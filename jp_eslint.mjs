@@ -7,6 +7,7 @@
  * Output: JSON array of ESLint result objects (same as --format json)
  *
  * Auto-detects sourceType: files with import/export → "module", others → "script".
+ * Lints each file individually to ensure correct sourceType per file.
  */
 import { ESLint } from "eslint";
 import html from "eslint-plugin-html";
@@ -32,38 +33,51 @@ function isModuleFile(filePath) {
   try {
     const src = readFileSync(filePath, "utf8");
     return /\b(import\s+|export\s+(default\s+|const\s+|let\s+|var\s+|function\s+|class\s+|\{))/m.test(src);
-  } catch (_e) {
+  } catch {
     return false;
   }
 }
 
-// Collect JS files to determine which are modules vs scripts
-function collectJsFiles(targetPath) {
+// Collect lintable files from a directory
+function collectFiles(targetPath) {
   const stat = statSync(targetPath);
   if (stat.isFile()) return [targetPath];
   const files = [];
-  for (const entry of readdirSync(targetPath, { withFileTypes: true, recursive: true })) {
-    if (entry.isFile() && /\.(m?js|ts|jsx|tsx)$/.test(entry.name)) {
-      files.push(resolve(entry.parentPath || targetPath, entry.name));
+  const skip = new Set(["node_modules", "vendor", ".git", "dist", "build"]);
+  function walk(dir) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = resolve(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!skip.has(entry.name)) walk(full);
+      } else if (/\.(m?js|ts|jsx|tsx|html?)$/.test(entry.name)) {
+        files.push(full);
+      }
     }
   }
+  walk(targetPath);
   return files;
 }
 
-const jsFiles = collectJsFiles(absTarget);
-const scriptFiles = jsFiles.filter(f => !isModuleFile(f));
-const moduleFiles = jsFiles.filter(f => isModuleFile(f));
-
-// cwd = target dir so ESLint's base path includes the file
-const cwd = statSync(absTarget).isDirectory() ? absTarget : dirname(absTarget);
-
-// Common rules for all JS
+// Common rules — quality + correctness
 const commonRules = {
+  // Correctness
   "no-undef":              "error",
   "no-unused-vars":        ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
   "eqeqeq":                ["error", "always", { null: "ignore" }],
-  "no-eval":               "error",
-  "no-implied-eval":       "error",
+  "no-eval":               "warn",    // warn, not error — some projects use eval intentionally
+  "no-implied-eval":       "warn",
+  "no-new-func":           "warn",
+  "no-shadow":             "warn",
+  "no-redeclare":          "error",
+
+  // Quality
+  "complexity":            ["warn", 25],
+  "max-depth":             ["warn", 5],
+  "max-lines-per-function": ["warn", { max: 200, skipBlankLines: true, skipComments: true }],
+  "max-params":            ["warn", 6],
+  "no-magic-numbers":      ["warn", { ignore: [-1, 0, 1, 2], ignoreArrayIndexes: true, ignoreDefaultValues: true }],
+
+  // Style
   "prefer-const":          "warn",
   "no-var":                "warn",
   "no-console":            ["warn", { allow: ["warn", "error"] }],
@@ -71,7 +85,7 @@ const commonRules = {
   "prefer-template":       "warn",
 };
 
-// Browser globals for script-mode files
+// Browser globals
 const browserGlobals = {
   window: "readonly", document: "readonly", console: "readonly",
   fetch: "readonly", localStorage: "readonly", sessionStorage: "readonly",
@@ -94,64 +108,64 @@ const moduleGlobals = {
   URL: "readonly",
 };
 
-// Build file-specific glob patterns for script files
-const scriptGlobs = scriptFiles.map(f => f.replace(/\\/g, "/"));
-const moduleGlobs = moduleFiles.map(f => f.replace(/\\/g, "/"));
+// Lint a single file with the correct config
+async function lintFile(filePath) {
+  const isHtml = /\.html?$/.test(filePath);
+  const isModule = !isHtml && isModuleFile(filePath);
+  const dir = dirname(filePath);
 
-const overrideConfig = [
-  // HTML plugin
-  {
-    plugins: { html },
-    files: ["**/*.html"],
-  },
-  // HTML inline scripts
-  {
-    files: ["**/*.html"],
-    languageOptions: {
-      ecmaVersion: 2022,
-      sourceType: "script",
-      globals: browserGlobals,
-    },
-    rules: commonRules,
-  },
-];
+  const config = [];
 
-// Module JS files
-if (moduleGlobs.length > 0) {
-  overrideConfig.push({
-    files: moduleGlobs,
-    languageOptions: {
-      ecmaVersion: 2022,
-      sourceType: "module",
-      globals: moduleGlobals,
-    },
-    rules: commonRules,
+  if (isHtml) {
+    config.push({
+      plugins: { html },
+      files: ["**"],
+      languageOptions: {
+        ecmaVersion: 2022,
+        sourceType: "script",
+        globals: browserGlobals,
+      },
+      rules: commonRules,
+    });
+  } else {
+    config.push({
+      files: ["**"],
+      languageOptions: {
+        ecmaVersion: 2022,
+        sourceType: isModule ? "module" : "script",
+        globals: isModule ? moduleGlobals : browserGlobals,
+      },
+      rules: commonRules,
+    });
+  }
+
+  const eslint = new ESLint({
+    cwd: dir,
+    overrideConfigFile: true,
+    overrideConfig: config,
   });
+
+  return eslint.lintFiles([filePath]);
 }
 
-// Script JS files (no import/export)
-if (scriptGlobs.length > 0) {
-  overrideConfig.push({
-    files: scriptGlobs,
-    languageOptions: {
-      ecmaVersion: 2022,
-      sourceType: "script",
-      globals: browserGlobals,
-    },
-    rules: commonRules,
-  });
+// Main
+const files = collectFiles(absTarget);
+const allResults = [];
+
+for (const f of files) {
+  try {
+    const results = await lintFile(f);
+    allResults.push(...results);
+  } catch (err) {
+    allResults.push({
+      filePath: f,
+      messages: [{ ruleId: null, severity: 2, message: err.message, line: 0, column: 0 }],
+      errorCount: 1,
+      warningCount: 0,
+      fixableErrorCount: 0,
+      fixableWarningCount: 0,
+    });
+  }
 }
 
-const eslint = new ESLint({
-  cwd,
-  overrideConfigFile: true,
-  overrideConfig,
-});
-
-try {
-  const results = await eslint.lintFiles([absTarget]);
-  console.log(JSON.stringify(results));
-} catch (err) {
-  console.error(JSON.stringify({ error: err.message }));
-  process.exit(1);
-}
+console.log(JSON.stringify(allResults));
