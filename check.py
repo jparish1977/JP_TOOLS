@@ -109,6 +109,41 @@ def run_mypy(target: str) -> dict:
     return {"tool": "mypy", "status": _status(issues, result.returncode), "issues": issues}
 
 
+def _count_eslint_suppressions(target: str) -> list[dict]:
+    """Scan source files for eslint-disable comments — these are acknowledged but not invisible."""
+    import re
+    suppressions = []
+    p = Path(target)
+    files = [p] if p.is_file() else [
+        Path(root) / f
+        for root, dirs, filenames in os.walk(str(p))
+        for f in filenames
+        if f.endswith((".js", ".mjs", ".html"))
+        and "node_modules" not in root and "vendor" not in root
+    ]
+    pattern = re.compile(r"eslint-disable(?:-next-line|-line)?\s+([^\s*]+)")
+    for fp in files:
+        try:
+            for i, line in enumerate(fp.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                m = pattern.search(line)
+                if m:
+                    reason = ""
+                    if "--" in line:
+                        reason = line.split("--", 1)[1].strip().rstrip("*/").strip()
+                    suppressions.append({
+                        "file":     str(fp),
+                        "line":     i,
+                        "col":      0,
+                        "severity": "warning",
+                        "rule":     f"suppressed:{m.group(1)}",
+                        "message":  f"Acknowledged suppression: {m.group(1)}" + (f" ({reason})" if reason else ""),
+                        "fixable":  False,
+                    })
+        except OSError:
+            pass
+    return suppressions
+
+
 def run_eslint(target: str) -> dict:
     tools_dir = Path(__file__).parent
     runner    = tools_dir / "jp_eslint.mjs"
@@ -136,6 +171,9 @@ def run_eslint(target: str) -> dict:
         if result.stderr:
             return {"tool": "eslint", "status": "error", "issues": [],
                     "note": result.stderr.strip()}
+    # Add acknowledged suppressions as warnings so they stay visible in reports
+    suppressions = _count_eslint_suppressions(target)
+    issues.extend(suppressions)
     return {"tool": "eslint", "status": _status(issues), "issues": issues}
 
 

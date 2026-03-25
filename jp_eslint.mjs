@@ -64,9 +64,9 @@ const commonRules = {
   "no-undef":              "error",
   "no-unused-vars":        ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
   "eqeqeq":                ["error", "always", { null: "ignore" }],
-  "no-eval":               "warn",    // warn, not error — some projects use eval intentionally
-  "no-implied-eval":       "warn",
-  "no-new-func":           "warn",
+  "no-eval":               "error",
+  "no-implied-eval":       "error",
+  "no-new-func":           "error",
   "no-shadow":             "warn",
   "no-redeclare":          "error",
 
