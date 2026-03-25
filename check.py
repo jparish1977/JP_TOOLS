@@ -249,7 +249,7 @@ def run_rector(target: str) -> dict:
     if not php:   return _tool_missing("php")
     if not bin_:  return _tool_missing("rector (run: composer install in JP_TOOLS)")
     cfg  = Path(__file__).parent / "configs" / "rector.php"
-    args = [php, bin_, "process", "--dry-run", "--output-format=json", "--no-progress"]
+    args = [php, bin_, "process", "--dry-run", "--output-format=json", "--no-progress-bar"]
     if cfg.exists():
         args += [f"--config={cfg}"]
     result = subprocess.run(args + [target], capture_output=True, text=True)
@@ -296,6 +296,113 @@ def run_prettier(target: str) -> dict:
     return {"tool": "prettier", "status": _status(issues, result.returncode), "issues": issues}
 
 
+# ── security audit runners ────────────────────────────────────────────────────
+
+def run_pip_audit(target: str) -> dict:
+    cmd = shutil.which("pip-audit") or shutil.which("pip-audit.exe")
+    if not cmd:
+        return _tool_missing("pip-audit (pip install pip-audit)")
+    # target could be a dir with requirements.txt or a single file
+    p = Path(target)
+    req_file = None
+    if p.is_dir():
+        for name in ("requirements.txt", "requirements-dev.txt", "requirements.lock"):
+            candidate = p / name
+            if candidate.exists():
+                req_file = str(candidate)
+                break
+    elif p.suffix == ".txt":
+        req_file = target
+    args = [cmd, "--format", "json"]
+    if req_file:
+        args += ["-r", req_file]
+    result = subprocess.run(args, capture_output=True, text=True)
+    issues = []
+    try:
+        data = json.loads(result.stdout)
+        for vuln in data.get("dependencies", []):
+            for v in vuln.get("vulns", []):
+                issues.append({
+                    "file":     req_file or "(installed packages)",
+                    "line":     0,
+                    "col":      0,
+                    "severity": "error",
+                    "rule":     v.get("id", "CVE"),
+                    "message":  f"{vuln.get('name')}=={vuln.get('version')}: {v.get('description', v.get('id', ''))}",
+                    "fixable":  bool(v.get("fix_versions")),
+                })
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {"tool": "pip-audit", "status": _status(issues), "issues": issues}
+
+
+def run_npm_audit(target: str) -> dict:
+    cmd = shutil.which("npm") or shutil.which("npm.cmd")
+    if not cmd:
+        return _tool_missing("npm")
+    p = Path(target)
+    work_dir = str(p) if p.is_dir() else str(p.parent)
+    pkg_json = Path(work_dir) / "package.json"
+    if not pkg_json.exists():
+        return {"tool": "npm-audit", "status": "skip", "issues": [],
+                "note": "No package.json found"}
+    result = subprocess.run([cmd, "audit", "--json"], capture_output=True, text=True,
+                            cwd=work_dir)
+    issues = []
+    try:
+        data = json.loads(result.stdout)
+        for name, adv in data.get("vulnerabilities", {}).items():
+            issues.append({
+                "file":     "package.json",
+                "line":     0,
+                "col":      0,
+                "severity": adv.get("severity", "error"),
+                "rule":     f"npm-audit:{name}",
+                "message":  f"{name}: {adv.get('title', adv.get('severity', 'vulnerability'))} (via {', '.join(adv.get('via', []) if isinstance(adv.get('via', [None])[0], str) else [v.get('title','?') for v in adv.get('via',[])])})",
+                "fixable":  adv.get("fixAvailable", False) is not False,
+            })
+    except (json.JSONDecodeError, TypeError, IndexError):
+        pass
+    return {"tool": "npm-audit", "status": _status(issues), "issues": issues}
+
+
+def run_composer_audit(target: str) -> dict:
+    php = _php_cmd()
+    composer = shutil.which("composer") or shutil.which("composer.bat")
+    if not php and not composer:
+        return _tool_missing("composer")
+    p = Path(target)
+    work_dir = str(p) if p.is_dir() else str(p.parent)
+    composer_json = Path(work_dir) / "composer.json"
+    if not composer_json.exists():
+        return {"tool": "composer-audit", "status": "skip", "issues": [],
+                "note": "No composer.json found"}
+    if composer and not composer.endswith(".bat"):
+        cmd = [composer, "audit", "--format=json"]
+    elif php:
+        cmd = [php, composer or "composer", "audit", "--format=json"]
+    else:
+        cmd = [composer, "audit", "--format=json"]
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=work_dir)
+    issues = []
+    try:
+        data = json.loads(result.stdout)
+        for pkg, advisories in data.get("advisories", {}).items():
+            for adv in advisories:
+                issues.append({
+                    "file":     "composer.json",
+                    "line":     0,
+                    "col":      0,
+                    "severity": "error",
+                    "rule":     adv.get("cve", adv.get("advisoryId", "advisory")),
+                    "message":  f"{pkg}: {adv.get('title', 'security advisory')}",
+                    "fixable":  False,
+                })
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {"tool": "composer-audit", "status": _status(issues), "issues": issues}
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _status(issues: list, returncode: int = None) -> str:
@@ -313,40 +420,50 @@ def _tool_missing(name: str) -> dict:
     }
 
 
+_EXT_TO_LANG = {
+    ".py":   "python",
+    ".js":   "js",  ".ts":  "js",  ".jsx": "js",  ".tsx": "js",
+    ".mjs":  "js",  ".cjs": "js",
+    ".css":  "css", ".scss": "css", ".less": "css",
+    ".html": "html", ".htm": "html",
+    ".php":  "php",
+}
+
+# Directories to skip when scanning
+_SKIP_DIRS = {"node_modules", "vendor", "__pycache__", ".git", ".venv", "venv", "dist", "build"}
+
+
 def _detect_lang(target: str) -> str:
     p = Path(target)
     if p.is_file():
-        ext = p.suffix.lower()
-        if ext == ".py":
-            return "python"
-        if ext in {".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"}:
-            return "js"
-        if ext in {".css", ".scss", ".less"}:
-            return "css"
-        if ext in {".html", ".htm"}:
-            return "html"
-        if ext in {".php"}:
-            return "php"
-    elif p.is_dir():
-        py  = len(list(p.rglob("*.py")))
-        js  = sum(len(list(p.rglob(f"*{e}"))) for e in (".js", ".ts", ".jsx", ".tsx"))
-        css = sum(len(list(p.rglob(f"*{e}"))) for e in (".css", ".scss", ".less"))
-        php = sum(len(list(p.rglob(f"*{e}"))) for e in (".php",))
-        counts = {"python": py, "js": js, "css": css, "php": php}
-        best = max(counts, key=counts.get)
-        return best if counts[best] > 0 else "unknown"
+        return _EXT_TO_LANG.get(p.suffix.lower(), "unknown")
     return "unknown"
 
 
+def _collect_files(directory: str) -> dict[str, list[str]]:
+    """Scan a directory and group files by language. Returns {lang: [filepaths]}."""
+    groups: dict[str, list[str]] = {}
+    for root, dirs, files in os.walk(directory):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+        for f in files:
+            lang = _EXT_TO_LANG.get(Path(f).suffix.lower())
+            if lang:
+                groups.setdefault(lang, []).append(str(Path(root) / f))
+    return groups
+
+
 TOOL_RUNNERS = {
-    "ruff":       run_ruff,
-    "mypy":       run_mypy,
-    "eslint":     run_eslint,
-    "stylelint":  run_stylelint,
-    "prettier":   run_prettier,
-    "phpstan":    run_phpstan,
-    "phpcs":      run_phpcs,
-    "rector":     run_rector,
+    "ruff":           run_ruff,
+    "mypy":           run_mypy,
+    "eslint":         run_eslint,
+    "stylelint":      run_stylelint,
+    "prettier":       run_prettier,
+    "phpstan":        run_phpstan,
+    "phpcs":          run_phpcs,
+    "rector":         run_rector,
+    "pip-audit":      run_pip_audit,
+    "npm-audit":      run_npm_audit,
+    "composer-audit": run_composer_audit,
 }
 
 DEFAULT_TOOLS = {
@@ -357,37 +474,18 @@ DEFAULT_TOOLS = {
     "php":    ["phpstan", "phpcs", "rector"],
 }
 
+AUDIT_TOOLS = {
+    "python": ["pip-audit"],
+    "js":     ["npm-audit"],
+    "php":    ["composer-audit"],
+}
 
-# ── main ──────────────────────────────────────────────────────────────────────
+# Tools that accept directories natively (pass the dir, not individual files)
+_DIR_CAPABLE = {"ruff", "mypy", "phpstan", "phpcs", "rector",
+                "pip-audit", "npm-audit", "composer-audit"}
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Run code quality tools and output structured JSON.",
-    )
-    parser.add_argument("target", help="File or directory to check")
-    parser.add_argument("--lang",  choices=["python", "js", "auto"], default="auto",
-                        help="Language override (default: auto-detect)")
-    parser.add_argument("--tools", metavar="TOOLS",
-                        help="Comma-separated tools to run, e.g. ruff,mypy")
-    parser.add_argument("--pretty", action="store_true",
-                        help="Pretty-print JSON output")
-    args = parser.parse_args()
 
-    target = str(Path(args.target).resolve())
-    if not Path(target).exists():
-        print(json.dumps({"error": f"Path not found: {target}"}))
-        sys.exit(2)
-
-    lang = args.lang if args.lang != "auto" else _detect_lang(target)
-
-    if args.tools:
-        tool_names = [t.strip() for t in args.tools.split(",")]
-    elif lang in DEFAULT_TOOLS:
-        tool_names = DEFAULT_TOOLS[lang]
-    else:
-        print(json.dumps({"error": f"Cannot detect language for: {target}"}))
-        sys.exit(2)
-
+def _run_tools(tool_names: list[str], target: str) -> list[dict]:
     checks = []
     for name in tool_names:
         runner = TOOL_RUNNERS.get(name)
@@ -396,25 +494,125 @@ def main():
         else:
             checks.append({"tool": name, "status": "unknown",
                            "issues": [], "note": f"No runner for '{name}'"})
+    return checks
 
+
+def _summarize(checks: list[dict]) -> dict:
     all_issues = [i for c in checks for i in c.get("issues", [])]
     errors   = sum(1 for i in all_issues if i["severity"] == "error")
     warnings = sum(1 for i in all_issues if i["severity"] == "warning")
+    return {
+        "total":    len(all_issues),
+        "errors":   errors,
+        "warnings": warnings,
+        "fixable":  sum(1 for i in all_issues if i.get("fixable")),
+    }
+
+
+# ── main ──────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Run code quality tools and output structured JSON.",
+    )
+    parser.add_argument("target", help="File or directory to check")
+    parser.add_argument("--lang",  choices=["python", "js", "css", "html", "php", "auto"],
+                        default="auto",
+                        help="Language override (default: auto-detect)")
+    parser.add_argument("--tools", metavar="TOOLS",
+                        help="Comma-separated tools to run, e.g. ruff,mypy")
+    parser.add_argument("--pretty", action="store_true",
+                        help="Pretty-print JSON output")
+    parser.add_argument("--audit", action="store_true",
+                        help="Also run security audit tools (pip-audit, npm audit, composer audit)")
+    args = parser.parse_args()
+
+    target = str(Path(args.target).resolve())
+    if not Path(target).exists():
+        print(json.dumps({"error": f"Path not found: {target}"}))
+        sys.exit(2)
+
+    is_dir = Path(target).is_dir()
+
+    # ── Single file or explicit --lang / --tools ──────────────────────────
+    if not is_dir or args.lang != "auto" or args.tools:
+        lang = args.lang if args.lang != "auto" else _detect_lang(target)
+        if args.tools:
+            tool_names = [t.strip() for t in args.tools.split(",")]
+        elif lang in DEFAULT_TOOLS:
+            tool_names = list(DEFAULT_TOOLS[lang])
+        else:
+            print(json.dumps({"error": f"Cannot detect language for: {target}"}))
+            sys.exit(2)
+        if args.audit:
+            tool_names.extend(AUDIT_TOOLS.get(lang, []))
+
+        checks = _run_tools(tool_names, target)
+        output = {
+            "target":   target,
+            "language": lang,
+            "checks":   checks,
+            "summary":  _summarize(checks),
+        }
+        print(json.dumps(output, indent=2 if args.pretty else None))
+        sys.exit(1 if output["summary"]["errors"] > 0 else 0)
+
+    # ── Directory: scan, group by language, run appropriate tools ─────────
+    groups = _collect_files(target)
+    if not groups:
+        print(json.dumps({"error": f"No recognized source files in: {target}"}))
+        sys.exit(2)
+
+    all_checks = []
+    lang_sections = []
+
+    for lang, files in sorted(groups.items()):
+        tool_names = list(DEFAULT_TOOLS.get(lang, []))
+        if args.audit:
+            tool_names.extend(AUDIT_TOOLS.get(lang, []))
+        if not tool_names:
+            continue
+
+        lang_checks = []
+        for name in tool_names:
+            runner = TOOL_RUNNERS.get(name)
+            if not runner:
+                continue
+            if name in _DIR_CAPABLE:
+                # Run once against the whole dir — tool handles file discovery
+                lang_checks.append(runner(target))
+            else:
+                # Run per-file, merge issues into one result per tool
+                merged_issues = []
+                any_fail = False
+                for fp in files:
+                    result = runner(fp)
+                    merged_issues.extend(result.get("issues", []))
+                    if result["status"] == "fail":
+                        any_fail = True
+                lang_checks.append({
+                    "tool":   name,
+                    "status": "fail" if any_fail else "pass",
+                    "issues": merged_issues,
+                })
+
+        all_checks.extend(lang_checks)
+        lang_sections.append({
+            "language":   lang,
+            "file_count": len(files),
+            "tools":      [c["tool"] for c in lang_checks],
+        })
 
     output = {
-        "target":   target,
-        "language": lang,
-        "checks":   checks,
-        "summary":  {
-            "total":    len(all_issues),
-            "errors":   errors,
-            "warnings": warnings,
-            "fixable":  sum(1 for i in all_issues if i.get("fixable")),
-        },
+        "target":     target,
+        "mode":       "multi-language",
+        "languages":  lang_sections,
+        "checks":     all_checks,
+        "summary":    _summarize(all_checks),
     }
 
     print(json.dumps(output, indent=2 if args.pretty else None))
-    sys.exit(1 if errors > 0 else 0)
+    sys.exit(1 if output["summary"]["errors"] > 0 else 0)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,62 @@
+# JP_TOOLS CI — drop this into .github/workflows/check.yml
+# Runs check.py on every push and PR, reports issues as annotations.
+#
+# Install: python JP_TOOLS/init-ci.py  (copies this into your repo)
+
+name: Code Quality
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Enable the languages your project uses
+        include:
+          - lang: python
+            setup: |
+              pip install ruff mypy pip-audit
+          - lang: js
+            setup: |
+              npm install -g eslint prettier
+          - lang: php
+            setup: |
+              sudo apt-get install -y php-cli php-mbstring
+              composer global require phpstan/phpstan squizlabs/php_codesniffer
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        if: matrix.lang == 'js'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up PHP
+        if: matrix.lang == 'php'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+
+      - name: Clone JP_TOOLS
+        run: git clone https://github.com/jparish1977/JP_TOOLS.git /tmp/jp_tools
+
+      - name: Install tool dependencies
+        run: ${{ matrix.setup }}
+
+      - name: Run check
+        run: |
+          python /tmp/jp_tools/check.py . --lang ${{ matrix.lang }} --pretty
+        continue-on-error: false
