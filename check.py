@@ -135,6 +135,36 @@ def run_eslint(target: str) -> dict:
     return {"tool": "eslint", "status": _status(issues), "issues": issues}
 
 
+def run_stylelint(target: str) -> dict:
+    tools_dir = Path(__file__).parent
+    runner    = tools_dir / "jp_stylelint.mjs"
+    node      = shutil.which("node") or shutil.which("node.exe")
+    if not node:
+        return _tool_missing("node (required for stylelint)")
+    if not runner.exists():
+        return _tool_missing("jp_stylelint.mjs")
+    result = subprocess.run([node, str(runner), target], capture_output=True, text=True,
+                            cwd=str(tools_dir))
+    issues = []
+    try:
+        for file_result in json.loads(result.stdout or "[]"):
+            for w in file_result.get("warnings", []):
+                issues.append({
+                    "file":     file_result.get("source", target),
+                    "line":     w.get("line", 0),
+                    "col":      w.get("column", 0),
+                    "severity": w.get("severity", "warning"),
+                    "rule":     w.get("rule", ""),
+                    "message":  w.get("text", ""),
+                    "fixable":  False,
+                })
+    except (json.JSONDecodeError, TypeError):
+        if result.stderr:
+            return {"tool": "stylelint", "status": "error", "issues": [],
+                    "note": result.stderr.strip()}
+    return {"tool": "stylelint", "status": _status(issues), "issues": issues}
+
+
 def run_prettier(target: str) -> dict:
     cmd = shutil.which("prettier") or shutil.which("prettier.cmd")
     if not cmd:
@@ -180,27 +210,35 @@ def _detect_lang(target: str) -> str:
         ext = p.suffix.lower()
         if ext == ".py":
             return "python"
-        if ext in {".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs", ".html"}:
+        if ext in {".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"}:
             return "js"
+        if ext in {".css", ".scss", ".less"}:
+            return "css"
+        if ext in {".html", ".htm"}:
+            return "html"
     elif p.is_dir():
         py  = len(list(p.rglob("*.py")))
         js  = sum(len(list(p.rglob(f"*{e}"))) for e in (".js", ".ts", ".jsx", ".tsx"))
-        if py == 0 and js == 0:
-            return "unknown"
-        return "python" if py >= js else "js"
+        css = sum(len(list(p.rglob(f"*{e}"))) for e in (".css", ".scss", ".less"))
+        counts = {"python": py, "js": js, "css": css}
+        best = max(counts, key=counts.get)
+        return best if counts[best] > 0 else "unknown"
     return "unknown"
 
 
 TOOL_RUNNERS = {
-    "ruff":     run_ruff,
-    "mypy":     run_mypy,
-    "eslint":   run_eslint,
-    "prettier": run_prettier,
+    "ruff":       run_ruff,
+    "mypy":       run_mypy,
+    "eslint":     run_eslint,
+    "stylelint":  run_stylelint,
+    "prettier":   run_prettier,
 }
 
 DEFAULT_TOOLS = {
     "python": ["ruff", "mypy"],
     "js":     ["eslint", "prettier"],
+    "css":    ["stylelint", "prettier"],
+    "html":   ["eslint", "stylelint", "prettier"],
 }
 
 
