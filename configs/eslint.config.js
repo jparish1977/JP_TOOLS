@@ -1,7 +1,13 @@
 // JP_TOOLS shared ESLint flat config (ESLint 9+)
-// Covers vanilla JS and browser environments
+// Covers vanilla JS and browser environments, including inline scripts in .html files
+
+import html from "eslint-plugin-html";
 
 export default [
+  {
+    plugins: { html },
+    files: ["**/*.html"],
+  },
   {
     languageOptions: {
       ecmaVersion: 2022,

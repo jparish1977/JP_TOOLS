@@ -106,14 +106,15 @@ def run_mypy(target: str) -> dict:
 
 
 def run_eslint(target: str) -> dict:
-    cmd = shutil.which("eslint") or shutil.which("eslint.cmd")
-    if not cmd:
-        return _tool_missing("eslint")
-    cfg = Path(__file__).parent / "configs" / "eslint.config.js"
-    args = ["--format", "json"]
-    if cfg.exists():
-        args += ["--config", str(cfg)]
-    result = subprocess.run([cmd] + args + [target], capture_output=True, text=True)
+    tools_dir = Path(__file__).parent
+    runner    = tools_dir / "jp_eslint.mjs"
+    node      = shutil.which("node") or shutil.which("node.exe")
+    if not node:
+        return _tool_missing("node (required for eslint)")
+    if not runner.exists():
+        return _tool_missing("jp_eslint.mjs")
+    result = subprocess.run([node, str(runner), target], capture_output=True, text=True,
+                            cwd=str(tools_dir))
     issues = []
     try:
         for file_result in json.loads(result.stdout or "[]"):
@@ -128,7 +129,9 @@ def run_eslint(target: str) -> dict:
                     "fixable":  msg.get("fix") is not None,
                 })
     except (json.JSONDecodeError, TypeError):
-        pass
+        if result.stderr:
+            return {"tool": "eslint", "status": "error", "issues": [],
+                    "note": result.stderr.strip()}
     return {"tool": "eslint", "status": _status(issues), "issues": issues}
 
 

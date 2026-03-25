@@ -53,7 +53,12 @@ def fix_ruff(target: str, dry_run: bool) -> dict:
 
 
 def fix_prettier(target: str, dry_run: bool) -> dict:
-    cmd = shutil.which("prettier") or shutil.which("prettier.cmd")
+    local_bin = Path(__file__).parent / "node_modules" / ".bin"
+    cmd = (
+        str(local_bin / "prettier.cmd") if (local_bin / "prettier.cmd").exists() else
+        str(local_bin / "prettier")     if (local_bin / "prettier").exists() else
+        shutil.which("prettier") or shutil.which("prettier.cmd")
+    )
     if not cmd:
         return {"tool": "prettier", "status": "unavailable", "fixed": 0, "remaining": []}
     if dry_run:

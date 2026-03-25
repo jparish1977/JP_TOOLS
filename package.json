@@ -1,0 +1,12 @@
+{
+  "name": "jp-tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Code quality toolbox for agentic AI development",
+  "dependencies": {
+    "eslint": "^10.0.0",
+    "eslint-plugin-html": "^8.0.0",
+    "prettier": "^3.0.0"
+  }
+}
