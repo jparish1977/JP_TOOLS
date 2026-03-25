@@ -35,6 +35,20 @@ const eslint = new ESLint({
       files: ["**/*.html"],
     },
     {
+      files: ["**/*.mjs", "**/*.js", "**/*.ts", "**/*.jsx", "**/*.tsx"],
+      languageOptions: {
+        ecmaVersion: 2022,
+        sourceType: "module",
+        globals: {
+          process: "readonly", console: "readonly",
+          setTimeout: "readonly", clearTimeout: "readonly",
+          setInterval: "readonly", clearInterval: "readonly",
+          URL: "readonly",
+        },
+      },
+    },
+    {
+      files: ["**/*.html"],
       languageOptions: {
         ecmaVersion: 2022,
         sourceType: "script",   // HTML inline scripts are typically non-module

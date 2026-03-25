@@ -183,8 +183,10 @@ def _php_cmd() -> str | None:
 def run_phpstan(target: str) -> dict:
     php  = _php_cmd()
     bin_ = _php_bin("phpstan")
-    if not php:   return _tool_missing("php")
-    if not bin_:  return _tool_missing("phpstan (run: composer install in JP_TOOLS)")
+    if not php:
+        return _tool_missing("php")
+    if not bin_:
+        return _tool_missing("phpstan (run: composer install in JP_TOOLS)")
     cfg  = Path(__file__).parent / "configs" / "phpstan.neon"
     args = [php, bin_, "analyse", "--error-format=json", "--no-progress"]
     if cfg.exists():
@@ -214,8 +216,10 @@ def run_phpstan(target: str) -> dict:
 def run_phpcs(target: str) -> dict:
     php  = _php_cmd()
     bin_ = _php_bin("phpcs")
-    if not php:   return _tool_missing("php")
-    if not bin_:  return _tool_missing("phpcs (run: composer install in JP_TOOLS)")
+    if not php:
+        return _tool_missing("php")
+    if not bin_:
+        return _tool_missing("phpcs (run: composer install in JP_TOOLS)")
     cfg  = Path(__file__).parent / "configs" / "phpcs.xml"
     args = [php, bin_, "--report=json"]
     if cfg.exists():
@@ -246,8 +250,10 @@ def run_rector(target: str) -> dict:
     """Rector in dry-run mode — reports what would change without writing."""
     php  = _php_cmd()
     bin_ = _php_bin("rector")
-    if not php:   return _tool_missing("php")
-    if not bin_:  return _tool_missing("rector (run: composer install in JP_TOOLS)")
+    if not php:
+        return _tool_missing("php")
+    if not bin_:
+        return _tool_missing("rector (run: composer install in JP_TOOLS)")
     cfg  = Path(__file__).parent / "configs" / "rector.php"
     args = [php, bin_, "process", "--dry-run", "--output-format=json", "--no-progress-bar"]
     if cfg.exists():
@@ -256,17 +262,17 @@ def run_rector(target: str) -> dict:
     issues = []
     try:
         data = json.loads(result.stdout)
-        for change in data.get("changed_files", []):
-            for diff in change.get("diffs", []):
-                issues.append({
-                    "file":     change.get("file", target),
-                    "line":     diff.get("line", 0),
-                    "col":      0,
-                    "severity": "warning",
-                    "rule":     diff.get("rector_class", "rector"),
-                    "message":  diff.get("description", "Rector would refactor this"),
-                    "fixable":  True,
-                })
+        for fd in data.get("file_diffs", []):
+            rectors = fd.get("applied_rectors", [])
+            issues.append({
+                "file":     fd.get("file", target),
+                "line":     0,
+                "col":      0,
+                "severity": "warning",
+                "rule":     ", ".join(r.rsplit("\\", 1)[-1] for r in rectors) or "rector",
+                "message":  f"Rector would apply {len(rectors)} rule(s)",
+                "fixable":  True,
+            })
     except (json.JSONDecodeError, TypeError):
         if result.stderr:
             return {"tool": "rector", "status": "error", "issues": [],

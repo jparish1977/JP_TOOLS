@@ -7,7 +7,6 @@ Usage:
     python fix.py <path> [--lang python|js|auto] [--dry-run] [--pretty]
 """
 
-import sys
 import os
 import json
 import shutil
@@ -31,7 +30,7 @@ def fix_ruff(target: str, dry_run: bool) -> dict:
     args = ["ruff", "check", "--fix"]
     if dry_run:
         args.append("--diff")
-    result = subprocess.run(args + [target], capture_output=True, text=True)
+    subprocess.run(args + [target], capture_output=True, text=True)
     # After fix, re-check to find what remains
     recheck = subprocess.run(
         ["ruff", "check", "--output-format", "json", target],
@@ -65,9 +64,9 @@ def fix_prettier(target: str, dry_run: bool) -> dict:
     if dry_run:
         result = subprocess.run([cmd, "--check", target], capture_output=True, text=True)
         unformatted = [
-            l.strip()[len("[warn]"):].strip()
-            for l in (result.stdout + result.stderr).splitlines()
-            if l.strip().startswith("[warn]")
+            line.strip()[len("[warn]"):].strip()
+            for line in (result.stdout + result.stderr).splitlines()
+            if line.strip().startswith("[warn]")
         ]
         return {"tool": "prettier", "status": "dry-run", "would_fix": unformatted}
     result = subprocess.run([cmd, "--write", target], capture_output=True, text=True)
@@ -94,9 +93,11 @@ def _php_cmd() -> str | None:
 def fix_phpcs(target: str, dry_run: bool) -> dict:
     php  = _php_cmd()
     bin_ = _php_bin("phpcbf")
-    if not php:   return {"tool": "phpcbf", "status": "unavailable", "remaining": []}
-    if not bin_:  return {"tool": "phpcbf", "status": "unavailable",
-                          "note": "run: composer install in JP_TOOLS"}
+    if not php:
+        return {"tool": "phpcbf", "status": "unavailable", "remaining": []}
+    if not bin_:
+        return {"tool": "phpcbf", "status": "unavailable",
+                "note": "run: composer install in JP_TOOLS"}
     cfg  = Path(__file__).parent / "configs" / "phpcs.xml"
     args = [php, bin_]
     if cfg.exists():
@@ -124,11 +125,13 @@ def fix_phpcs(target: str, dry_run: bool) -> dict:
 def fix_rector(target: str, dry_run: bool) -> dict:
     php  = _php_cmd()
     bin_ = _php_bin("rector")
-    if not php:   return {"tool": "rector", "status": "unavailable", "remaining": []}
-    if not bin_:  return {"tool": "rector", "status": "unavailable",
-                          "note": "run: composer install in JP_TOOLS"}
+    if not php:
+        return {"tool": "rector", "status": "unavailable", "remaining": []}
+    if not bin_:
+        return {"tool": "rector", "status": "unavailable",
+                "note": "run: composer install in JP_TOOLS"}
     cfg  = Path(__file__).parent / "configs" / "rector.php"
-    args = [php, bin_, "process", "--output-format=json", "--no-progress"]
+    args = [php, bin_, "process", "--output-format=json", "--no-progress-bar"]
     if cfg.exists():
         args += [f"--config={cfg}"]
     if dry_run:
@@ -136,7 +139,7 @@ def fix_rector(target: str, dry_run: bool) -> dict:
     result = subprocess.run(args + [target], capture_output=True, text=True)
     try:
         data = json.loads(result.stdout)
-        changed = [c["file"] for c in data.get("changed_files", [])]
+        changed = data.get("changed_files", [])
         return {"tool": "rector", "status": "dry-run" if dry_run else "fixed",
                 "changed": changed}
     except (json.JSONDecodeError, TypeError):
@@ -156,10 +159,14 @@ def _detect_lang(target: str) -> str:
     p = Path(target)
     if p.is_file():
         ext = p.suffix.lower()
-        if ext == ".py":   return "python"
-        if ext == ".php":  return "php"
-        if ext in {".js", ".ts", ".jsx", ".tsx", ".html"}: return "js"
-        if ext in {".css", ".scss", ".less"}:              return "css"
+        if ext == ".py":
+            return "python"
+        if ext == ".php":
+            return "php"
+        if ext in {".js", ".ts", ".jsx", ".tsx", ".html"}:
+            return "js"
+        if ext in {".css", ".scss", ".less"}:
+            return "css"
     elif p.is_dir():
         py  = len(list(p.rglob("*.py")))
         php = len(list(p.rglob("*.php")))
