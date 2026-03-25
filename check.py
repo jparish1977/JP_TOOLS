@@ -14,11 +14,21 @@ Exit codes:
 """
 
 import sys
+import os
 import json
 import shutil
 import subprocess
 import argparse
 from pathlib import Path
+
+# Ensure Node global bin dirs are on PATH (Windows npm installs land here)
+_NODE_PATHS = [
+    Path(os.environ.get("APPDATA", "")) / "npm",
+    Path("C:/Program Files/nodejs"),
+]
+os.environ["PATH"] = os.pathsep.join(
+    [str(p) for p in _NODE_PATHS if p.exists()] + [os.environ.get("PATH", "")]
+)
 
 
 # ── tool runners ──────────────────────────────────────────────────────────────
