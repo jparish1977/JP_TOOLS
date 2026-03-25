@@ -165,6 +165,114 @@ def run_stylelint(target: str) -> dict:
     return {"tool": "stylelint", "status": _status(issues), "issues": issues}
 
 
+def _php_bin(name: str) -> str | None:
+    """Resolve a Composer bin, falling back to global PATH."""
+    tools_dir = Path(__file__).parent
+    for ext in ("", ".bat", ".cmd"):
+        local = tools_dir / "vendor" / "bin" / f"{name}{ext}"
+        if local.exists():
+            return str(local)
+    return shutil.which(name) or shutil.which(f"{name}.bat")
+
+
+def _php_cmd() -> str | None:
+    return shutil.which("php") or shutil.which("php.exe")
+
+
+def run_phpstan(target: str) -> dict:
+    php  = _php_cmd()
+    bin_ = _php_bin("phpstan")
+    if not php:   return _tool_missing("php")
+    if not bin_:  return _tool_missing("phpstan (run: composer install in JP_TOOLS)")
+    cfg  = Path(__file__).parent / "configs" / "phpstan.neon"
+    args = [php, bin_, "analyse", "--error-format=json", "--no-progress"]
+    if cfg.exists():
+        args += ["-c", str(cfg)]
+    result = subprocess.run(args + [target], capture_output=True, text=True)
+    issues = []
+    try:
+        data = json.loads(result.stdout)
+        for fe in data.get("files", {}).values():
+            for msg in fe.get("messages", []):
+                issues.append({
+                    "file":     msg.get("file", target),
+                    "line":     msg.get("line", 0),
+                    "col":      0,
+                    "severity": "error",
+                    "rule":     "phpstan",
+                    "message":  msg.get("message", ""),
+                    "fixable":  False,
+                })
+    except (json.JSONDecodeError, TypeError):
+        if result.stderr:
+            return {"tool": "phpstan", "status": "error", "issues": [],
+                    "note": result.stderr.strip()}
+    return {"tool": "phpstan", "status": _status(issues), "issues": issues}
+
+
+def run_phpcs(target: str) -> dict:
+    php  = _php_cmd()
+    bin_ = _php_bin("phpcs")
+    if not php:   return _tool_missing("php")
+    if not bin_:  return _tool_missing("phpcs (run: composer install in JP_TOOLS)")
+    cfg  = Path(__file__).parent / "configs" / "phpcs.xml"
+    args = [php, bin_, "--report=json"]
+    if cfg.exists():
+        args += [f"--standard={cfg}"]
+    result = subprocess.run(args + [target], capture_output=True, text=True)
+    issues = []
+    try:
+        data = json.loads(result.stdout)
+        for fp, fdata in data.get("files", {}).items():
+            for msg in fdata.get("messages", []):
+                issues.append({
+                    "file":     fp,
+                    "line":     msg.get("line", 0),
+                    "col":      msg.get("column", 0),
+                    "severity": msg.get("type", "ERROR").lower(),
+                    "rule":     msg.get("source", "phpcs"),
+                    "message":  msg.get("message", ""),
+                    "fixable":  msg.get("fixable", False),
+                })
+    except (json.JSONDecodeError, TypeError):
+        if result.stderr:
+            return {"tool": "phpcs", "status": "error", "issues": [],
+                    "note": result.stderr.strip()}
+    return {"tool": "phpcs", "status": _status(issues), "issues": issues}
+
+
+def run_rector(target: str) -> dict:
+    """Rector in dry-run mode — reports what would change without writing."""
+    php  = _php_cmd()
+    bin_ = _php_bin("rector")
+    if not php:   return _tool_missing("php")
+    if not bin_:  return _tool_missing("rector (run: composer install in JP_TOOLS)")
+    cfg  = Path(__file__).parent / "configs" / "rector.php"
+    args = [php, bin_, "process", "--dry-run", "--output-format=json", "--no-progress"]
+    if cfg.exists():
+        args += [f"--config={cfg}"]
+    result = subprocess.run(args + [target], capture_output=True, text=True)
+    issues = []
+    try:
+        data = json.loads(result.stdout)
+        for change in data.get("changed_files", []):
+            for diff in change.get("diffs", []):
+                issues.append({
+                    "file":     change.get("file", target),
+                    "line":     diff.get("line", 0),
+                    "col":      0,
+                    "severity": "warning",
+                    "rule":     diff.get("rector_class", "rector"),
+                    "message":  diff.get("description", "Rector would refactor this"),
+                    "fixable":  True,
+                })
+    except (json.JSONDecodeError, TypeError):
+        if result.stderr:
+            return {"tool": "rector", "status": "error", "issues": [],
+                    "note": result.stderr.strip()}
+    return {"tool": "rector", "status": _status(issues), "issues": issues}
+
+
 def run_prettier(target: str) -> dict:
     cmd = shutil.which("prettier") or shutil.which("prettier.cmd")
     if not cmd:
@@ -216,11 +324,14 @@ def _detect_lang(target: str) -> str:
             return "css"
         if ext in {".html", ".htm"}:
             return "html"
+        if ext in {".php"}:
+            return "php"
     elif p.is_dir():
         py  = len(list(p.rglob("*.py")))
         js  = sum(len(list(p.rglob(f"*{e}"))) for e in (".js", ".ts", ".jsx", ".tsx"))
         css = sum(len(list(p.rglob(f"*{e}"))) for e in (".css", ".scss", ".less"))
-        counts = {"python": py, "js": js, "css": css}
+        php = sum(len(list(p.rglob(f"*{e}"))) for e in (".php",))
+        counts = {"python": py, "js": js, "css": css, "php": php}
         best = max(counts, key=counts.get)
         return best if counts[best] > 0 else "unknown"
     return "unknown"
@@ -232,6 +343,9 @@ TOOL_RUNNERS = {
     "eslint":     run_eslint,
     "stylelint":  run_stylelint,
     "prettier":   run_prettier,
+    "phpstan":    run_phpstan,
+    "phpcs":      run_phpcs,
+    "rector":     run_rector,
 }
 
 DEFAULT_TOOLS = {
@@ -239,6 +353,7 @@ DEFAULT_TOOLS = {
     "js":     ["eslint", "prettier"],
     "css":    ["stylelint", "prettier"],
     "html":   ["eslint", "stylelint", "prettier"],
+    "php":    ["phpstan", "phpcs", "rector"],
 }
 
 

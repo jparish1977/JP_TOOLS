@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!-- JP_TOOLS shared PHP_CodeSniffer ruleset -->
+<!-- Based on PSR-12 with practical relaxations for real-world code -->
+<ruleset name="JP">
+    <description>JP_TOOLS coding standard — PSR-12 base with practical relaxations</description>
+
+    <rule ref="PSR12">
+        <!-- Allow long lines in comments and strings -->
+        <exclude name="Generic.Files.LineLength"/>
+    </rule>
+
+    <!-- Require short array syntax [] over array() -->
+    <rule ref="Generic.Arrays.DisallowLongArraySyntax"/>
+
+    <!-- No closing PHP tag in pure-PHP files -->
+    <rule ref="PSR2.Files.ClosingTag"/>
+
+    <!-- Catch common bugs -->
+    <rule ref="Generic.PHP.NoSilencedErrors"/>
+    <rule ref="Generic.PHP.DeprecatedFunctions"/>
+
+    <!-- Formatting -->
+    <rule ref="Squiz.WhiteSpace.SuperfluousWhitespace"/>
+    <rule ref="Generic.Formatting.SpaceAfterCast"/>
+</ruleset>

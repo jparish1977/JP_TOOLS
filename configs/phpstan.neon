@@ -1,0 +1,13 @@
+parameters:
+    # JP_TOOLS shared PHPStan config
+    # Start at level 5 — catches real bugs without demanding full type coverage.
+    # Bump toward 9 as the codebase matures.
+    level: 5
+
+    # Don't fail on missing vendor stubs for common frameworks.
+    # Add project-specific ignores in a local phpstan.neon that includes this one.
+    ignoreErrors: []
+
+    # Treat all files as potential entry points (no bootstrapping required)
+    checkMissingIterableValueType: false
+    checkGenericClassInNonGenericObjectType: false

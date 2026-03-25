@@ -1,0 +1,14 @@
+{
+    "name": "jp-tools/php-quality",
+    "description": "PHP code quality tools for JP_TOOLS",
+    "require-dev": {
+        "phpstan/phpstan": "^2.0",
+        "squizlabs/php_codesniffer": "^3.10",
+        "rector/rector": "^2.0",
+        "nikic/php-parser": "^5.0"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}
