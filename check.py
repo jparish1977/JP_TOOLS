@@ -31,6 +31,9 @@ os.environ["PATH"] = os.pathsep.join(
     [str(p) for p in _EXTRA_PATHS if p.exists()] + [os.environ.get("PATH", "")]
 )
 
+# Force UTF-8 for subprocess output on Windows (avoids cp1252 decode errors)
+os.environ["PYTHONUTF8"] = "1"
+
 
 # ── tool runners ──────────────────────────────────────────────────────────────
 
