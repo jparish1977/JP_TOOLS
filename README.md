@@ -1,5 +1,7 @@
 # JP_TOOLS
 
+[![Code Quality](https://github.com/jparish1977/JP_TOOLS/actions/workflows/check.yml/badge.svg)](https://github.com/jparish1977/JP_TOOLS/actions/workflows/check.yml)
+
 Code quality toolbox for use with agentic AI in professional software development.
 Runs linters, type checkers, formatters, and security auditors against arbitrary files
 or directories and returns structured JSON designed for AI agent consumption.
