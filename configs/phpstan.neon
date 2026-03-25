@@ -9,5 +9,4 @@ parameters:
     ignoreErrors: []
 
     # Treat all files as potential entry points (no bootstrapping required)
-    checkMissingIterableValueType: false
-    checkGenericClassInNonGenericObjectType: false
+    reportUnmatchedIgnoredErrors: false

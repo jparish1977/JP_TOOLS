@@ -15,12 +15,13 @@ import subprocess
 import argparse
 from pathlib import Path
 
-_NODE_PATHS = [
+_EXTRA_PATHS = [
     Path(os.environ.get("APPDATA", "")) / "npm",
     Path("C:/Program Files/nodejs"),
+    Path("C:/Users") / os.environ.get("USERNAME", "") / "AppData/Local/Programs/PHP/8.3.30/nts/x64",
 ]
 os.environ["PATH"] = os.pathsep.join(
-    [str(p) for p in _NODE_PATHS if p.exists()] + [os.environ.get("PATH", "")]
+    [str(p) for p in _EXTRA_PATHS if p.exists()] + [os.environ.get("PATH", "")]
 )
 
 

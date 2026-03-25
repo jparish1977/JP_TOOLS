@@ -21,13 +21,14 @@ import subprocess
 import argparse
 from pathlib import Path
 
-# Ensure Node global bin dirs are on PATH (Windows npm installs land here)
-_NODE_PATHS = [
-    Path(os.environ.get("APPDATA", "")) / "npm",
+# Inject known tool locations that may not be on PATH yet (e.g. before reboot)
+_EXTRA_PATHS = [
+    Path(os.environ.get("APPDATA", "")) / "npm",           # Node global bins
     Path("C:/Program Files/nodejs"),
+    Path("C:/Users") / os.environ.get("USERNAME", "") / "AppData/Local/Programs/PHP/8.3.30/nts/x64",
 ]
 os.environ["PATH"] = os.pathsep.join(
-    [str(p) for p in _NODE_PATHS if p.exists()] + [os.environ.get("PATH", "")]
+    [str(p) for p in _EXTRA_PATHS if p.exists()] + [os.environ.get("PATH", "")]
 )
 
 
