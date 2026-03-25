@@ -4,6 +4,9 @@
 <ruleset name="JP">
     <description>JP_TOOLS coding standard — PSR-12 base with practical relaxations</description>
 
+    <!-- Only check PHP files -->
+    <arg name="extensions" value="php"/>
+
     <rule ref="PSR12">
         <!-- Allow long lines in comments and strings -->
         <exclude name="Generic.Files.LineLength"/>
