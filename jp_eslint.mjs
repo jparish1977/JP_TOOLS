@@ -62,7 +62,7 @@ function collectFiles(targetPath) {
 const commonRules = {
   // Correctness
   "no-undef":              "error",
-  "no-unused-vars":        ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+  "no-unused-vars":        ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" }],
   "eqeqeq":                ["error", "always", { null: "ignore" }],
   "no-eval":               "error",
   "no-implied-eval":       "error",
@@ -71,9 +71,11 @@ const commonRules = {
   "no-redeclare":          "error",
 
   // Quality
+  "max-lines":             ["warn", { max: 500, skipBlankLines: true, skipComments: true }],
   "complexity":            ["warn", 25],
   "max-depth":             ["warn", 5],
   "max-lines-per-function": ["warn", { max: 200, skipBlankLines: true, skipComments: true }],
+  "max-statements":        ["warn", 50],
   "max-params":            ["warn", 6],
   "no-magic-numbers":      ["warn", { ignore: [-1, 0, 1, 2], ignoreArrayIndexes: true, ignoreDefaultValues: true }],
 
@@ -128,6 +130,10 @@ async function lintFile(filePath) {
       rules: commonRules,
     });
   } else {
+    const scriptOverrides = isModule ? {} : {
+      // In script mode, top-level functions/vars are global exports — not truly unused
+      "no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" }],
+    };
     config.push({
       files: ["**"],
       languageOptions: {
@@ -135,7 +141,7 @@ async function lintFile(filePath) {
         sourceType: isModule ? "module" : "script",
         globals: isModule ? moduleGlobals : browserGlobals,
       },
-      rules: commonRules,
+      rules: { ...commonRules, ...scriptOverrides },
     });
   }
 
