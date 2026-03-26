@@ -103,10 +103,25 @@ def close_issue(repo: str, issue_number: int):
         print(f"Closed #{issue_number}")
 
 
+def create_issue(repo: str, title: str, body: str, labels: list = None):
+    """Create a new issue via gh CLI."""
+    cmd = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body]
+    if labels:
+        for label in labels:
+            cmd.extend(["--label", label])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"Error creating issue: {result.stderr}", file=sys.stderr)
+        sys.exit(1)
+    print(result.stdout.strip())
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Post templated GitHub comments")
+    parser = argparse.ArgumentParser(description="Post templated GitHub comments or create issues")
     parser.add_argument("--repo", help="owner/repo")
-    parser.add_argument("--issue", type=int, help="Issue or PR number")
+    parser.add_argument("--issue", type=int, help="Issue or PR number (for commenting)")
+    parser.add_argument("--create", metavar="TITLE", help="Create a new issue with this title")
+    parser.add_argument("--label", action="append", default=[], help="Labels for --create")
     parser.add_argument("--template", "-t", help="Template name")
     parser.add_argument("--var", action="append", default=[], help="key=value pairs")
     parser.add_argument("--dry-run", action="store_true", help="Preview without posting")
@@ -137,13 +152,17 @@ def main():
         print("--- END PREVIEW ---")
         return 0
 
-    if not args.repo or not args.issue:
-        parser.error("--repo and --issue are required (or use --dry-run)")
+    if not args.repo:
+        parser.error("--repo is required")
 
-    post_comment(args.repo, args.issue, body)
-
-    if args.close:
-        close_issue(args.repo, args.issue)
+    if args.create:
+        create_issue(args.repo, args.create, body, args.label or None)
+    elif args.issue:
+        post_comment(args.repo, args.issue, body)
+        if args.close:
+            close_issue(args.repo, args.issue)
+    else:
+        parser.error("--issue or --create is required (or use --dry-run)")
 
     return 0
 
