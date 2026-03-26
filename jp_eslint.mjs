@@ -32,7 +32,9 @@ function isModuleFile(filePath) {
   if (extname(filePath) === ".cjs") return false;
   try {
     const src = readFileSync(filePath, "utf8");
-    return /\b(import\s+|export\s+(default\s+|const\s+|let\s+|var\s+|function\s+|class\s+|\{))/m.test(src);
+    // Match import/export only at the start of a line (ignoring leading whitespace)
+    // to avoid false positives from comments like "export/import"
+    return /^\s*(import\s+|export\s+(default\s+|const\s+|let\s+|var\s+|function\s+|class\s+|\{))/m.test(src);
   } catch {
     return false;
   }
@@ -87,27 +89,14 @@ const commonRules = {
   "prefer-template":       "warn",
 };
 
-// Browser globals
-const browserGlobals = {
-  window: "readonly", document: "readonly", console: "readonly",
-  fetch: "readonly", localStorage: "readonly", sessionStorage: "readonly",
-  setTimeout: "readonly", clearTimeout: "readonly",
-  setInterval: "readonly", clearInterval: "readonly",
-  URL: "readonly", Blob: "readonly", FileReader: "readonly",
-  Image: "readonly", requestAnimationFrame: "readonly",
-  alert: "readonly", confirm: "readonly", prompt: "readonly",
-  navigator: "readonly", location: "readonly",
-  performance: "readonly", HTMLElement: "readonly",
-  HTMLCanvasElement: "readonly", WebGLRenderingContext: "readonly",
-  Event: "readonly", MouseEvent: "readonly", KeyboardEvent: "readonly",
-};
+import globals from "globals";
+
+// Use the complete browser globals from the 'globals' package
+const browserGlobals = globals.browser;
 
 // Node/module globals
 const moduleGlobals = {
-  process: "readonly", console: "readonly",
-  setTimeout: "readonly", clearTimeout: "readonly",
-  setInterval: "readonly", clearInterval: "readonly",
-  URL: "readonly",
+  ...globals.node,
 };
 
 // Lint a single file with the correct config
