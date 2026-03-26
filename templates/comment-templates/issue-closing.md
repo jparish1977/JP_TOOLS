@@ -1,9 +1,9 @@
-## Resolved in #{pr_number}
+## Resolved in #{pr}
 
 **What changed:** {summary}
 
 **Files touched:**
-{file_list}
+{files}
 
 **How to verify:**
-{verification_steps}
+{verify}

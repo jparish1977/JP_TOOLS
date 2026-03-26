@@ -1,6 +1,6 @@
 ## Superseded
 
-This issue is replaced by #{new_issue_number}.
+This issue is replaced by #{issue}.
 
 **Why:** {reason}
 
