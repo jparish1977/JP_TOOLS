@@ -1,24 +1,22 @@
 ## Specification
 
 ### Goal
-{what_this_should_accomplish}
+{goal}
 
 ### Current behavior
-{how_it_works_today_or_n_a}
+{current}
 
 ### Desired behavior
-{how_it_should_work}
+{desired}
 
 ### Acceptance criteria
-- [ ] {criterion_1}
-- [ ] {criterion_2}
-- [ ] {criterion_3}
+{criteria}
 
 ### Technical approach
-{implementation_notes_or_tbd}
+{approach}
 
 ### Dependencies
-{related_issues_or_none}
+{deps}
 
 ### Out of scope
-{what_this_does_not_cover}
+{out_of_scope}

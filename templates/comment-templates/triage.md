@@ -1,12 +1,12 @@
 ## Status update
 
-**Current state:** {open|in-progress|blocked|ready-for-review}
+**Current state:** {state}
 
 **What's done:**
-{completed_items}
+{done}
 
 **What's blocking:**
-{blockers_or_none}
+{blockers}
 
 **Next steps:**
-{next_actions}
+{next}
