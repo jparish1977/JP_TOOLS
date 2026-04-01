@@ -12,7 +12,7 @@ or directories and returns structured JSON designed for AI agent consumption.
 git clone https://github.com/jparish1977/JP_TOOLS.git
 cd JP_TOOLS
 pip install ruff mypy pip-audit         # Python tools
-npm install                             # JS/CSS tools (eslint, stylelint, prettier)
+npm install                             # JS/TS/CSS tools (eslint, typescript-eslint, stylelint, prettier)
 composer install                        # PHP tools (phpstan, phpcs, rector)
 ```
 
@@ -64,7 +64,8 @@ and runs the appropriate tools for each:
 | Language | Extensions | Tools | Audit |
 |---|---|---|---|
 | Python | `.py` | ruff, mypy | pip-audit |
-| JavaScript | `.js`, `.ts`, `.jsx`, `.tsx` | eslint, prettier | npm audit |
+| JavaScript | `.js`, `.jsx` | eslint, prettier | npm audit |
+| TypeScript | `.ts`, `.tsx` | eslint (typescript-eslint), prettier | npm audit |
 | CSS | `.css`, `.scss`, `.less` | stylelint, prettier | — |
 | HTML | `.html` | eslint, stylelint, prettier | — |
 | PHP | `.php` | phpstan, phpcs, rector | composer audit |
