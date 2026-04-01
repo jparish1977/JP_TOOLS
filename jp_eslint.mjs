@@ -90,6 +90,7 @@ const commonRules = {
 };
 
 import globals from "globals";
+import tseslint from "typescript-eslint";
 
 // Use the complete browser globals from the 'globals' package
 const browserGlobals = globals.browser;
@@ -102,7 +103,8 @@ const moduleGlobals = {
 // Lint a single file with the correct config
 async function lintFile(filePath) {
   const isHtml = /\.html?$/.test(filePath);
-  const isModule = !isHtml && isModuleFile(filePath);
+  const isTs = /\.tsx?$/.test(filePath);
+  const isModule = !isHtml && (isTs || isModuleFile(filePath));
   const dir = dirname(filePath);
 
   const config = [];
@@ -117,6 +119,31 @@ async function lintFile(filePath) {
         globals: browserGlobals,
       },
       rules: commonRules,
+    });
+  } else if (isTs) {
+    // TypeScript files — use typescript-eslint parser
+    // Disable rules that conflict with TS type system
+    const tsRules = { ...commonRules };
+    delete tsRules["no-undef"];          // TS handles this
+    delete tsRules["no-unused-vars"];    // use @typescript-eslint version instead
+    delete tsRules["no-redeclare"];      // TS handles this
+    delete tsRules["no-shadow"];         // TS handles this
+
+    config.push({
+      files: ["**"],
+      languageOptions: {
+        ecmaVersion: 2022,
+        sourceType: "module",
+        parser: tseslint.parser,
+        globals: { ...browserGlobals, ...moduleGlobals },
+      },
+      plugins: {
+        "@typescript-eslint": tseslint.plugin,
+      },
+      rules: {
+        ...tsRules,
+        "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" }],
+      },
     });
   } else {
     const scriptOverrides = isModule ? {} : {
