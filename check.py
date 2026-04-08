@@ -221,6 +221,18 @@ def _php_cmd() -> str | None:
     return shutil.which("php") or shutil.which("php.exe")
 
 
+def _find_project_config(target: str, filenames: list[str]) -> Path | None:
+    """Walk up from target looking for a project-local config file."""
+    p = Path(target).resolve()
+    start = p if p.is_dir() else p.parent
+    for directory in (start, *start.parents):
+        for name in filenames:
+            candidate = directory / name
+            if candidate.exists():
+                return candidate
+    return None
+
+
 def run_phpstan(target: str) -> dict:
     php  = _php_cmd()
     bin_ = _php_bin("phpstan")
@@ -228,7 +240,9 @@ def run_phpstan(target: str) -> dict:
         return _tool_missing("php")
     if not bin_:
         return _tool_missing("phpstan (run: composer install in JP_TOOLS)")
-    cfg  = Path(__file__).parent / "configs" / "phpstan.neon"
+    cfg = _find_project_config(target, ["phpstan.neon", "phpstan.neon.dist"])
+    if cfg is None:
+        cfg = Path(__file__).parent / "configs" / "phpstan.neon"
     args = [php, bin_, "analyse", "--error-format=json", "--no-progress"]
     if cfg.exists():
         args += ["-c", str(cfg)]
@@ -261,7 +275,9 @@ def run_phpcs(target: str) -> dict:
         return _tool_missing("php")
     if not bin_:
         return _tool_missing("phpcs (run: composer install in JP_TOOLS)")
-    cfg  = Path(__file__).parent / "configs" / "phpcs.xml"
+    cfg = _find_project_config(target, ["phpcs.xml", "phpcs.xml.dist", ".phpcs.xml", ".phpcs.xml.dist"])
+    if cfg is None:
+        cfg = Path(__file__).parent / "configs" / "phpcs.xml"
     args = [php, bin_, "--report=json"]
     if cfg.exists():
         args += [f"--standard={cfg}"]
@@ -295,7 +311,9 @@ def run_rector(target: str) -> dict:
         return _tool_missing("php")
     if not bin_:
         return _tool_missing("rector (run: composer install in JP_TOOLS)")
-    cfg  = Path(__file__).parent / "configs" / "rector.php"
+    cfg = _find_project_config(target, ["rector.php", "rector.php.dist"])
+    if cfg is None:
+        cfg = Path(__file__).parent / "configs" / "rector.php"
     args = [php, bin_, "process", "--dry-run", "--output-format=json", "--no-progress-bar"]
     if cfg.exists():
         args += [f"--config={cfg}"]
