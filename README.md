@@ -2,21 +2,30 @@
 
 [![Code Quality](https://github.com/jparish1977/JP_TOOLS/actions/workflows/check.yml/badge.svg)](https://github.com/jparish1977/JP_TOOLS/actions/workflows/check.yml)
 
-Code quality toolbox for use with agentic AI in professional software development.
-Runs linters, type checkers, formatters, and security auditors against arbitrary files
-or directories and returns structured JSON designed for AI agent consumption.
+Developer toolbox for code quality, data recovery, file analysis, and archive management.
+Built with pluggable interfaces — every tool is coded to contracts with swappable adapters.
 
 ## Quick Start
 
 ```bash
 git clone https://github.com/jparish1977/JP_TOOLS.git
 cd JP_TOOLS
-pip install ruff mypy pip-audit         # Python tools
-npm install                             # JS/TS/CSS tools (eslint, typescript-eslint, stylelint, prettier)
-composer install                        # PHP tools (phpstan, phpcs, rector)
+
+# Code quality tools
+pip install ruff mypy pip-audit         # Python linting/typing
+npm install                             # JS/TS/CSS (eslint, typescript-eslint, stylelint, prettier)
+composer install                        # PHP (phpstan, phpcs, rector, phpunit)
+
+# Recovery & analysis tools (Linux/WSL)
+bash install-recovery.sh
+
+# Recovery & analysis tools (Windows native)
+powershell install-recovery.ps1
 ```
 
-## Scripts
+## Tools
+
+### Code Quality
 
 | Script | Purpose |
 |---|---|
@@ -24,6 +33,37 @@ composer install                        # PHP tools (phpstan, phpcs, rector)
 | `fix.py` | Auto-fix what's fixable, report what isn't |
 | `install-hooks.py` | Install pre-commit hook into any git repo |
 | `init-ci.py` | Copy GitHub Actions CI template into a repo |
+
+### File Analysis (PHP — hex architecture)
+
+| Script | Purpose |
+|---|---|
+| `find-dupes.php` | Find duplicate files or compare directories |
+| | Pluggable hashers, caches (memory, filesystem, SQLite), output formats |
+| | Worker pool for parallel hashing, persistent hash DB for instant re-scans |
+
+### Data Recovery (Python)
+
+| Script | Purpose |
+|---|---|
+| `recover.py` | File recovery via photorec with profile-based filtering |
+| `undelete.py` | Recover deleted files from NTFS/ext filesystems |
+| `image-disk.py` | Forensic disk imaging via ddrescue |
+| `scan-image.py` | Scan raw images for ROM signatures and embedded files |
+
+### Archive Management (Python)
+
+| Script | Purpose |
+|---|---|
+| `chd.py` | CHD archive management — create, verify, extract, import, delta, batch |
+| `chd-hunkmap.py` | CHD hunk map analysis — block-level dedup intelligence |
+
+### Deployment
+
+| Script | Purpose |
+|---|---|
+| `deploy-s3.py` | Deploy static sites to S3 |
+| `deploy-all.py` | S3 + GitHub Pages deploy |
 
 ## Usage
 
@@ -134,3 +174,149 @@ python init-ci.py /path/to/repo
 ```
 
 Creates `.github/workflows/check.yml` — runs on push to main and on PRs.
+
+## FileScanner Library
+
+PHP library with hexagonal architecture — interfaces for everything, swap adapters without touching business logic.
+
+```
+lib/FileScanner/
+├── Contract/           Interfaces (ports)
+│   ├── HasherInterface.php
+│   ├── FilesystemInterface.php
+│   ├── CacheInterface.php
+│   ├── OutputInterface.php
+│   ├── ScannerInterface.php
+│   ├── SchedulerInterface.php
+│   └── DuplicateFinderInterface.php
+├── Hasher/             Hash adapters
+│   ├── NativeHasher.php        PHP hash_file() — cross-platform
+│   └── ShellHasher.php         md5sum/sha256sum — Linux, parallel-friendly
+├── Cache/              Storage adapters
+│   ├── MemoryCache.php          In-memory, single-run
+│   ├── FilesystemCache.php      File-per-hash on disk
+│   └── SqliteCache.php          Persistent DB, staleness checks, dupe queries
+├── Filesystem/
+│   └── LocalFilesystem.php      Native filesystem adapter
+├── Output/
+│   ├── ConsoleOutput.php        Human-readable terminal output
+│   └── JsonOutput.php           Machine-readable JSON
+├── Scheduler/
+│   ├── SequentialScheduler.php  One-at-a-time (default)
+│   ├── WorkerPoolScheduler.php  Parallel via proc_open worker pool
+│   └── hash-worker.php          Worker process for parallel hashing
+├── Scanner.php          Directory walker + hasher
+├── DuplicateFinder.php  Find dupes within or across directories
+├── FileEntry.php        Value object
+├── DuplicateGroup.php   Value object
+├── ComparisonResult.php Value object
+└── tests/
+    ├── HasherTest.php
+    ├── CacheTest.php
+    ├── ValueObjectTest.php
+    ├── ScannerTest.php
+    ├── DuplicateFinderTest.php
+    └── phpunit.xml
+```
+
+### find-dupes.php Usage
+
+```bash
+# Find duplicates within a directory
+php find-dupes.php ~/Pictures
+
+# Compare two directories
+php find-dupes.php ~/backup1 ~/backup2
+
+# JSON output
+php find-dupes.php ~/data --json
+
+# Persistent SQLite cache (hash once, instant re-scans)
+php find-dupes.php ~/data --db ~/.hash-cache.db
+
+# SHA-256 instead of MD5
+php find-dupes.php ~/data --algo sha256
+
+# Parallel hashing with 4 worker processes
+php find-dupes.php ~/data --workers 4
+
+# Ignore specific directories
+php find-dupes.php ~/data --ignore vendor,node_modules
+```
+
+## Recovery Tools
+
+### Profiles (recover.py)
+
+| Profile | File Types |
+|---|---|
+| `code` | JS, HTML, PHP, Python, JSON, XML, CSS, SQL, shell, etc. |
+| `art` | PNG, JPG, TIFF, PSD, BMP, GIF, SVG, WebP, etc. |
+| `writing` | TXT, PDF, DOC, ODT, RTF, MD, EPUB, etc. |
+| `roms` | NES, SNES, GB, GBA, N64, ISO, BIN, CHD, ZIP, 7z, etc. |
+| `all` | All of the above |
+| `full` | Everything photorec can find |
+
+```bash
+# Recover code files from a drive
+python recover.py /dev/sdb1 ./recovered --profile code
+
+# Recover everything
+python recover.py F: ./recovered --profile all
+```
+
+### CHD Archive Management
+
+```bash
+# Create CHD from disc image
+python chd.py create game.iso game.chd
+
+# Import any format (auto-converts CSO, PBP, NRG, MDF, ECM)
+python chd.py import game.cso game.chd
+
+# Batch convert a whole directory
+python chd.py batch-create ~/roms/psx --format iso
+
+# Verify integrity
+python chd.py verify game.chd
+python chd.py batch-verify ~/roms/chd
+
+# Delta (incremental) CHD
+python chd.py delta base.chd updated.img updated.chd
+
+# Analyze block-level deduplication
+python chd-hunkmap.py archive.chd --self-refs --trace archive.tar
+```
+
+### ROM Signature Scanner
+
+```bash
+# Scan a disk image for ROM magic bytes
+python scan-image.py disk.img --signatures roms
+
+# Scan with binwalk + ROM signatures
+python scan-image.py disk.img --signatures all --output ./results
+```
+
+Detects: NES, SNES, Game Boy, GBA, N64, Genesis, Master System, Game Gear,
+Atari 7800, Atari Lynx, Neo Geo, FDS, Sega 32X, Sega CD, CHD, CSO, CUE,
+PBP, WBFS, NKit, GameCube, 3DS, NDS, WordPerfect, ISO 9660.
+
+## Testing
+
+```bash
+# PHP unit tests (46 tests, 107 assertions)
+php vendor/bin/phpunit --configuration lib/FileScanner/tests/phpunit.xml
+
+# PHP with coverage (requires PCOV)
+php vendor/bin/phpunit --configuration lib/FileScanner/tests/phpunit.xml --coverage-text
+
+# PHP static analysis (level 8)
+php vendor/bin/phpstan analyse lib/FileScanner/ --level=8
+
+# PHP code style (PSR-12)
+php vendor/bin/phpcs lib/FileScanner/ --standard=PSR12
+
+# Python linting
+ruff check recover.py image-disk.py undelete.py scan-image.py chd.py chd-hunkmap.py
+```
