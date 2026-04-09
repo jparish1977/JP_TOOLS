@@ -2,6 +2,24 @@
 # Runs check.py on every push and PR, reports issues as annotations.
 #
 # Install: python JP_TOOLS/init-ci.py  (copies this into your repo)
+#
+# --- Private Composer dependencies ---
+# If your project requires private GitHub repos via VCS repositories in
+# composer.json, the default GITHUB_TOKEN only has access to the current repo.
+#
+# Setup:
+#   1. Create a fine-grained PAT at github.com/settings/personal-access-tokens/new
+#      Scope: read-only "Contents" access to the private dependency repos
+#   2. Add as a repo secret:
+#        gh secret set COMPOSER_TOKEN -R owner/repo
+#   3. In the PHP job below, add this env var:
+#        env:
+#          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.COMPOSER_TOKEN }}"}}'
+#   4. If composer.json uses path repos for local dev, swap to VCS in CI:
+#        - name: Switch to VCS repos for CI
+#          run: |
+#            sed -i 's|"type": "path"|"type": "vcs"|g' composer.json
+#            sed -i 's|"url": "../iteration8-core"|"url": "https://github.com/owner/iteration8-core.git"|g' composer.json
 
 name: Code Quality
 
@@ -31,16 +49,16 @@ jobs:
               composer global require phpstan/phpstan squizlabs/php_codesniffer
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
       - name: Set up Node
         if: matrix.lang == 'js'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
