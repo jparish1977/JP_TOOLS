@@ -316,7 +316,9 @@ def run_photorec(photorec_cmd, source, output_dir, profile_name, extensions, dry
         for ext in extensions:
             if ext in PHOTOREC_FAMILIES:
                 families.add(PHOTOREC_FAMILIES[ext])
-        enable_line = ",".join(sorted(families)) + ",enable"
+        # photorec expects each family followed by its own ,enable toggle
+        # e.g. "jpg,enable,png,enable,txt,enable"
+        enable_line = ",".join(f"{f},enable" for f in sorted(families))
 
     print(f"{'[DRY RUN] ' if dry_run else ''}Recovery scan")
     print(f"  Source:    {source}")
@@ -338,7 +340,7 @@ def run_photorec(photorec_cmd, source, output_dir, profile_name, extensions, dry
         sys.exit(0)
 
     # Build photorec command
-    # photorec /d <output> /cmd <source> fileopt,everything,disable,<families>,enable,search
+    # photorec /d <output> /cmd <source> fileopt,everything,disable,jpg,enable,png,enable,...,search
     if profile_name == "full":
         cmd_str = "fileopt,everything,enable,search"
     else:
