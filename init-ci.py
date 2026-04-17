@@ -12,7 +12,9 @@ import shutil
 import sys
 from pathlib import Path
 
-TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+JP_TOOLS_ROOT = Path(__file__).resolve().parent
+TEMPLATES_DIR = JP_TOOLS_ROOT / "templates"
+METHODOLOGY_DOC = JP_TOOLS_ROOT / "METHODOLOGY.md"
 
 
 def main():
@@ -45,6 +47,9 @@ def main():
     shutil.copy2(src, dest)
     print(f"Installed CI workflow at {dest}")
     print("Commit and push to activate.")
+    print()
+    print("This project now follows JP_TOOLS methodology.")
+    print(f"Read it: {METHODOLOGY_DOC}")
 
 
 if __name__ == "__main__":
