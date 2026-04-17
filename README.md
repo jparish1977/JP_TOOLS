@@ -5,6 +5,14 @@
 Developer toolbox for code quality, data recovery, file analysis, and archive management.
 Built with pluggable interfaces — every tool is coded to contracts with swappable adapters.
 
+> **Read [METHODOLOGY.md](METHODOLOGY.md) first.**
+> JP_TOOLS is a set of practices, not just a set of scripts. The methodology is
+> the asset. Every tool in here, and every project the toolbox installs itself
+> into, is an application of the same discipline: hexagonal ports/adapters,
+> immutable value objects, a zero-framework-deps domain, enforced quality gates.
+> New projects adopting `install-hooks.py` or `init-ci.py` are expected to
+> follow the methodology.
+
 ## Quick Start
 
 ```bash
