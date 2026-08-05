@@ -76,6 +76,17 @@ That edits your local `composer.json` — don't commit those two entries back.
 | `undelete.py` | Recover deleted files from NTFS/ext filesystems |
 | `image-disk.py` | Forensic disk imaging via ddrescue |
 | `scan-image.py` | Scan raw images for ROM signatures and embedded files |
+| `ntfs-inventory.py` | List an **unmountable** NTFS volume to TSV — resumable, metadata only |
+| `ntfs-size.py` | Size a subtree on an unmountable volume, before committing to a copy |
+| `ntfs-extract.py` | Copy a tree off an unmountable volume — resumable, skips unreadable files |
+| `inventory-drive.py` | Catalogue a **mounted** volume to the same TSV format, for offline diffing |
+
+The last four cover a gap between imaging and carving: **the volume will not
+mount, but the live files are intact.** `image-disk.py` needs somewhere to put a
+full image, and `undelete.py` looks for deleted files — neither helps when the
+files are fine and only the filesystem metadata is damaged. Inventory first,
+size what you might want, then copy. Comparing that inventory against drives you
+already own is usually what shrinks the job most.
 
 ### Archive Management (Python)
 
