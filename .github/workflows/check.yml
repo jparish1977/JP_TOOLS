@@ -15,13 +15,22 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - run: pip install ruff mypy
+      # Pinned deliberately. Unpinned, this said `pip install ruff mypy`, and the
+      # build went red in August against code that had not changed since April —
+      # new linter releases added rules while the source stood still. Bump these
+      # on purpose, with the fixes in the same commit, rather than discovering it
+      # in whichever unrelated PR happens to be open.
+      - run: pip install ruff==0.16.1 mypy==2.3.0
       - name: Self-check Python files
         run: |
+          # No `set -e` reliance: the runner aborts the loop on the first
+          # failure, which hid every problem after the first file.
+          rc=0
           for f in check.py fix.py install-hooks.py init-ci.py; do
             echo "--- $f ---"
-            python check.py "$f" --pretty
+            python check.py "$f" --pretty || rc=1
           done
+          exit $rc
 
   js:
     name: JS (eslint)

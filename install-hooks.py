@@ -8,8 +8,8 @@ Usage:
     python install-hooks.py --remove [path]     # uninstall the hook
 """
 
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 TOOLS_DIR = Path(__file__).resolve().parent
