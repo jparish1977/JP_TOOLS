@@ -23,7 +23,7 @@ if command -v apt &>/dev/null; then
 
     echo ""
     echo "--- Filesystem recovery ---"
-    sudo apt install -y ntfs-3g        # includes ntfsundelete
+    sudo apt install -y ntfs-3g        # ntfsundelete, and ntfsls/ntfscat for ntfs-extract.py
     sudo apt install -y extundelete 2>/dev/null || echo "    extundelete not available in this repo — skipping"
 
     echo ""
