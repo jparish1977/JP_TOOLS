@@ -39,7 +39,9 @@ jobs:
         include:
           - lang: python
             setup: |
-              pip install ruff mypy pip-audit
+              # Pin these. Unpinned linters turn a green build red without any
+              # code change, months later, in whichever PR happens to be open.
+              pip install ruff==0.16.1 mypy==2.3.0 pip-audit==2.10.1
           - lang: js
             setup: |
               npm install -g eslint prettier
