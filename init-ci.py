@@ -7,9 +7,9 @@ Usage:
     python init-ci.py [path-to-repo]    # defaults to cwd
 """
 
-import sys
-import shutil
 import argparse
+import shutil
+import sys
 from pathlib import Path
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"

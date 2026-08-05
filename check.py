@@ -13,12 +13,12 @@ Exit codes:
     2  — usage / tool-not-found error
 """
 
-import sys
-import os
+import argparse
 import json
+import os
 import shutil
 import subprocess
-import argparse
+import sys
 from pathlib import Path
 
 # Inject known tool locations that may not be on PATH yet (e.g. before reboot)
@@ -42,7 +42,7 @@ def run_ruff(target: str) -> dict:
         return _tool_missing("ruff")
     result = subprocess.run(
         ["ruff", "check", "--output-format", "json", target],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
     try:
         raw = json.loads(result.stdout) if result.stdout.strip() else []
@@ -69,7 +69,7 @@ def run_mypy(target: str) -> dict:
     result = subprocess.run(
         ["mypy", "--show-error-codes", "--no-error-summary",
          "--ignore-missing-imports", target],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
     issues = []
     for line in result.stdout.splitlines():
@@ -152,7 +152,7 @@ def run_eslint(target: str) -> dict:
         return _tool_missing("node (required for eslint)")
     if not runner.exists():
         return _tool_missing("jp_eslint.mjs")
-    result = subprocess.run([node, str(runner), target], capture_output=True, text=True,
+    result = subprocess.run([node, str(runner), target], capture_output=True, text=True, check=False,
                             cwd=str(tools_dir))
     issues = []
     try:
@@ -185,7 +185,7 @@ def run_stylelint(target: str) -> dict:
         return _tool_missing("node (required for stylelint)")
     if not runner.exists():
         return _tool_missing("jp_stylelint.mjs")
-    result = subprocess.run([node, str(runner), target], capture_output=True, text=True,
+    result = subprocess.run([node, str(runner), target], capture_output=True, text=True, check=False,
                             cwd=str(tools_dir))
     issues = []
     try:
@@ -246,7 +246,7 @@ def run_phpstan(target: str) -> dict:
     args = [php, bin_, "analyse", "--error-format=json", "--no-progress"]
     if cfg.exists():
         args += ["-c", str(cfg)]
-    result = subprocess.run(args + [target], capture_output=True, text=True)
+    result = subprocess.run(args + [target], capture_output=True, text=True, check=False)
     issues = []
     try:
         data = json.loads(result.stdout)
@@ -281,7 +281,7 @@ def run_phpcs(target: str) -> dict:
     args = [php, bin_, "--report=json"]
     if cfg.exists():
         args += [f"--standard={cfg}"]
-    result = subprocess.run(args + [target], capture_output=True, text=True)
+    result = subprocess.run(args + [target], capture_output=True, text=True, check=False)
     issues = []
     try:
         data = json.loads(result.stdout)
@@ -317,7 +317,7 @@ def run_rector(target: str) -> dict:
     args = [php, bin_, "process", "--dry-run", "--output-format=json", "--no-progress-bar"]
     if cfg.exists():
         args += [f"--config={cfg}"]
-    result = subprocess.run(args + [target], capture_output=True, text=True)
+    result = subprocess.run(args + [target], capture_output=True, text=True, check=False)
     issues = []
     try:
         data = json.loads(result.stdout)
@@ -343,7 +343,7 @@ def run_prettier(target: str) -> dict:
     cmd = shutil.which("prettier") or shutil.which("prettier.cmd")
     if not cmd:
         return _tool_missing("prettier")
-    result = subprocess.run([cmd, "--check", target], capture_output=True, text=True)
+    result = subprocess.run([cmd, "--check", target], capture_output=True, text=True, check=False)
     issues = []
     for line in (result.stdout + result.stderr).splitlines():
         line = line.strip()
@@ -381,7 +381,7 @@ def run_pip_audit(target: str) -> dict:
     args = [cmd, "--format", "json"]
     if req_file:
         args += ["-r", req_file]
-    result = subprocess.run(args, capture_output=True, text=True)
+    result = subprocess.run(args, capture_output=True, text=True, check=False)
     issues = []
     try:
         data = json.loads(result.stdout)
@@ -411,7 +411,7 @@ def run_npm_audit(target: str) -> dict:
     if not pkg_json.exists():
         return {"tool": "npm-audit", "status": "skip", "issues": [],
                 "note": "No package.json found"}
-    result = subprocess.run([cmd, "audit", "--json"], capture_output=True, text=True,
+    result = subprocess.run([cmd, "audit", "--json"], capture_output=True, text=True, check=False,
                             cwd=work_dir)
     issues = []
     try:
@@ -448,7 +448,7 @@ def run_composer_audit(target: str) -> dict:
         cmd = [php, composer or "composer", "audit", "--format=json"]
     else:
         cmd = [composer, "audit", "--format=json"]
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=work_dir)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=work_dir)
     issues = []
     try:
         data = json.loads(result.stdout)
@@ -470,7 +470,7 @@ def run_composer_audit(target: str) -> dict:
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _status(issues: list, returncode: int = None) -> str:
+def _status(issues: list, returncode: int | None = None) -> str:
     if returncode is not None and returncode not in (0, 1):
         return "error"
     return "fail" if issues else "pass"
