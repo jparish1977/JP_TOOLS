@@ -7,11 +7,11 @@ Usage:
     python fix.py <path> [--lang python|js|auto] [--dry-run] [--pretty]
 """
 
-import os
+import argparse
 import json
+import os
 import shutil
 import subprocess
-import argparse
 from pathlib import Path
 
 _EXTRA_PATHS = [
@@ -30,11 +30,11 @@ def fix_ruff(target: str, dry_run: bool) -> dict:
     args = ["ruff", "check", "--fix"]
     if dry_run:
         args.append("--diff")
-    subprocess.run(args + [target], capture_output=True, text=True)
+    subprocess.run(args + [target], capture_output=True, text=True, check=False)
     # After fix, re-check to find what remains
     recheck = subprocess.run(
         ["ruff", "check", "--output-format", "json", target],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
     try:
         remaining = json.loads(recheck.stdout) if recheck.stdout.strip() else []
@@ -62,14 +62,14 @@ def fix_prettier(target: str, dry_run: bool) -> dict:
     if not cmd:
         return {"tool": "prettier", "status": "unavailable", "fixed": 0, "remaining": []}
     if dry_run:
-        result = subprocess.run([cmd, "--check", target], capture_output=True, text=True)
+        result = subprocess.run([cmd, "--check", target], capture_output=True, text=True, check=False)
         unformatted = [
             line.strip()[len("[warn]"):].strip()
             for line in (result.stdout + result.stderr).splitlines()
             if line.strip().startswith("[warn]")
         ]
         return {"tool": "prettier", "status": "dry-run", "would_fix": unformatted}
-    result = subprocess.run([cmd, "--write", target], capture_output=True, text=True)
+    result = subprocess.run([cmd, "--write", target], capture_output=True, text=True, check=False)
     return {
         "tool":   "prettier",
         "status": "fixed" if result.returncode == 0 else "error",
@@ -107,7 +107,7 @@ def fix_phpcs(target: str, dry_run: bool) -> dict:
         check_bin = _php_bin("phpcs")
         if check_bin:
             r = subprocess.run([php, check_bin, "--report=json"] + ([f"--standard={cfg}"] if cfg.exists() else []) + [target],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, check=False)
             try:
                 data = json.loads(r.stdout)
                 fixable = [m for fd in data.get("files", {}).values()
@@ -117,7 +117,7 @@ def fix_phpcs(target: str, dry_run: bool) -> dict:
             except (json.JSONDecodeError, TypeError):
                 pass
         return {"tool": "phpcbf", "status": "dry-run", "would_fix": "?"}
-    result = subprocess.run(args + [target], capture_output=True, text=True)
+    result = subprocess.run(args + [target], capture_output=True, text=True, check=False)
     return {"tool": "phpcbf", "status": "fixed" if result.returncode in (0, 1) else "error",
             "output": result.stdout.strip()}
 
@@ -136,7 +136,7 @@ def fix_rector(target: str, dry_run: bool) -> dict:
         args += [f"--config={cfg}"]
     if dry_run:
         args.append("--dry-run")
-    result = subprocess.run(args + [target], capture_output=True, text=True)
+    result = subprocess.run(args + [target], capture_output=True, text=True, check=False)
     try:
         data = json.loads(result.stdout)
         changed = data.get("changed_files", [])
