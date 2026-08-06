@@ -51,6 +51,33 @@ powershell install-recovery.ps1
 | `image-disk.py` | Forensic disk imaging via ddrescue |
 | `scan-image.py` | Scan raw images for ROM signatures and embedded files |
 
+### VM / Image Triage (Python)
+
+| Script | Purpose |
+|---|---|
+| `vm-image-boot.py` | Boot a disk image headless under KVM and screenshot what it does |
+
+For an image you cannot plug into anything: does it boot, how far does it get,
+and what is on screen when it stops. A serial console shows only what the guest
+chooses to log; the framebuffer shows what actually happened.
+
+```bash
+sudo apt install qemu-system-x86 qemu-utils ovmf
+python3 vm-image-boot.py disk.img -w 110 -o screen.png --forward 12340:1234
+```
+
+Two things it encodes, both learned the hard way:
+
+- **`virtio-vga`, not `-vga std`.** The default Bochs adapter has no
+  `/dev/dri/card0`, so any guest with a KMS-configured Xorg dies with
+  `no screens found` — which reads like a broken image and isn't.
+- **A forwarded port proves nothing.** QEMU binds `hostfwd` ports on the *host*
+  immediately, whether or not the guest listens; the connect succeeds and then
+  resets. Judge a guest service by its reply.
+
+Defaults to a throwaway qcow2 overlay, so a botched boot cannot damage the
+original image. PPM→PNG conversion is stdlib-only — no Pillow, no ImageMagick.
+
 ### Archive Management (Python)
 
 | Script | Purpose |
