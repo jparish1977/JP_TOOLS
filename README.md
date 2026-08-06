@@ -51,6 +51,31 @@ powershell install-recovery.ps1
 | `image-disk.py` | Forensic disk imaging via ddrescue |
 | `scan-image.py` | Scan raw images for ROM signatures and embedded files |
 
+### Binary Triage (Python)
+
+| Script | Purpose |
+|---|---|
+| `autoit-extract.py` | Decode the AutoIt script inside a compiled PE and scan it for network, persistence and execution indicators |
+
+An AutoIt binary tells you nothing from the outside: every stub imports
+`InternetOpenA` and `URLDownloadToFile` because it embeds the whole language,
+so antivirus emits generic verdicts like `Win.Trojan.Autoit-73` off that
+surface alone. Only the decoded script settles it.
+
+`autoit-ripper` reads the resource layout; this also handles the **overlay**
+layout used by older Aut2Exe builds, where the payload is appended after the
+last section and `autoit-ripper` stops with "Couldn't find any appropiate PE
+resource directory" — a layout miss reported as a failure.
+
+```bash
+pip install autoit-ripper
+python3 autoit-extract.py SUSPECT.exe -o ./out
+```
+
+Nothing is executed; the input is read as bytes. Read the indicator lines
+rather than counting them — a device-flashing tool legitimately runs other
+binaries, and what matters is which ones and from where.
+
 ### Archive Management (Python)
 
 | Script | Purpose |
