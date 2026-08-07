@@ -1,9 +1,6 @@
 {
     "name": "jp-tools/php-quality",
     "description": "PHP code quality tools for JP_TOOLS",
-    "require": {
-        "iteration8/utilities": "dev-master"
-    },
     "require-dev": {
         "nikic/php-parser": "^5.0",
         "phpstan/phpstan": "^2.0",
@@ -11,18 +8,9 @@
         "rector/rector": "^2.0",
         "squizlabs/php_codesniffer": "^3.10"
     },
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/jparish1977/iteration8-utilities.git"
-        },
-        {
-            "type": "vcs",
-            "url": "https://github.com/jparish1977/iteration8-core.git"
-        }
-    ],
-    "minimum-stability": "dev",
-    "prefer-stable": true,
+    "suggest": {
+        "iteration8/utilities": "Required by find-dupes.php only. Private repo — see README (Optional: find-dupes.php)."
+    },
     "config": {
         "optimize-autoloader": true,
         "sort-packages": true

@@ -23,6 +23,21 @@ bash install-recovery.sh
 powershell install-recovery.ps1
 ```
 
+### Optional: find-dupes.php
+
+`find-dupes.php` is the one tool that needs `iteration8/utilities`, a private library.
+It is deliberately **not** in `composer.json` so that `composer install` works for everyone;
+skip this section and every other tool still runs.
+
+If you have access to the repo:
+
+```bash
+composer config repositories.iteration8-utilities vcs https://github.com/jparish1977/iteration8-utilities.git
+composer require iteration8/utilities:dev-master
+```
+
+That edits your local `composer.json` — don't commit those two entries back.
+
 ## Tools
 
 ### Code Quality
@@ -41,6 +56,9 @@ powershell install-recovery.ps1
 | `find-dupes.php` | Find duplicate files or compare directories |
 | | Pluggable hashers, caches (memory, filesystem, SQLite), output formats |
 | | Worker pool for parallel hashing, persistent hash DB for instant re-scans |
+
+`find-dupes.php` depends on `iteration8/utilities`, which lives in a private repo — see
+[Optional: find-dupes.php](#optional-find-dupesphp). Nothing else in JP_TOOLS needs it.
 
 ### Data Recovery (Python)
 
