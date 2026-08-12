@@ -195,47 +195,51 @@ Creates `.github/workflows/check.yml` — runs on push to main and on PRs.
 
 ## FileScanner Library
 
-PHP library with hexagonal architecture — interfaces for everything, swap adapters without touching business logic.
+**FileScanner does not live in this repo.** It ships in `iteration8/utilities`
+under `src/FileScanner/`, and `find-dupes.php` here is the composition root that
+wires it up. Install it with the optional step in
+[Optional: find-dupes.php](#optional-find-dupesphp).
+
+It is a PHP library with hexagonal architecture: interfaces for everything, so
+adapters swap without touching business logic.
 
 ```
-lib/FileScanner/
+Iteration8\Utilities\FileScanner\   (src/FileScanner/ in iteration8/utilities)
 ├── Contract/           Interfaces (ports)
-│   ├── HasherInterface.php
-│   ├── FilesystemInterface.php
-│   ├── CacheInterface.php
-│   ├── OutputInterface.php
-│   ├── ScannerInterface.php
-│   ├── SchedulerInterface.php
-│   └── DuplicateFinderInterface.php
+│   ├── HasherInterface
+│   ├── FilesystemInterface
+│   ├── HashCacheInterface
+│   ├── OutputInterface
+│   ├── ScannerInterface
+│   ├── SchedulerInterface
+│   └── DuplicateFinderInterface
 ├── Hasher/             Hash adapters
-│   ├── NativeHasher.php        PHP hash_file() — cross-platform
-│   └── ShellHasher.php         md5sum/sha256sum — Linux, parallel-friendly
+│   ├── NativeHasher            PHP hash_file(), cross-platform
+│   └── ShellHasher             md5sum/sha256sum, Linux, parallel-friendly
 ├── Cache/              Storage adapters
-│   ├── MemoryCache.php          In-memory, single-run
-│   ├── FilesystemCache.php      File-per-hash on disk
-│   └── SqliteCache.php          Persistent DB, staleness checks, dupe queries
-├── Filesystem/
-│   └── LocalFilesystem.php      Native filesystem adapter
+│   ├── MemoryCache             In-memory, single-run
+│   ├── FilesystemCache         File-per-hash on disk
+│   └── SqliteCache             Persistent DB, staleness checks, dupe queries
+├── Filesystem/LocalFilesystem  Native filesystem adapter
 ├── Output/
-│   ├── ConsoleOutput.php        Human-readable terminal output
-│   └── JsonOutput.php           Machine-readable JSON
+│   ├── ConsoleOutput           Human-readable terminal output
+│   └── JsonOutput              Machine-readable JSON
 ├── Scheduler/
-│   ├── SequentialScheduler.php  One-at-a-time (default)
-│   ├── WorkerPoolScheduler.php  Parallel via proc_open worker pool
-│   └── hash-worker.php          Worker process for parallel hashing
-├── Scanner.php          Directory walker + hasher
-├── DuplicateFinder.php  Find dupes within or across directories
-├── FileEntry.php        Value object
-├── DuplicateGroup.php   Value object
-├── ComparisonResult.php Value object
-└── tests/
-    ├── HasherTest.php
-    ├── CacheTest.php
-    ├── ValueObjectTest.php
-    ├── ScannerTest.php
-    ├── DuplicateFinderTest.php
-    └── phpunit.xml
+│   ├── SequentialScheduler     One-at-a-time (default)
+│   ├── WorkerPoolScheduler     Parallel via proc_open worker pool
+│   └── hash-worker.php         Worker process for parallel hashing
+├── Scanner                     Directory walker + hasher
+├── DirectoryWalker
+├── FileHasher
+├── IgnoreFilter
+├── DuplicateFinder             Find dupes within or across directories
+├── FileEntry                   Value object
+├── DuplicateGroup              Value object
+└── ComparisonResult            Value object
 ```
+
+Its tests live with it, in that package's `tests/Unit/FileScanner/` and
+`tests/Integration/FileScanner/`.
 
 ### find-dupes.php Usage
 
@@ -322,19 +326,32 @@ PBP, WBFS, NKit, GameCube, 3DS, NDS, WordPerfect, ISO 9660.
 
 ## Testing
 
+The PHP tools declared in `composer.json` (phpstan, phpcs, phpunit, rector) are
+here to be run *against other projects* by `check.py`. FileScanner's tests live
+with FileScanner, in `iteration8/utilities`.
+
 ```bash
-# PHP unit tests (46 tests, 107 assertions)
-php vendor/bin/phpunit --configuration lib/FileScanner/tests/phpunit.xml
+# Check this repo the way CI does
+python check.py . --pretty
 
-# PHP with coverage (requires PCOV)
-php vendor/bin/phpunit --configuration lib/FileScanner/tests/phpunit.xml --coverage-text
-
-# PHP static analysis (level 8)
-php vendor/bin/phpstan analyse lib/FileScanner/ --level=8
-
-# PHP code style (PSR-12)
-php vendor/bin/phpcs lib/FileScanner/ --standard=PSR12
-
-# Python linting
+# Python linting directly
 ruff check recover.py image-disk.py undelete.py scan-image.py chd.py chd-hunkmap.py
+
+# FileScanner's own suite, from a clone of iteration8/utilities
+php vendor/bin/phpunit
+php vendor/bin/phpstan analyse src/ --level=8
+php vendor/bin/phpcs src/ --standard=PSR12
 ```
+
+### Known gap: this repo does not yet meet its own bar
+
+`METHODOLOGY.md` §2.5 says quality gates are not optional and puts the coverage
+threshold at 95%. JP_TOOLS does not currently meet that standard on itself:
+
+- **No test suite.** None of the Python tools here have unit tests.
+- **`python check.py .` reports 89 issues on master**, 86 of them errors, 54
+  auto-fixable.
+
+CI gates the two workflows it runs, so this is not invisible, but a toolbox that
+distributes a discipline should hold itself to it first. Recorded here rather
+than left for someone to discover by running the tool on its own repo.
