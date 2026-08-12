@@ -293,6 +293,12 @@ def test_retention_is_read_not_inferred() -> None:
 
     off = "\n".join(render(audit, frozenset(), retention=False))
     check_true("says retention off", "RETENTION: OFF" in off)
+    check_true("points the right way", "listed above" in off)
+
+    # With nothing retained there is no "above" to point at, and saying so
+    # anyway is the kind of noise that makes a report read as boilerplate.
+    empty_off = "\n".join(render(classify(spool([])), frozenset(), retention=False))
+    check_true("no dangling reference when clean", "listed above" not in empty_off)
     check_true("does not claim host retains", "CUPS is keeping documents" not in off)
     check_true("still reports the leftovers", "retained file(s) still on disk" in off)
 
