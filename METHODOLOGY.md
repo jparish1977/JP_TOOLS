@@ -103,7 +103,7 @@ Iteration8\Utilities\FileScanner\
 ├── Contract/                    # PORTS
 │   ├── HasherInterface            # "something that hashes a file"
 │   ├── FilesystemInterface        # "something that lists files"
-│   ├── CacheInterface             # "something that stores hashes"
+│   ├── HashCacheInterface         # "something that stores hashes"
 │   ├── OutputInterface            # "something that emits results"
 │   ├── ScannerInterface           # "something that scans"
 │   ├── SchedulerInterface         # "something that runs work"
@@ -111,7 +111,7 @@ Iteration8\Utilities\FileScanner\
 ├── Hasher/                      # ADAPTERS for HasherInterface
 │   ├── NativeHasher               # PHP hash_file(), cross-platform
 │   └── ShellHasher                # md5sum / sha256sum, parallel-friendly
-├── Cache/                       # ADAPTERS for CacheInterface
+├── Cache/                       # ADAPTERS for HashCacheInterface
 │   ├── MemoryCache                # in-memory, single-run
 │   ├── FilesystemCache            # file-per-hash on disk
 │   └── SqliteCache                # persistent DB with dupe queries
@@ -121,13 +121,16 @@ Iteration8\Utilities\FileScanner\
 │   ├── SequentialScheduler        # one-at-a-time default
 │   └── WorkerPoolScheduler        # proc_open parallel
 ├── Scanner                      # orchestrator, uses ports only
+├── DirectoryWalker
+├── FileHasher
+├── IgnoreFilter
 ├── DuplicateFinder
 ├── FileEntry                    # value object (final readonly)
 ├── DuplicateGroup               # value object
 └── ComparisonResult             # value object
 ```
 
-**Read the structure:** `Scanner` accepts `HasherInterface`, `CacheInterface`, `SchedulerInterface`, `OutputInterface` via its constructor. It never imports `NativeHasher` or `SqliteCache`. Changing from single-threaded MD5 on disk to parallel SHA-256 in memory is a wiring change at the composition root, not a code change in `Scanner`.
+**Read the structure:** `Scanner` accepts `HasherInterface`, `HashCacheInterface`, `SchedulerInterface`, `OutputInterface` via its constructor. It never imports `NativeHasher` or `SqliteCache`. Changing from single-threaded MD5 on disk to parallel SHA-256 in memory is a wiring change at the composition root, not a code change in `Scanner`.
 
 **Read the tests:** the scanner test fakes the ports. The hasher and cache tests exercise each adapter against the port contract. No integration test needs the entire OS.
 
