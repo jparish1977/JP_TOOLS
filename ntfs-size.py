@@ -36,13 +36,12 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import List, Tuple
 
 # ntfsls -l prints: size, month, day, time, year, name
 LISTING = re.compile(r"^\s*(\d+)\s+\w+\s+\d+\s+[\d:]+\s+\d{4}\s+(.*)$")
 
 
-def as_root(cmd: List[str]) -> List[str]:
+def as_root(cmd: list[str]) -> list[str]:
     """Prefix with sudo unless we already are root.
 
     Reading a block device needs privilege, but the *script* does not: elevating
@@ -54,15 +53,20 @@ def as_root(cmd: List[str]) -> List[str]:
     return ["sudo", "-n"] + cmd
 
 
-def listdir(device: str, path: str, timeout: int) -> List[Tuple[int, str]]:
-    """One directory, as (size, name). Directories report size 0."""
+def listdir(device: str, path: str, timeout: int) -> list[tuple[int, str, bool]]:
+    """One directory, as (size, name, is_dir).
+
+    `-F` (classify) appends "/" to directory names. ntfsls reports size 0 for
+    both a directory and an empty file, so size alone cannot tell them apart.
+    NTFS forbids "/" in a name, so the marker is unambiguous.
+    """
     try:
         result = subprocess.run(
             as_root(["ntfsls", "-l", "-F", "-p", path, device]),
             capture_output=True, text=True, timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
-        print("  ! timed out listing %s" % path, file=sys.stderr)
+        print(f"  ! timed out listing {path}", file=sys.stderr)
         return []
     rows = []
     for line in result.stdout.splitlines():
@@ -80,7 +84,7 @@ def listdir(device: str, path: str, timeout: int) -> List[Tuple[int, str]]:
 
 
 def walk(device: str, path: str, depth: int, maxdepth: int,
-         timeout: int) -> Tuple[int, int]:
+         timeout: int) -> tuple[int, int]:
     """Recursive size of one subtree. Returns (bytes, files)."""
     total = 0
     files = 0
@@ -123,13 +127,13 @@ def main() -> int:
 
     entries = listdir(args.device, args.path, args.timeout)
     if not entries:
-        print("nothing listed at %s on %s" % (args.path, args.device), file=sys.stderr)
+        print(f"nothing listed at {args.path} on {args.device}", file=sys.stderr)
         print("(is it an NTFS partition, and are you root?)", file=sys.stderr)
         return 1
 
     rows = []
-    for size, name in entries:
-        if size:
+    for size, name, is_dir in entries:
+        if not is_dir:
             rows.append((size, 1, name))
             continue
         child = args.path.rstrip("/") + "/" + name
