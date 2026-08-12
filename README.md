@@ -92,7 +92,7 @@ already own is usually what shrinks the job most.
 
 | Script | Purpose |
 |---|---|
-| `spool-audit.py` | Audit and clear documents CUPS keeps after printing — `--fix` stops the retention, `--purge` clears what is there |
+| `spool-audit.py` | Audit and clear documents CUPS keeps after printing, including its TempDir — `--fix` stops the retention, `--purge` clears what is there |
 
 Printing sends the whole document through CUPS, and CUPS may keep a copy after
 the job finishes. Print a password, a recovery sheet or a private key and that
@@ -103,6 +103,12 @@ It exists as a tool rather than a one-liner because the obvious one-liner
 reports danger as safety: `sudo ls /var/spool/cups | grep -E 'd0*85' || echo
 CLEAN` prints CLEAN when sudo fails, making a check that never ran
 indistinguishable from a clean result.
+
+It audits `tmp/` as well as the top level. CUPS `TempDir` defaults to
+`/var/spool/cups/tmp` and holds document content during filtering, so a
+top-level-only check reports clean while readable data sits one directory down.
+Passing job ids scopes `--purge` to those jobs only, because on a shared printer
+deleting everything destroys other people's documents.
 
 ### Archive Management (Python)
 

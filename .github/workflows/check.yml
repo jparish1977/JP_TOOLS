@@ -25,10 +25,25 @@ jobs:
         run: |
           # No `set -e` reliance: the runner aborts the loop on the first
           # failure, which hid every problem after the first file.
+          # This list is manual, which means a new tool is not checked until
+          # someone remembers to add it. spool-audit.py was merged-ready with a
+          # green badge while no job in this file touched it, so "CI green" was
+          # true and said nothing about the code. Add new scripts here.
           rc=0
-          for f in check.py fix.py install-hooks.py init-ci.py; do
+          for f in check.py fix.py install-hooks.py init-ci.py spool-audit.py; do
             echo "--- $f ---"
             python check.py "$f" --pretty || rc=1
+          done
+          exit $rc
+      - name: Run test suites
+        run: |
+          # Nothing ran tests/ at all before. A suite that CI never executes is
+          # documentation, not a gate. Each suite skips rather than fails when
+          # its environment is unavailable, so this stays green on the runner.
+          rc=0
+          for t in tests/test_*.py; do
+            echo "--- $t ---"
+            python "$t" || rc=1
           done
           exit $rc
 

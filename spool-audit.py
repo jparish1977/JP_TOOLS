@@ -8,8 +8,10 @@ copy outlives the paper, on a machine that may not be yours.
 Usage:
     python spool-audit.py                    # report on everything
     python spool-audit.py 85 86              # report, highlighting those jobs
+    python spool-audit.py 85 86 --purge      # delete ONLY those jobs' documents
     python spool-audit.py --purge            # delete every retained document
-    python spool-audit.py --fix              # stop CUPS retaining them at all
+    python spool-audit.py --include-control  # also count/remove job control files
+    python spool-audit.py --fix              # stop CUPS retaining documents
     python spool-audit.py --spool DIR        # audit a directory instead
 
 Reading the spool needs root, so this normally runs under sudo.
@@ -20,21 +22,26 @@ WHY THIS EXISTS AS A TOOL
         sudo ls /var/spool/cups/ | grep -E 'd0*(85|86)' || echo CLEAN
 
     When sudo fails, ls prints nothing, grep matches nothing, and it announces
-    CLEAN. A failed check and a clean result are indistinguishable. This tool
-    treats "could not read" as its own outcome and never collapses it into a
-    pass.
+    CLEAN. A failed check and a clean result are indistinguishable. Every
+    outcome here is therefore distinct, including "could not read" and "that
+    path does not exist", and none of them collapse into a pass.
 
-    The second version of that shell script had the opposite bug: it listed
-    every retained document whether or not the jobs you asked about were among
-    them, so a successful cleanup looked exactly like a failure. Targeted jobs
-    and everything else are reported separately here, and the classification is
-    a pure function so it can be tested without a printer.
+WHAT COUNTS AS A LEAK
+    d<job>-<n>   top-level document files, the printed content
+    tmp/*        CUPS TempDir, default /var/spool/cups/tmp, holds document
+                 content during filtering. Auditing only the top level reports
+                 CLEAN while readable document data sits one directory down.
+    c<job>       control files. Not document content, but they carry the job
+                 title and submitting user, so a job named
+                 "gpg-private-key.txt" is disclosure by itself. Counted only
+                 with --include-control, and never removed without it.
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -43,86 +50,146 @@ from pathlib import Path
 
 DEFAULT_SPOOL = "/var/spool/cups"
 DEFAULT_CONF = "/etc/cups/cupsd.conf"
+TEMP_SUBDIR = "tmp"
 
-# CUPS names control files c<jobid> and document files d<jobid>-<docnum>.
-# Only the d-files hold what was actually printed.
 DOCUMENT = re.compile(r"^d(\d+)-(\d+)$")
+CONTROL = re.compile(r"^c(\d+)$")
 
 
 class Verdict(Enum):
-    """The three distinct outcomes. Collapsing any two of these is the bug."""
+    """Distinct outcomes. Collapsing any two of these is the bug this prevents."""
 
-    UNREADABLE = "unreadable"
+    DENIED = "denied"
+    MISSING = "missing"
     CLEAN = "clean"
     RETAINED = "retained"
 
 
+class Kind(Enum):
+    DOCUMENT = "document"
+    TEMP = "temp"
+    CONTROL = "control"
+
+
 @dataclass(frozen=True)
-class Document:
-    """One retained document file in the spool."""
+class Entry:
+    """One file in the spool. `job` is None for temp files, which are unattributable."""
 
     name: str
-    job: int
+    kind: Kind
+    job: int | None = None
 
-    @property
-    def is_document(self) -> bool:
-        return True
+
+@dataclass(frozen=True)
+class Listing:
+    """Raw spool contents, or why they could not be read."""
+
+    verdict: Verdict
+    top: tuple[str, ...] = ()
+    temp: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class Audit:
-    """Result of classifying a spool listing. Pure data, no I/O, no printing."""
+    """Classified spool contents. Pure data: no I/O, no printing."""
 
     verdict: Verdict
-    targeted: tuple[Document, ...]
-    others: tuple[Document, ...]
+    targeted: tuple[Entry, ...]
+    others: tuple[Entry, ...]
+    asked_for_jobs: bool = False
 
     @property
     def total(self) -> int:
         return len(self.targeted) + len(self.others)
 
     @property
+    def readable(self) -> bool:
+        return self.verdict in (Verdict.CLEAN, Verdict.RETAINED)
+
+    @property
     def targeted_are_gone(self) -> bool:
         """True when nothing you asked about is present.
 
         Deliberately independent of `verdict`: the jobs you care about can be
-        gone while the spool still holds other people's documents. Reporting
-        those two as one number is what made the shell version unreadable.
+        gone while the spool still holds other people's documents.
         """
         return not self.targeted
 
+    @property
+    def exit_code(self) -> int:
+        """0 satisfied, 1 something you care about is still there, 2 unknown.
 
-def parse_document(name: str) -> Document | None:
-    """Return a Document for a CUPS document filename, else None."""
+        When job ids were given, this answers the question that was asked --
+        "are MY documents gone?" -- rather than "is the spool empty?". Basing
+        it on the whole spool would re-merge the two states the data model
+        keeps apart, and `spool-audit.py 85 && echo SAFE` would never fire.
+        """
+        if not self.readable:
+            return 2
+        if self.asked_for_jobs:
+            return 0 if self.targeted_are_gone else 1
+        return 0 if self.verdict is Verdict.CLEAN else 1
+
+
+def parse_entry(name: str, include_control: bool) -> Entry | None:
+    """Classify a top-level spool filename."""
     m = DOCUMENT.match(name)
-    if m is None:
-        return None
-    return Document(name=name, job=int(m.group(1)))
+    if m is not None:
+        return Entry(name=name, kind=Kind.DOCUMENT, job=int(m.group(1)))
+    c = CONTROL.match(name)
+    if c is not None and include_control:
+        return Entry(name=name, kind=Kind.CONTROL, job=int(c.group(1)))
+    return None
 
 
-def classify(names: list[str], jobs: frozenset[int] = frozenset()) -> Audit:
-    """Partition a spool listing into targeted and other retained documents.
+def classify(
+    listing: Listing,
+    jobs: frozenset[int] = frozenset(),
+    include_control: bool = False,
+) -> Audit:
+    """Partition a spool listing into targeted and other retained files."""
+    if listing.verdict in (Verdict.DENIED, Verdict.MISSING):
+        return Audit(listing.verdict, (), (), asked_for_jobs=bool(jobs))
 
-    `names` is a directory listing. `jobs` are the job ids you asked about.
-    Anything that is not a document file is ignored: control files are job
-    history, which CUPS keeps by design and which leaks nothing.
+    entries = [e for e in (parse_entry(n, include_control) for n in listing.top) if e is not None]
+    # Temp files carry document content but no recoverable job id, so they can
+    # never be "targeted" by job number. They still count as retained data.
+    entries += [
+        Entry(name=f"{TEMP_SUBDIR}/{n}", kind=Kind.TEMP, job=None) for n in listing.temp
+    ]
+
+    targeted = tuple(sorted((e for e in entries if e.job in jobs), key=lambda e: e.name))
+    others = tuple(sorted((e for e in entries if e.job not in jobs), key=lambda e: e.name))
+    verdict = Verdict.RETAINED if entries else Verdict.CLEAN
+    return Audit(verdict, targeted, others, asked_for_jobs=bool(jobs))
+
+
+def victims_for(audit: Audit) -> tuple[Entry, ...]:
+    """What --purge should delete.
+
+    If job ids were given, only those. Deleting everything when the user named
+    specific jobs destroys other people's documents on a shared printer, which
+    is precisely the machine this tool is aimed at.
     """
-    docs = [d for d in (parse_document(n) for n in names) if d is not None]
-    targeted = tuple(sorted((d for d in docs if d.job in jobs), key=lambda d: d.name))
-    others = tuple(sorted((d for d in docs if d.job not in jobs), key=lambda d: d.name))
-    verdict = Verdict.RETAINED if docs else Verdict.CLEAN
-    return Audit(verdict=verdict, targeted=targeted, others=others)
+    return audit.targeted if audit.asked_for_jobs else audit.targeted + audit.others
 
 
 def render(audit: Audit, jobs: frozenset[int]) -> list[str]:
     """Format an Audit for a human. Returns lines; printing is the caller's job."""
-    if audit.verdict is Verdict.UNREADABLE:
+    if audit.verdict is Verdict.DENIED:
         return [
-            "COULD NOT READ THE SPOOL (needs root).",
+            "COULD NOT READ THE SPOOL (permission denied).",
             "Nothing is proven either way. This is NOT a clean result.",
+            "Re-run with sudo.",
+        ]
+    if audit.verdict is Verdict.MISSING:
+        return [
+            "THAT PATH DOES NOT EXIST.",
+            "Nothing is proven either way. This is NOT a clean result.",
+            "Check --spool; this is a wrong path, not a permissions problem.",
         ]
 
-    lines = [f"Spool holds {audit.total} retained document file(s).", ""]
+    lines = [f"Spool holds {audit.total} retained file(s).", ""]
 
     if jobs:
         wanted = ", ".join(str(j) for j in sorted(jobs))
@@ -130,19 +197,30 @@ def render(audit: Audit, jobs: frozenset[int]) -> list[str]:
         if audit.targeted_are_gone:
             lines.append("  none present. Those documents are GONE.")
         else:
-            lines += [f"  >>> {d.name}  STILL PRESENT" for d in audit.targeted]
-            lines.append("  remove with: --purge")
+            lines += [f"  >>> {e.name}  STILL PRESENT" for e in audit.targeted]
+            lines.append("  remove ONLY these with: --purge")
         lines.append("")
 
-    lines.append(f"OTHER RETAINED DOCUMENTS: {len(audit.others)}")
-    lines += [f"  {d.name}" for d in audit.others[:20]]
+    temp = [e for e in audit.others if e.kind is Kind.TEMP]
+    rest = [e for e in audit.others if e.kind is not Kind.TEMP]
+
+    lines.append(f"OTHER RETAINED FILES: {len(audit.others)}")
+    shown = (rest + temp)[:20]
+    lines += [f"  {e.name}" for e in shown]
     if len(audit.others) > 20:
         lines.append(f"  ... and {len(audit.others) - 20} more")
+    if temp:
+        lines.append("")
+        lines.append(
+            f"  {len(temp)} of these are in {TEMP_SUBDIR}/ (CUPS TempDir). They hold"
+        )
+        lines.append("  document content but carry no job id, so they cannot be")
+        lines.append("  targeted by job number. Purge without job ids to remove them.")
 
     lines.append("")
     if audit.verdict is Verdict.RETAINED:
         lines += [
-            "VERDICT: this host RETAINS printed documents.",
+            "VERDICT: this host RETAINS printed data.",
             "         --fix stops that permanently; --purge clears what is there.",
         ]
     else:
@@ -151,99 +229,195 @@ def render(audit: Audit, jobs: frozenset[int]) -> list[str]:
 
 
 # --- I/O boundary ----------------------------------------------------------
-# Thin wrappers over privileged operations. Kept free of logic so the domain
+# Thin wrappers over privileged operations, kept free of logic so everything
 # above stays testable without a printer, a spool or root.
 
 
-def read_spool(spool: str) -> list[str] | None:  # pragma: no cover
-    """List the spool directory, or None if it cannot be read."""
+def _sudo_ls(path: str) -> tuple[Verdict, tuple[str, ...]]:  # pragma: no cover
+    proc = subprocess.run(
+        ["sudo", "-n", "ls", "-1", path], capture_output=True, text=True, check=False
+    )
+    if proc.returncode == 0:
+        return Verdict.CLEAN, tuple(line for line in proc.stdout.splitlines() if line)
+    if "No such file" in proc.stderr:
+        return Verdict.MISSING, ()
+    return Verdict.DENIED, ()
+
+
+def read_spool(spool: str) -> Listing:  # pragma: no cover
+    """List the spool and its TempDir, distinguishing denied from missing."""
+    root = Path(spool)
     try:
-        return sorted(p.name for p in Path(spool).iterdir())
+        top = tuple(sorted(p.name for p in root.iterdir()))
+        verdict = Verdict.CLEAN
     except PermissionError:
-        proc = subprocess.run(
-            ["sudo", "ls", "-1", spool], capture_output=True, text=True, check=False
-        )
-        if proc.returncode != 0:
-            return None
-        return sorted(line for line in proc.stdout.splitlines() if line)
+        verdict, top = _sudo_ls(spool)
+        if verdict in (Verdict.DENIED, Verdict.MISSING):
+            return Listing(verdict)
+    except FileNotFoundError:
+        return Listing(Verdict.MISSING)
+    except NotADirectoryError:
+        return Listing(Verdict.MISSING)
     except OSError:
-        return None
+        return Listing(Verdict.DENIED)
 
-
-def delete(spool: str, docs: tuple[Document, ...]) -> None:  # pragma: no cover
-    """Remove document files, falling back to sudo when unprivileged."""
-    for d in docs:
-        target = str(Path(spool) / d.name)
+    temp: tuple[str, ...] = ()
+    if TEMP_SUBDIR in top:
+        tdir = root / TEMP_SUBDIR
         try:
-            Path(target).unlink()
+            temp = tuple(sorted(p.name for p in tdir.iterdir() if p.is_file()))
         except PermissionError:
-            subprocess.run(["sudo", "rm", "-f", target], check=False)
+            tverdict, temp = _sudo_ls(str(tdir))
+            if tverdict is not Verdict.CLEAN:
+                temp = ()
+        except OSError:
+            temp = ()
+
+    return Listing(verdict, tuple(n for n in top if n != TEMP_SUBDIR), temp)
+
+
+def delete(spool: str, entries: tuple[Entry, ...]) -> tuple[int, int]:  # pragma: no cover
+    """Remove files. Returns (deleted, failed).
+
+    A failed delete must be reported as a failed delete. Reporting it as
+    "the files are still there" sends the user hunting a process that is
+    recreating them, when in fact the removal never had permission.
+    """
+    deleted = failed = 0
+    for e in entries:
+        target = Path(spool) / e.name
+        try:
+            target.unlink()
+            deleted += 1
+            continue
         except FileNotFoundError:
+            deleted += 1
+            continue
+        except PermissionError:
             pass
+        rc = subprocess.run(["sudo", "-n", "rm", "-f", str(target)], check=False).returncode
+        if rc == 0 and not target.exists():
+            deleted += 1
+        else:
+            failed += 1
+    return deleted, failed
 
 
-def disable_retention(conf: str) -> bool:  # pragma: no cover
-    """Set PreserveJobFiles No and restart CUPS. True if it took."""
-    script = (
-        f"if grep -qiE '^ *PreserveJobFiles' {conf}; then "
-        f"sed -i -E 's/^ *PreserveJobFiles.*/PreserveJobFiles No/I' {conf}; "
-        f"else printf '\\nPreserveJobFiles No\\n' >> {conf}; fi"
+def _restart_cups() -> tuple[bool, str]:  # pragma: no cover
+    """Restart CUPS via whatever init this host has. Returns (ok, how)."""
+    if shutil.which("systemctl"):
+        rc = subprocess.run(["sudo", "-n", "systemctl", "restart", "cups"], check=False)
+        if rc.returncode == 0:
+            return True, "systemctl"
+    if shutil.which("service"):
+        rc = subprocess.run(["sudo", "-n", "service", "cups", "restart"], check=False)
+        if rc.returncode == 0:
+            return True, "service"
+    return False, "no working init command"
+
+
+def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
+    """Set PreserveJobFiles No and restart CUPS. Returns (ok, detail).
+
+    The path is passed as an argument, never interpolated into a shell string:
+    this runs under sudo, and a conf path containing shell metacharacters would
+    otherwise execute as root.
+    """
+    read = subprocess.run(["sudo", "-n", "cat", conf], capture_output=True, text=True, check=False)
+    if read.returncode != 0:
+        return False, f"could not read {conf}"
+
+    lines = read.stdout.splitlines()
+    out, replaced = [], False
+    for line in lines:
+        if re.match(r"^\s*PreserveJobFiles\b", line, re.IGNORECASE):
+            out.append("PreserveJobFiles No")
+            replaced = True
+        else:
+            out.append(line)
+    if not replaced:
+        out.append("PreserveJobFiles No")
+    body = "\n".join(out) + "\n"
+
+    write = subprocess.run(
+        ["sudo", "-n", "tee", conf], input=body, capture_output=True, text=True, check=False
     )
-    if subprocess.run(["sudo", "sh", "-c", script], check=False).returncode != 0:
-        return False
-    subprocess.run(["sudo", "systemctl", "restart", "cups"], check=False)
-    check = subprocess.run(
-        ["sudo", "grep", "-iE", "^PreserveJobFiles", conf],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return "no" in check.stdout.lower()
+    if write.returncode != 0:
+        return False, f"could not write {conf}"
+
+    ok, how = _restart_cups()
+    if not ok:
+        return False, (
+            f"config updated but CUPS was NOT restarted ({how}). "
+            "The running daemon still has the old setting."
+        )
+
+    verify = subprocess.run(["sudo", "-n", "cat", conf], capture_output=True, text=True, check=False)
+    for line in verify.stdout.splitlines():
+        if re.match(r"^\s*PreserveJobFiles\s+No\b", line, re.IGNORECASE):
+            return True, f"restarted via {how}"
+    return False, "config did not contain PreserveJobFiles No after writing"
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("jobs", nargs="*", type=int, help="job ids to highlight")
-    ap.add_argument("--purge", action="store_true", help="delete every retained document")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("jobs", nargs="*", type=int, help="job ids to highlight or purge")
+    ap.add_argument("--purge", action="store_true", help="delete retained files")
     ap.add_argument("--fix", action="store_true", help="stop CUPS retaining documents")
+    ap.add_argument(
+        "--include-control",
+        action="store_true",
+        help="also count/remove c<job> control files, which carry job titles",
+    )
     ap.add_argument("--spool", default=DEFAULT_SPOOL, help=f"spool directory (default {DEFAULT_SPOOL})")
     ap.add_argument("--conf", default=DEFAULT_CONF, help=f"cupsd.conf path (default {DEFAULT_CONF})")
     args = ap.parse_args(argv)
 
+    # --fix and --purge are independent and both may be requested. Returning
+    # after --fix silently dropped the purge and still exited 0.
     if args.fix:
-        ok = disable_retention(args.conf)
-        print("PreserveJobFiles set to No; cups restarted." if ok else "FAILED to change CUPS config.")
-        print("Existing documents are untouched. Run --purge to clear them.")
-        return 0 if ok else 1
+        ok, detail = disable_retention(args.conf)
+        print(f"PreserveJobFiles set to No; {detail}." if ok else f"FAILED: {detail}")
+        if not ok:
+            return 1
+        if not args.purge:
+            print("Existing files are untouched. Run --purge to clear them.")
+            return 0
 
-    names = read_spool(args.spool)
-    if names is None:
-        for line in render(Audit(Verdict.UNREADABLE, (), ()), frozenset()):
+    jobs = frozenset(args.jobs)
+    audit = classify(read_spool(args.spool), jobs, args.include_control)
+
+    if not audit.readable:
+        for line in render(audit, jobs):
             print(line)
         return 2
 
-    jobs = frozenset(args.jobs)
-    audit = classify(names, jobs)
-
     if args.purge:
-        victims = audit.targeted + audit.others
+        victims = victims_for(audit)
         if not victims:
             print("Nothing to purge.")
             return 0
-        print(f"Deleting {len(victims)} retained document file(s)...")
-        delete(args.spool, victims)
-        after = read_spool(args.spool)
-        if after is None:
-            print("Deleted, but the spool could not be re-read to confirm.")
+        scope = f"job(s) {', '.join(str(j) for j in sorted(jobs))}" if jobs else "all retained files"
+        print(f"Deleting {len(victims)} file(s) [{scope}]...")
+        deleted, failed = delete(args.spool, victims)
+        if failed:
+            print(f"DELETE FAILED for {failed} file(s); {deleted} removed.")
+            print("This is a permissions problem, not files being recreated.")
+            return 1
+        after = classify(read_spool(args.spool), jobs, args.include_control)
+        if not after.readable:
+            print(f"{deleted} removed, but the spool could not be re-read to confirm.")
             return 2
-        left = classify(after, jobs).total
-        print(f"Remaining document files: {left}")
-        print("SPOOL CLEAN." if left == 0 else "STILL PRESENT -- something is recreating them.")
-        return 0 if left == 0 else 1
+        remaining = len(victims_for(after))
+        print(f"{deleted} removed. Remaining in scope: {remaining}")
+        print("SCOPE CLEAN." if remaining == 0 else "STILL PRESENT after a successful delete.")
+        return 0 if remaining == 0 else 1
 
     for line in render(audit, jobs):
         print(line)
-    return 0 if audit.verdict is Verdict.CLEAN else 1
+    return audit.exit_code
 
 
 if __name__ == "__main__":
