@@ -16,6 +16,7 @@ Exit codes:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -86,6 +87,18 @@ def run_ruff(target: str) -> dict:
     return {"tool": "ruff", "status": _status(issues), "issues": issues}
 
 
+# mypy prints "file:line: severity: message [code]", optionally with a column,
+# and on Windows the path carries a drive letter. The previous parser split on
+# ":" with maxsplit=3, which put the severity in one field and then searched a
+# different field for it. It therefore classified EVERY error as a note and
+# dropped it: check.py reported "mypy pass" on a file mypy was failing.
+# Verified 2026-08-12 against a deliberate type error.
+_MYPY_LINE = re.compile(
+    r"^(?P<file>(?:[A-Za-z]:)?[^:]+):(?P<line>\d+):(?:(?P<col>\d+):)?\s*"
+    r"(?P<sev>error|warning|note):\s*(?P<msg>.*)$"
+)
+
+
 def run_mypy(target: str) -> dict:
     if not shutil.which("mypy"):
         return _tool_missing("mypy")
@@ -96,38 +109,27 @@ def run_mypy(target: str) -> dict:
     )
     issues = []
     for line in result.stdout.splitlines():
-        parts = line.split(":", 3)
-        if len(parts) < 3:
+        m = _MYPY_LINE.match(line)
+        if not m:
             continue
-        try:
-            line_num = int(parts[1].strip())
-        except ValueError:
-            continue
-        rest = (parts[3] if len(parts) > 3 else parts[2]).strip()
-        severity = "note"
-        for sev in ("error", "warning", "note"):
-            if f"{sev}:" in rest:
-                severity = sev
-                break
-        rule, msg = "", rest
-        if rest.endswith("]") and "[" in rest:
-            b = rest.rfind("[")
-            rule = rest[b + 1:-1]
-            msg  = rest[:b].strip()
-        for prefix in ("error: ", "warning: ", "note: "):
-            if msg.startswith(prefix):
-                msg = msg[len(prefix):]
-                break
+        severity = m.group("sev")
         if severity == "note":
-            continue  # skip context notes, not actionable
+            continue  # context lines, not actionable on their own
+        msg = m.group("msg").strip()
+        rule = ""
+        if msg.endswith("]") and "[" in msg:
+            b = msg.rfind("[")
+            rule = msg[b + 1:-1]
+            msg  = msg[:b].strip()
         issues.append({
-            "file":     parts[0].strip(),
-            "line":     line_num,
-            "col":      0,
+            "file":     m.group("file"),
+            "line":     int(m.group("line")),
+            "col":      int(m.group("col") or 0),
             "severity": severity,
             "rule":     f"mypy:{rule}" if rule else "mypy",
             "message":  msg,
             "fixable":  False,
+            "fixable_unsafe": False,
         })
     return {"tool": "mypy", "status": _status(issues, result.returncode), "issues": issues}
 
@@ -469,8 +471,13 @@ def run_composer_audit(target: str) -> dict:
         cmd = [composer, "audit", "--format=json"]
     elif php:
         cmd = [php, composer or "composer", "audit", "--format=json"]
-    else:
+    elif composer:
         cmd = [composer, "audit", "--format=json"]
+    else:
+        # Neither a usable composer nor php. The old final branch put `composer`
+        # in the list regardless, and it is None on exactly this path, so
+        # subprocess.run raised TypeError instead of reporting a missing tool.
+        return _tool_missing("composer (and no php to run it with)")
     result = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=work_dir)
     issues = []
     try:
@@ -515,10 +522,16 @@ _EXT_TO_LANG = {
     ".css":  "css", ".scss": "css", ".less": "css",
     ".html": "html", ".htm": "html",
     ".php":  "php",
+    # C/C++ and Arduino. .ino is a C++ sketch; the extension is the only thing
+    # that differs, and it was the gap that made this toolbox look inapplicable
+    # to an embedded project.
+    ".c":    "cpp", ".h":   "cpp", ".cpp": "cpp",
+    ".hpp":  "cpp", ".cc":  "cpp", ".ino": "cpp",
 }
 
 # Directories to skip when scanning
-_SKIP_DIRS = {"node_modules", "vendor", "__pycache__", ".git", ".venv", "venv", "dist", "build"}
+_SKIP_DIRS = {"node_modules", "vendor", "__pycache__", ".git", ".venv", "venv",
+              "dist", "build", ".mypy_cache", ".ruff_cache", ".pytest_cache"}
 
 
 def _detect_lang(target: str) -> str:
@@ -528,19 +541,109 @@ def _detect_lang(target: str) -> str:
     return "unknown"
 
 
-def _collect_files(directory: str) -> dict[str, list[str]]:
-    """Scan a directory and group files by language. Returns {lang: [filepaths]}."""
+# Extensions that are not source and are uninteresting to report as skipped.
+_UNREMARKABLE = {
+    ".md", ".txt", ".json", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".lock",
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".pdf", ".zip", ".gz",
+    ".csv", ".tsv", ".log", ".xml", ".sql", ".neon", ".db", "",
+}
+
+
+def _collect_files(directory: str) -> tuple[dict[str, list[str]], dict[str, int]]:
+    """Scan a directory, grouping files by language.
+
+    Also returns a count of source-looking extensions that no tool covers.
+    Silently omitting them is how this toolbox came to look inapplicable to an
+    embedded project: pointed at a repo of one .py, one .ino and one .h, it
+    reported on the .py and said nothing whatsoever about the other two, which
+    reads as "the tool does nothing" rather than "the tool does not cover this".
+    """
     groups: dict[str, list[str]] = {}
+    skipped: dict[str, int] = {}
     for root, dirs, files in os.walk(directory):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
         for f in files:
-            lang = _EXT_TO_LANG.get(Path(f).suffix.lower())
+            ext = Path(f).suffix.lower()
+            lang = _EXT_TO_LANG.get(ext)
             if lang:
                 groups.setdefault(lang, []).append(str(Path(root) / f))
-    return groups
+            elif ext not in _UNREMARKABLE:
+                skipped[ext] = skipped.get(ext, 0) + 1
+    return groups, skipped
+
+
+# Arduino sketches use ArduinoJson's `variant | fallback` operator, which reads
+# as a bitwise-or on an integer unless the analyser can see the overload. It
+# cannot: cppcheck's preprocessor fails on ArduinoJson's version-namespace
+# macros with "Invalid ## usage", and a failed parse yields an EMPTY report that
+# looks exactly like a clean one. Measured 2026-08-12 on cam2135/CYD-Deck:
+# without the header, cppcheck flagged 8 false badBitmaskCheck but did catch an
+# injected out-of-bounds write and buffer overflow; with the header it caught
+# nothing at all, injected bugs included.
+#
+# So the headers are deliberately NOT supplied, and this one rule is suppressed
+# for sketches instead. Do not "improve" this by adding -I paths: that silently
+# disables the whole analysis. g++ parses the same header fine, so this is a
+# cppcheck limitation, not a property of the code.
+_INO_SUPPRESS = ["badBitmaskCheck"]
+
+_CPPCHECK_SUPPRESS = [
+    "missingInclude",        # Arduino core headers are not present by design
+    "missingIncludeSystem",
+    "toomanyconfigs",        # informational, not a finding
+    "unusedFunction",        # setup()/loop() and ISRs are called by the core
+]
+
+
+def run_cppcheck(target: str) -> dict:
+    """Static analysis for C/C++ and Arduino sketches.
+
+    This is the linter slot, not the strongest check available. For firmware the
+    real gate is a compile against the actual toolchain (`arduino-cli compile`),
+    which resolves library overloads properly. cppcheck is what runs anywhere
+    without hundreds of megabytes of board support installed.
+    """
+    if not shutil.which("cppcheck"):
+        return _tool_missing("cppcheck (apt install cppcheck)")
+    suppress = list(_CPPCHECK_SUPPRESS)
+    lang_args = []
+    if Path(target).suffix.lower() == ".ino":
+        suppress += _INO_SUPPRESS
+        # Required, not cosmetic: cppcheck does not know the .ino extension, and
+        # without this it reports a syntaxError at the first sketch construct and
+        # analyses nothing. Measured. Not forced for .c/.cpp/.h, where cppcheck
+        # infers correctly and forcing C++ on a C file would be wrong.
+        lang_args = ["--language=c++"]
+    args = [
+        "cppcheck", *lang_args, "--enable=warning,style,performance,portability",
+        "--inline-suppr", "--quiet",
+        "--template={file}|{line}|{column}|{severity}|{id}|{message}",
+        *[f"--suppress={s}" for s in suppress],
+        target,
+    ]
+    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    issues = []
+    # cppcheck writes findings to stderr, not stdout.
+    for line in result.stderr.splitlines():
+        parts = line.split("|", 5)
+        if len(parts) < 6:
+            continue
+        fname, lineno, col, severity, rule, message = parts
+        issues.append({
+            "file":     fname,
+            "line":     int(lineno) if lineno.isdigit() else 0,
+            "col":      int(col) if col.isdigit() else 0,
+            "severity": "error" if severity in ("error", "warning") else "warning",
+            "rule":     rule,
+            "message":  message,
+            "fixable":  False,
+            "fixable_unsafe": False,
+        })
+    return {"tool": "cppcheck", "status": _status(issues), "issues": issues}
 
 
 TOOL_RUNNERS = {
+    "cppcheck":       run_cppcheck,
     "ruff":           run_ruff,
     "mypy":           run_mypy,
     "eslint":         run_eslint,
@@ -560,6 +663,7 @@ DEFAULT_TOOLS = {
     "css":    ["stylelint", "prettier"],
     "html":   ["eslint", "stylelint", "prettier"],
     "php":    ["phpstan", "phpcs", "rector"],
+    "cpp":    ["cppcheck"],
 }
 
 AUDIT_TOOLS = {
@@ -571,6 +675,8 @@ AUDIT_TOOLS = {
 # Tools that accept directories natively (pass the dir, not individual files)
 _DIR_CAPABLE = {"ruff", "mypy", "phpstan", "phpcs", "rector",
                 "pip-audit", "npm-audit", "composer-audit"}
+# cppcheck is deliberately not in _DIR_CAPABLE: the .ino suppression is decided
+# per file, and passing a directory would apply sketch rules to every .cpp.
 
 
 def _run_tools(tool_names: list[str], target: str) -> list[dict]:
@@ -650,7 +756,7 @@ def main():
         sys.exit(1 if output["summary"]["errors"] > 0 else 0)
 
     # ── Directory: scan, group by language, run appropriate tools ─────────
-    groups = _collect_files(target)
+    groups, skipped = _collect_files(target)
     if not groups:
         print(json.dumps({"error": f"No recognized source files in: {target}"}))
         sys.exit(2)
@@ -699,6 +805,10 @@ def main():
         "target":     target,
         "mode":       "multi-language",
         "languages":  lang_sections,
+        # Reported even when empty, so "nothing was skipped" is a stated result
+        # rather than an absence the reader has to infer.
+        "skipped":    [{"extension": e, "file_count": n}
+                       for e, n in sorted(skipped.items(), key=lambda kv: -kv[1])],
         "checks":     all_checks,
         "summary":    _summarize(all_checks),
     }
