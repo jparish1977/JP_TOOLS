@@ -46,12 +46,11 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import List, Tuple
 
 LISTING = re.compile(r"^\s*(\d+)\s+\w+\s+\d+\s+[\d:]+\s+\d{4}\s+(.*)$")
 
 
-def as_root(cmd: List[str]) -> List[str]:
+def as_root(cmd: list[str]) -> list[str]:
     """Prefix with sudo unless we already are root.
 
     Reading a block device needs privilege, but the *script* does not: elevating
@@ -63,7 +62,7 @@ def as_root(cmd: List[str]) -> List[str]:
     return ["sudo", "-n"] + cmd
 
 
-def listdir(device: str, path: str, timeout: int) -> List[Tuple[int, str, bool]]:
+def listdir(device: str, path: str, timeout: int) -> list[tuple[int, str, bool]]:
     """One directory as (size, name, is_dir).
 
     `-F` (classify) appends "/" to directory names. Without it a directory and a
@@ -79,7 +78,7 @@ def listdir(device: str, path: str, timeout: int) -> List[Tuple[int, str, bool]]
             capture_output=True, text=True, timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
-        print("  ! timed out listing %s" % path, file=sys.stderr)
+        print(f"  ! timed out listing {path}", file=sys.stderr)
         return []
     rows = []
     for line in result.stdout.splitlines():
@@ -97,9 +96,9 @@ def listdir(device: str, path: str, timeout: int) -> List[Tuple[int, str, bool]]
 
 
 def collect(device: str, path: str, depth: int, maxdepth: int,
-            timeout: int, minsize: int) -> List[Tuple[str, int]]:
+            timeout: int, minsize: int) -> list[tuple[str, int]]:
     """Every file at or under path, as (full path, size)."""
-    found: List[Tuple[str, int]] = []
+    found: list[tuple[str, int]] = []
     for size, name, is_dir in listdir(device, path, timeout):
         child = path.rstrip("/") + "/" + name
         if is_dir:
@@ -141,12 +140,12 @@ def extract(device: str, src: str, dest: str, size: int, timeout: int) -> bool:
                 stdout=handle, stderr=subprocess.PIPE, timeout=timeout, check=False,
             )
     except subprocess.TimeoutExpired:
-        print("  ! timeout: %s" % src, file=sys.stderr)
+        print(f"  ! timeout: {src}", file=sys.stderr)
         _unlink(part)
         return False
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", "replace").strip().splitlines()
-        print("  ! failed: %s -- %s" % (src, detail[-1] if detail else "unknown"),
+        print("  ! failed: {} -- {}".format(src, detail[-1] if detail else "unknown"),
               file=sys.stderr)
         _unlink(part)
         return False
@@ -185,13 +184,13 @@ def main() -> int:
 
     for tool in ("ntfsls", "ntfscat"):
         if shutil.which(tool) is None:
-            print("%s not found -- install the ntfs-3g package" % tool, file=sys.stderr)
+            print(f"{tool} not found -- install the ntfs-3g package", file=sys.stderr)
             return 1
 
-    print("enumerating %s ..." % args.path)
+    print(f"enumerating {args.path} ...")
     files = collect(args.device, args.path, 0, args.depth, 60, args.min_size)
     if not files:
-        print("nothing found at %s" % args.path, file=sys.stderr)
+        print(f"nothing found at {args.path}", file=sys.stderr)
         return 1
     total = sum(size for _, size in files)
     print("  %d files, %.1f GB" % (len(files), total / 1e9))
@@ -199,7 +198,7 @@ def main() -> int:
     base = args.path.rstrip("/")
     if args.dry_run:
         for src, size in files[:20]:
-            print("  %10.1f MB  %s" % (size / 1e6, src))
+            print(f"  {size / 1e6:10.1f} MB  {src}")
         if len(files) > 20:
             print("  ... and %d more" % (len(files) - 20))
         print("dry run -- nothing written")

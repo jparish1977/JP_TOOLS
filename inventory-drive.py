@@ -34,7 +34,7 @@ import os
 import re
 import sys
 import time
-from typing import Set, TextIO
+from typing import TextIO
 
 WIN_DRIVE = re.compile(r"^([A-Za-z]):[\\/]?$")
 
@@ -50,9 +50,9 @@ def win_to_wsl_path(win_path: str) -> str:
     return win_path
 
 
-def already_recorded(path: str) -> Set[str]:
+def already_recorded(path: str) -> set[str]:
     """Top-level directories present in an existing inventory."""
-    tops: Set[str] = set()
+    tops: set[str] = set()
     if not os.path.exists(path):
         return tops
     with open(path, encoding="utf-8", errors="replace") as handle:
@@ -104,14 +104,14 @@ def main() -> int:
 
     root = win_to_wsl_path(args.mountpoint).rstrip("/")
     if not os.path.isdir(root):
-        print("not a directory: %s" % root, file=sys.stderr)
+        print(f"not a directory: {root}", file=sys.stderr)
         return 1
 
     if args.rescan and os.path.exists(args.output):
         os.unlink(args.output)
     done = already_recorded(args.output)
     if done:
-        print("resuming -- already recorded: %s" % ", ".join(sorted(done)))
+        print("resuming -- already recorded: {}".format(", ".join(sorted(done))))
 
     try:
         entries = sorted(
@@ -119,7 +119,7 @@ def main() -> int:
             if not e.startswith("$") and e != "System Volume Information"
         )
     except OSError as exc:
-        print("cannot read %s: %s" % (root, exc), file=sys.stderr)
+        print(f"cannot read {root}: {exc}", file=sys.stderr)
         return 1
     if args.subdirs:
         entries = [e for e in entries if e in args.subdirs]

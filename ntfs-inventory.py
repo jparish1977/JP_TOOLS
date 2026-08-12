@@ -39,7 +39,7 @@ def listdir(path):
         r = subprocess.run(as_root(["ntfsls", "-l", "-F", "-p", path, DEV]),
                            capture_output=True, text=True, timeout=90, check=False)
     except subprocess.TimeoutExpired:
-        print("  ! timeout: %s" % path, file=sys.stderr)
+        print(f"  ! timeout: {path}", file=sys.stderr)
         return []
     rows = []
     for line in r.stdout.splitlines():
@@ -85,23 +85,23 @@ if os.path.exists(OUT):
         if not line.startswith("#"):
             done.add(line.split("\t")[0].lstrip("/").split("/", 1)[0])
     if done:
-        print("resuming -- done: %s" % ", ".join(sorted(done)))
+        print("resuming -- done: {}".format(", ".join(sorted(done))))
 
-tops = [(s, n) for s, n in listdir("/")
+tops = [(s, n, d) for s, n, d in listdir("/")
         if not n.startswith("$") and n != "System Volume Information"]
 if ONLY:
-    tops = [(s, n) for s, n in tops if n in ONLY]
+    tops = [(s, n, d) for s, n, d in tops if n in ONLY]
 
 with open(OUT, "a", encoding="utf-8") as out:
     if not done:
         out.write("#path\tsize\n")
-    for size, name in tops:
+    for size, name, is_dir in tops:
         if name in done:
             continue
-        if size:
+        if not is_dir:
             out.write("/%s\t%d\n" % (name, size))
             print("  %-24s %7d files %8.1f GB" % (name, 1, size / 1e9))
             continue
         n, b = walk("/" + name, out)
         print("  %-24s %7d files %8.1f GB" % (name[:24], n, b / 1e9))
-print("wrote %s" % OUT)
+print(f"wrote {OUT}")
