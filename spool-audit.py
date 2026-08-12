@@ -285,10 +285,21 @@ def _priv(argv: list[str]) -> list[str]:  # pragma: no cover
     return argv
 
 
-def _sudo_ls(path: str) -> tuple[Verdict, tuple[str, ...]]:  # pragma: no cover
-    proc = subprocess.run(
-        _priv(["ls", "-1", path]), capture_output=True, text=True, check=False
+def _sudo_ls(path: str, files_only: bool = False) -> tuple[Verdict, tuple[str, ...]]:  # pragma: no cover
+    """List a directory, optionally regular files only.
+
+    `files_only` matters: the direct-read path filters with `p.is_file()`, so
+    without the same filter here the two paths disagree about the same spool.
+    Measured 2026-08-12 -- a real filter chain creates `tmp/.cache`, a
+    DIRECTORY, which `ls -1` would have reported as leaked document content
+    whenever the tool escalated through sudo rather than running as root.
+    """
+    argv = (
+        ["find", path, "-maxdepth", "1", "-type", "f", "-printf", "%f\n"]
+        if files_only
+        else ["ls", "-1", path]
     )
+    proc = subprocess.run(_priv(argv), capture_output=True, text=True, check=False)
     if proc.returncode == 0:
         return Verdict.CLEAN, tuple(line for line in proc.stdout.splitlines() if line)
     if "No such file" in proc.stderr:
@@ -319,7 +330,7 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
         try:
             temp = tuple(sorted(p.name for p in tdir.iterdir() if p.is_file()))
         except PermissionError:
-            tverdict, temp = _sudo_ls(str(tdir))
+            tverdict, temp = _sudo_ls(str(tdir), files_only=True)
             if tverdict is not Verdict.CLEAN:
                 temp = ()
         except OSError:
