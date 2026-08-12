@@ -606,10 +606,16 @@ def run_cppcheck(target: str) -> dict:
     if not shutil.which("cppcheck"):
         return _tool_missing("cppcheck (apt install cppcheck)")
     suppress = list(_CPPCHECK_SUPPRESS)
+    lang_args = []
     if Path(target).suffix.lower() == ".ino":
         suppress += _INO_SUPPRESS
+        # Required, not cosmetic: cppcheck does not know the .ino extension, and
+        # without this it reports a syntaxError at the first sketch construct and
+        # analyses nothing. Measured. Not forced for .c/.cpp/.h, where cppcheck
+        # infers correctly and forcing C++ on a C file would be wrong.
+        lang_args = ["--language=c++"]
     args = [
-        "cppcheck", "--language=c++", "--enable=warning,style,performance,portability",
+        "cppcheck", *lang_args, "--enable=warning,style,performance,portability",
         "--inline-suppr", "--quiet",
         "--template={file}|{line}|{column}|{severity}|{id}|{message}",
         *[f"--suppress={s}" for s in suppress],
