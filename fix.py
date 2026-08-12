@@ -14,6 +14,11 @@ import shutil
 import subprocess
 from pathlib import Path
 
+# One definition of where ruff's config comes from. check.py is import-safe
+# (its argparse sits behind a main guard), so this defers to it rather than
+# keeping a second copy that can drift out of step.
+from check import _ruff_config_args
+
 _EXTRA_PATHS = [
     Path(os.environ.get("APPDATA", "")) / "npm",
     Path("C:/Program Files/nodejs"),
@@ -24,16 +29,41 @@ os.environ["PATH"] = os.pathsep.join(
 )
 
 
-def fix_ruff(target: str, dry_run: bool) -> dict:
+
+def _ruff_count(target: str) -> int:
+    """How many diagnostics ruff reports right now."""
+    out = subprocess.run(
+        ["ruff", "check", *_ruff_config_args(target), "--output-format", "json", target],
+        capture_output=True, text=True, check=False,
+    ).stdout
+    try:
+        return len(json.loads(out)) if out.strip() else 0
+    except json.JSONDecodeError:
+        return 0
+
+
+def fix_ruff(target: str, dry_run: bool, unsafe: bool = False, **_: object) -> dict:
+    """Apply ruff's fixes.
+
+    `ruff check --fix` applies *safe* fixes only. Most of what accumulates in
+    practice is classed unsafe (a rewrite that could change behaviour, such as
+    percent-format to f-string) or displayonly (never auto-applied). Without
+    --unsafe this reports 0 fixed on files check.py describes as fixable, which
+    is the tool disagreeing with its own report rather than a no-op.
+    """
     if not shutil.which("ruff"):
         return {"tool": "ruff", "status": "unavailable", "fixed": 0, "remaining": []}
-    args = ["ruff", "check", "--fix"]
+    before = _ruff_count(target)
+    args = ["ruff", "check", *_ruff_config_args(target), "--fix"]
+    if unsafe:
+        args.append("--unsafe-fixes")
     if dry_run:
         args.append("--diff")
-    subprocess.run(args + [target], capture_output=True, text=True, check=False)
+    subprocess.run([*args, target], capture_output=True, text=True, check=False)
     # After fix, re-check to find what remains
     recheck = subprocess.run(
-        ["ruff", "check", "--output-format", "json", target],
+        ["ruff", "check", *_ruff_config_args(target),
+         "--output-format", "json", target],
         capture_output=True, text=True, check=False,
     )
     try:
@@ -43,7 +73,9 @@ def fix_ruff(target: str, dry_run: bool) -> dict:
     return {
         "tool":      "ruff",
         "status":    "dry-run" if dry_run else "fixed",
-        "fixed":     "?" if dry_run else "auto",
+        # A real number. This used to say "auto", which was not checkable.
+        "fixed":     0 if dry_run else max(0, before - len(remaining)),
+        "unsafe":    unsafe,
         "remaining": [
             {"file": i.get("filename"), "line": i.get("location", {}).get("row"),
              "rule": i.get("code"), "message": i.get("message")}
@@ -52,7 +84,7 @@ def fix_ruff(target: str, dry_run: bool) -> dict:
     }
 
 
-def fix_prettier(target: str, dry_run: bool) -> dict:
+def fix_prettier(target: str, dry_run: bool, **_: object) -> dict:
     local_bin = Path(__file__).parent / "node_modules" / ".bin"
     cmd = (
         str(local_bin / "prettier.cmd") if (local_bin / "prettier.cmd").exists() else
@@ -90,7 +122,7 @@ def _php_cmd() -> str | None:
     return shutil.which("php") or shutil.which("php.exe")
 
 
-def fix_phpcs(target: str, dry_run: bool) -> dict:
+def fix_phpcs(target: str, dry_run: bool, **_: object) -> dict:
     php  = _php_cmd()
     bin_ = _php_bin("phpcbf")
     if not php:
@@ -117,12 +149,12 @@ def fix_phpcs(target: str, dry_run: bool) -> dict:
             except (json.JSONDecodeError, TypeError):
                 pass
         return {"tool": "phpcbf", "status": "dry-run", "would_fix": "?"}
-    result = subprocess.run(args + [target], capture_output=True, text=True, check=False)
+    result = subprocess.run([*args, target], capture_output=True, text=True, check=False)
     return {"tool": "phpcbf", "status": "fixed" if result.returncode in (0, 1) else "error",
             "output": result.stdout.strip()}
 
 
-def fix_rector(target: str, dry_run: bool) -> dict:
+def fix_rector(target: str, dry_run: bool, **_: object) -> dict:
     php  = _php_cmd()
     bin_ = _php_bin("rector")
     if not php:
@@ -136,7 +168,7 @@ def fix_rector(target: str, dry_run: bool) -> dict:
         args += [f"--config={cfg}"]
     if dry_run:
         args.append("--dry-run")
-    result = subprocess.run(args + [target], capture_output=True, text=True, check=False)
+    result = subprocess.run([*args, target], capture_output=True, text=True, check=False)
     try:
         data = json.loads(result.stdout)
         changed = data.get("changed_files", [])
@@ -183,6 +215,9 @@ def main():
     parser.add_argument("--lang",    choices=["python", "js", "css", "php", "auto"], default="auto")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would change without writing files")
+    parser.add_argument("--unsafe",  action="store_true",
+                        help="also apply ruff's unsafe fixes; these can change "
+                             "behaviour, so review the diff")
     parser.add_argument("--pretty",  action="store_true")
     args = parser.parse_args()
 
@@ -190,7 +225,7 @@ def main():
     lang   = args.lang if args.lang != "auto" else _detect_lang(target)
     fixers = FIXERS.get(lang, [])
 
-    results = [fn(target, args.dry_run) for _, fn in fixers]
+    results = [fn(target, args.dry_run, unsafe=args.unsafe) for _, fn in fixers]
     print(json.dumps({"target": target, "language": lang, "results": results},
                      indent=2 if args.pretty else None))
 
