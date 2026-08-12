@@ -14,6 +14,7 @@ from pathlib import Path
 
 TOOLS_DIR = Path(__file__).resolve().parent
 CHECK_PY  = TOOLS_DIR / "check.py"
+METHODOLOGY_DOC = TOOLS_DIR / "METHODOLOGY.md"
 
 HOOK_MARKER = "# JP_TOOLS pre-commit hook"
 
@@ -89,6 +90,9 @@ def install(repo_path: Path):
     hook_file.chmod(0o755)
     print(f"Installed JP_TOOLS pre-commit hook at {hook_file}")
     print(f"Checks will run: python {CHECK_PY} .")
+    print()
+    print("This project now follows JP_TOOLS methodology.")
+    print(f"Read it: {METHODOLOGY_DOC}")
 
 
 def remove(repo_path: Path):
