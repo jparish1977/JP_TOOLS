@@ -204,7 +204,7 @@ def _detect_lang(target: str) -> str:
         php = len(list(p.rglob("*.php")))
         js  = sum(len(list(p.rglob(f"*{e}"))) for e in (".js", ".ts", ".jsx", ".tsx"))
         counts = {"python": py, "php": php, "js": js}
-        best = max(counts, key=counts.get)
+        best = max(counts, key=lambda name: counts[name])
         return best if counts[best] > 0 else "unknown"
     return "unknown"
 
