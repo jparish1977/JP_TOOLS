@@ -3,7 +3,10 @@
 # Or copy/symlink into a project as ruff.toml
 
 line-length = 100
-target-version = "py38"
+# Matches the CI runner (3.12). This said py38, which was wrong in a way
+# nothing could catch while the file went unused: check.py itself uses
+# `str | None`, which needs 3.10.
+target-version = "py312"
 
 [lint]
 select = [

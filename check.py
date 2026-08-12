@@ -37,11 +37,27 @@ os.environ["PYTHONUTF8"] = "1"
 
 # ── tool runners ──────────────────────────────────────────────────────────────
 
+def _ruff_config_args(target: str) -> list[str]:
+    """Point ruff at the JP_TOOLS defaults, unless the project has its own.
+
+    ruff already implements precedence when it discovers a config itself, so
+    passing --config on top of a project's own file would override the project
+    rather than defer to it. Supply the default only when there is nothing to
+    discover. Note a bare pyproject.toml counts: --config would fail on one
+    with no [tool.ruff] section, and ruff handles that case correctly alone.
+    """
+    if _find_project_config(target, ["ruff.toml", ".ruff.toml", "pyproject.toml"]):
+        return []
+    shared = Path(__file__).parent / "configs" / "ruff.toml"
+    return ["--config", str(shared)] if shared.exists() else []
+
+
 def run_ruff(target: str) -> dict:
     if not shutil.which("ruff"):
         return _tool_missing("ruff")
     result = subprocess.run(
-        ["ruff", "check", "--output-format", "json", target],
+        ["ruff", "check", *_ruff_config_args(target),
+         "--output-format", "json", target],
         capture_output=True, text=True, check=False,
     )
     try:
@@ -56,7 +72,14 @@ def run_ruff(target: str) -> dict:
             "severity": "error",
             "rule":     i.get("code", ""),
             "message":  i.get("message", ""),
-            "fixable":  i.get("fix") is not None,
+            # "fixable" means fix.py can apply it as invoked by default, which
+            # is `ruff check --fix`: safe fixes only. Counting every finding
+            # that carries a fix object overstated it badly -- on recover.py,
+            # 14 of 18 carried one while only 2 were safe, the rest being 3
+            # unsafe and 9 displayonly, which are never auto-applied at all.
+            "fixable":  (i.get("fix") or {}).get("applicability") == "safe",
+            "fixable_unsafe":
+                (i.get("fix") or {}).get("applicability") == "unsafe",
         }
         for i in raw
     ]
@@ -246,7 +269,7 @@ def run_phpstan(target: str) -> dict:
     args = [php, bin_, "analyse", "--error-format=json", "--no-progress"]
     if cfg.exists():
         args += ["-c", str(cfg)]
-    result = subprocess.run(args + [target], capture_output=True, text=True, check=False)
+    result = subprocess.run([*args, target], capture_output=True, text=True, check=False)
     issues = []
     try:
         data = json.loads(result.stdout)
@@ -281,7 +304,7 @@ def run_phpcs(target: str) -> dict:
     args = [php, bin_, "--report=json"]
     if cfg.exists():
         args += [f"--standard={cfg}"]
-    result = subprocess.run(args + [target], capture_output=True, text=True, check=False)
+    result = subprocess.run([*args, target], capture_output=True, text=True, check=False)
     issues = []
     try:
         data = json.loads(result.stdout)
@@ -317,7 +340,7 @@ def run_rector(target: str) -> dict:
     args = [php, bin_, "process", "--dry-run", "--output-format=json", "--no-progress-bar"]
     if cfg.exists():
         args += [f"--config={cfg}"]
-    result = subprocess.run(args + [target], capture_output=True, text=True, check=False)
+    result = subprocess.run([*args, target], capture_output=True, text=True, check=False)
     issues = []
     try:
         data = json.loads(result.stdout)
@@ -570,7 +593,11 @@ def _summarize(checks: list[dict]) -> dict:
         "total":    len(all_issues),
         "errors":   errors,
         "warnings": warnings,
+        # Split deliberately: "fixable" is what `fix.py` applies now, and
+        # "fixable_unsafe" is what `fix.py --unsafe` would additionally attempt.
+        # Reporting one combined number described work no tool would do.
         "fixable":  sum(1 for i in all_issues if i.get("fixable")),
+        "fixable_unsafe": sum(1 for i in all_issues if i.get("fixable_unsafe")),
     }
 
 
