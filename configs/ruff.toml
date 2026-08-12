@@ -20,12 +20,21 @@ select = [
     "C4",   # flake8-comprehensions
     "SIM",  # flake8-simplify
     "RUF",  # ruff-specific
+
+    # Chosen against what this codebase actually does, rather than inherited
+    # from whatever the installed ruff defaults to. Widened 2026-08-12 after
+    # measuring what the narrower list was dropping.
+    "DTZ",      # naive datetime — inventories and logs record mtimes
+    "EXE",      # shebang/executable-bit agreement — this repo is scripts
+    "ISC",      # implicit string concatenation
+    "BLE",      # blind except
+    "PLW1510",  # subprocess.run without an explicit check=
+    "S110",     # try/except/pass, which swallows the error entirely
 ]
 ignore = [
     "E501",   # line too long — handled by formatter, not linter
     "B008",   # do not perform function calls in default arguments (common in Tkinter/UI)
     "SIM108", # ternary operator — sometimes less readable
-    "UP007",  # use X | Y for union types — requires Python 3.10+
 ]
 
 [lint.per-file-ignores]
