@@ -36,7 +36,7 @@ def as_root(cmd):
 
 def listdir(path):
     try:
-        r = subprocess.run(as_root(["ntfsls", "-l", "-p", path, DEV]),
+        r = subprocess.run(as_root(["ntfsls", "-l", "-F", "-p", path, DEV]),
                            capture_output=True, text=True, timeout=90, check=False)
     except subprocess.TimeoutExpired:
         print("  ! timeout: %s" % path, file=sys.stderr)
@@ -44,19 +44,33 @@ def listdir(path):
     rows = []
     for line in r.stdout.splitlines():
         m = LISTING.match(line)
-        if m and m.group(2).strip() not in (".", ".."):
-            rows.append((int(m.group(1)), m.group(2).strip()))
+        if not m:
+            continue
+        name = m.group(2).strip()
+        is_dir = name.endswith("/")
+        if is_dir:
+            name = name[:-1]
+        if name in (".", ".."):
+            continue
+        rows.append((int(m.group(1)), name, is_dir))
     return rows
 
 
 def walk(path, out, depth=0, maxdepth=8):
     n = b = 0
-    for size, name in listdir(path):
+    for size, name, is_dir in listdir(path):
         child = path.rstrip("/") + "/" + name
-        if size == 0 and depth < maxdepth:
-            sn, sb = walk(child, out, depth + 1, maxdepth)
-            n += sn
-            b += sb
+        # -F marks directories. Branching on size alone recorded every empty
+        # file as a directory, and at the depth limit recorded every directory
+        # as a 0-byte file.
+        if is_dir:
+            if depth < maxdepth:
+                sn, sb = walk(child, out, depth + 1, maxdepth)
+                n += sn
+                b += sb
+            else:
+                print(f"  ! depth limit {maxdepth} reached, "
+                      f"not descending into {child}", file=sys.stderr)
         else:
             out.write("%s\t%d\n" % (child, size))
             n += 1

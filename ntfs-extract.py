@@ -63,11 +63,19 @@ def as_root(cmd: List[str]) -> List[str]:
     return ["sudo", "-n"] + cmd
 
 
-def listdir(device: str, path: str, timeout: int) -> List[Tuple[int, str]]:
-    """One directory as (size, name). Directories report size 0."""
+def listdir(device: str, path: str, timeout: int) -> List[Tuple[int, str, bool]]:
+    """One directory as (size, name, is_dir).
+
+    `-F` (classify) appends "/" to directory names. Without it a directory and a
+    zero-byte file are indistinguishable, because ntfsls reports size 0 for
+    both -- verified against a scratch NTFS image, where the `$Extend` directory
+    and the empty `$Secure` file both list as 0. Branching on size alone treated
+    every empty file as a directory, so empty files were silently never copied.
+    NTFS forbids "/" in a name, so the marker is unambiguous.
+    """
     try:
         result = subprocess.run(
-            as_root(["ntfsls", "-l", "-p", path, device]),
+            as_root(["ntfsls", "-l", "-F", "-p", path, device]),
             capture_output=True, text=True, timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
@@ -79,9 +87,12 @@ def listdir(device: str, path: str, timeout: int) -> List[Tuple[int, str]]:
         if not match:
             continue
         name = match.group(2).strip()
+        is_dir = name.endswith("/")
+        if is_dir:
+            name = name[:-1]
         if name in (".", ".."):
             continue
-        rows.append((int(match.group(1)), name))
+        rows.append((int(match.group(1)), name, is_dir))
     return rows
 
 
@@ -89,15 +100,33 @@ def collect(device: str, path: str, depth: int, maxdepth: int,
             timeout: int, minsize: int) -> List[Tuple[str, int]]:
     """Every file at or under path, as (full path, size)."""
     found: List[Tuple[str, int]] = []
-    for size, name in listdir(device, path, timeout):
+    for size, name, is_dir in listdir(device, path, timeout):
         child = path.rstrip("/") + "/" + name
-        if size == 0:
+        if is_dir:
             if depth < maxdepth:
                 found.extend(collect(device, child, depth + 1, maxdepth,
                                      timeout, minsize))
+            else:
+                # Say so. A silently truncated tree looks exactly like a
+                # complete one in the totals, which in a recovery means
+                # believing you have everything when you do not.
+                print(f"  ! depth limit {maxdepth} reached, "
+                      f"not descending into {child}", file=sys.stderr)
         elif size >= minsize:
             found.append((child, size))
     return found
+
+
+def within(root: str, candidate: str) -> bool:
+    """True if candidate resolves inside root.
+
+    Names come from a filesystem damaged enough that the kernel refuses to mount
+    it, and this may run as root. A ".." surviving into the relative path would
+    otherwise write outside the destination.
+    """
+    root_abs = os.path.abspath(root)
+    cand_abs = os.path.abspath(candidate)
+    return cand_abs == root_abs or cand_abs.startswith(root_abs + os.sep)
 
 
 def extract(device: str, src: str, dest: str, size: int, timeout: int) -> bool:
@@ -182,6 +211,10 @@ def main() -> int:
     for src, size in files:
         rel = src[len(base):].lstrip("/")
         dest = os.path.join(args.destination, rel)
+        if not within(args.destination, dest):
+            print(f"  ! refusing path outside destination: {src}", file=sys.stderr)
+            failed += 1
+            continue
         if os.path.exists(dest) and os.path.getsize(dest) == size:
             skipped += 1
             done_bytes += size
