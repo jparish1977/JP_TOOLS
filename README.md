@@ -88,6 +88,22 @@ files are fine and only the filesystem metadata is damaged. Inventory first,
 size what you might want, then copy. Comparing that inventory against drives you
 already own is usually what shrinks the job most.
 
+### System Hygiene (Python)
+
+| Script | Purpose |
+|---|---|
+| `spool-audit.py` | Audit and clear documents CUPS keeps after printing — `--fix` stops the retention, `--purge` clears what is there |
+
+Printing sends the whole document through CUPS, and CUPS may keep a copy after
+the job finishes. Print a password, a recovery sheet or a private key and that
+copy outlives the paper, on a machine that may not be yours. Written after
+exactly that happened on a shared household printer.
+
+It exists as a tool rather than a one-liner because the obvious one-liner
+reports danger as safety: `sudo ls /var/spool/cups | grep -E 'd0*85' || echo
+CLEAN` prints CLEAN when sudo fails, making a check that never ran
+indistinguishable from a clean result.
+
 ### Archive Management (Python)
 
 | Script | Purpose |
