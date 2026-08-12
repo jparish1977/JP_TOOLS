@@ -43,6 +43,7 @@ WHAT COUNTS AS A LEAK
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -253,7 +254,8 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
     if retention is True:
         lines.append("RETENTION: ON. CUPS is keeping documents. --fix stops that.")
     elif retention is False:
-        lines.append("RETENTION: OFF (PreserveJobFiles No). Anything below predates the fix.")
+        note = " Files listed above predate the fix." if audit.total else ""
+        lines.append(f"RETENTION: OFF (PreserveJobFiles No).{note}")
     else:
         lines.append("RETENTION: unknown (could not read cupsd.conf).")
 
@@ -269,9 +271,23 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
 # above stays testable without a printer, a spool or root.
 
 
+def _priv(argv: list[str]) -> list[str]:  # pragma: no cover
+    """Prefix with sudo only when we are not root AND sudo exists.
+
+    Unconditionally shelling out to sudo crashed with FileNotFoundError on any
+    system without it -- every container, every minimal image, and the case
+    where the tool is already running as root, which is how it is normally
+    used. Found by running real CUPS in a container on 2026-08-12; neither the
+    fixture nor the real machine could show it, because both had sudo.
+    """
+    if os.geteuid() != 0 and shutil.which("sudo"):
+        return ["sudo", "-n", *argv]
+    return argv
+
+
 def _sudo_ls(path: str) -> tuple[Verdict, tuple[str, ...]]:  # pragma: no cover
     proc = subprocess.run(
-        ["sudo", "-n", "ls", "-1", path], capture_output=True, text=True, check=False
+        _priv(["ls", "-1", path]), capture_output=True, text=True, check=False
     )
     if proc.returncode == 0:
         return Verdict.CLEAN, tuple(line for line in proc.stdout.splitlines() if line)
@@ -331,7 +347,7 @@ def delete(spool: str, entries: tuple[Entry, ...]) -> tuple[int, int]:  # pragma
             continue
         except PermissionError:
             pass
-        rc = subprocess.run(["sudo", "-n", "rm", "-f", str(target)], check=False).returncode
+        rc = subprocess.run(_priv(["rm", "-f", str(target)]), check=False).returncode
         if rc == 0 and not target.exists():
             deleted += 1
         else:
@@ -341,7 +357,7 @@ def delete(spool: str, entries: tuple[Entry, ...]) -> tuple[int, int]:  # pragma
 
 def retention_state(conf: str) -> bool | None:  # pragma: no cover
     """Is CUPS configured to keep job files? None if the config is unreadable."""
-    read = subprocess.run(["sudo", "-n", "cat", conf], capture_output=True, text=True, check=False)
+    read = subprocess.run(_priv(["cat", conf]), capture_output=True, text=True, check=False)
     if read.returncode != 0:
         return None
     for line in read.stdout.splitlines():
@@ -357,11 +373,11 @@ def retention_state(conf: str) -> bool | None:  # pragma: no cover
 def _restart_cups() -> tuple[bool, str]:  # pragma: no cover
     """Restart CUPS via whatever init this host has. Returns (ok, how)."""
     if shutil.which("systemctl"):
-        rc = subprocess.run(["sudo", "-n", "systemctl", "restart", "cups"], check=False)
+        rc = subprocess.run(_priv(["systemctl", "restart", "cups"]), check=False)
         if rc.returncode == 0:
             return True, "systemctl"
     if shutil.which("service"):
-        rc = subprocess.run(["sudo", "-n", "service", "cups", "restart"], check=False)
+        rc = subprocess.run(_priv(["service", "cups", "restart"]), check=False)
         if rc.returncode == 0:
             return True, "service"
     return False, "no working init command"
@@ -374,7 +390,7 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     this runs under sudo, and a conf path containing shell metacharacters would
     otherwise execute as root.
     """
-    read = subprocess.run(["sudo", "-n", "cat", conf], capture_output=True, text=True, check=False)
+    read = subprocess.run(_priv(["cat", conf]), capture_output=True, text=True, check=False)
     if read.returncode != 0:
         return False, f"could not read {conf}"
 
@@ -391,7 +407,7 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     body = "\n".join(out) + "\n"
 
     write = subprocess.run(
-        ["sudo", "-n", "tee", conf], input=body, capture_output=True, text=True, check=False
+        _priv(["tee", conf]), input=body, capture_output=True, text=True, check=False
     )
     if write.returncode != 0:
         return False, f"could not write {conf}"
@@ -403,7 +419,7 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
             "The running daemon still has the old setting."
         )
 
-    verify = subprocess.run(["sudo", "-n", "cat", conf], capture_output=True, text=True, check=False)
+    verify = subprocess.run(_priv(["cat", conf]), capture_output=True, text=True, check=False)
     for line in verify.stdout.splitlines():
         if re.match(r"^\s*PreserveJobFiles\s+No\b", line, re.IGNORECASE):
             return True, f"restarted via {how}"
