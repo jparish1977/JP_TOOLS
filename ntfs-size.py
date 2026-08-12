@@ -58,7 +58,7 @@ def listdir(device: str, path: str, timeout: int) -> List[Tuple[int, str]]:
     """One directory, as (size, name). Directories report size 0."""
     try:
         result = subprocess.run(
-            as_root(["ntfsls", "-l", "-p", path, device]),
+            as_root(["ntfsls", "-l", "-F", "-p", path, device]),
             capture_output=True, text=True, timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
@@ -70,9 +70,12 @@ def listdir(device: str, path: str, timeout: int) -> List[Tuple[int, str]]:
         if not match:
             continue
         name = match.group(2).strip()
+        is_dir = name.endswith("/")
+        if is_dir:
+            name = name[:-1]
         if name in (".", ".."):
             continue
-        rows.append((int(match.group(1)), name))
+        rows.append((int(match.group(1)), name, is_dir))
     return rows
 
 
@@ -81,15 +84,19 @@ def walk(device: str, path: str, depth: int, maxdepth: int,
     """Recursive size of one subtree. Returns (bytes, files)."""
     total = 0
     files = 0
-    for size, name in listdir(device, path, timeout):
+    for size, name, is_dir in listdir(device, path, timeout):
         child = path.rstrip("/") + "/" + name
-        # ntfsls reports 0 for directories; recurse until the depth limit, then
-        # stop rather than guessing -- an under-count is obvious, a wrong number
-        # is not.
-        if size == 0 and depth < maxdepth:
-            sub_total, sub_files = walk(device, child, depth + 1, maxdepth, timeout)
-            total += sub_total
-            files += sub_files
+        # -F marks directories, so an empty file is no longer mistaken for one.
+        # At the depth limit, stop and say so rather than counting the directory
+        # itself as a 0-byte file, which quietly under-counted the subtree.
+        if is_dir:
+            if depth < maxdepth:
+                sub_total, sub_files = walk(device, child, depth + 1, maxdepth, timeout)
+                total += sub_total
+                files += sub_files
+            else:
+                print(f"  ! depth limit {maxdepth} reached, "
+                      f"not descending into {child}", file=sys.stderr)
         else:
             total += size
             files += 1
