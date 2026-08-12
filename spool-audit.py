@@ -35,6 +35,9 @@ WHAT COUNTS AS A LEAK
                  title and submitting user, so a job named
                  "gpg-private-key.txt" is disclosure by itself. Counted only
                  with --include-control, and never removed without it.
+    tmp/cups-*   CUPS runtime files (lockfiles, notifier sockets). NOT content.
+                 Reported separately, never counted as a leak, never purged --
+                 deleting them removes a lock from under a running cupsd.
 """
 
 from __future__ import annotations
@@ -55,6 +58,14 @@ TEMP_SUBDIR = "tmp"
 DOCUMENT = re.compile(r"^d(\d+)-(\d+)$")
 CONTROL = re.compile(r"^c(\d+)$")
 
+# CUPS keeps its own runtime files in TempDir alongside spooled document data.
+# Measured on joe-Inspiron-17-7778, 2026-08-12: tmp/ held eight opaque document
+# temporaries and one `cups-dbus-notifier-lockfile`. Counting the lockfile as
+# leaked content inflates every total, and deleting it removes a lock from
+# under a running cupsd. Named artifacts are reported separately and are never
+# purged.
+ARTIFACT = re.compile(r"^cups-.*(lockfile|notifier|socket)$|^cups-dbus-")
+
 
 class Verdict(Enum):
     """Distinct outcomes. Collapsing any two of these is the bug this prevents."""
@@ -69,6 +80,7 @@ class Kind(Enum):
     DOCUMENT = "document"
     TEMP = "temp"
     CONTROL = "control"
+    ARTIFACT = "artifact"
 
 
 @dataclass(frozen=True)
@@ -97,6 +109,7 @@ class Audit:
     targeted: tuple[Entry, ...]
     others: tuple[Entry, ...]
     asked_for_jobs: bool = False
+    artifacts: tuple[Entry, ...] = ()
 
     @property
     def total(self) -> int:
@@ -155,13 +168,20 @@ def classify(
     # Temp files carry document content but no recoverable job id, so they can
     # never be "targeted" by job number. They still count as retained data.
     entries += [
-        Entry(name=f"{TEMP_SUBDIR}/{n}", kind=Kind.TEMP, job=None) for n in listing.temp
+        Entry(name=f"{TEMP_SUBDIR}/{n}", kind=Kind.TEMP, job=None)
+        for n in listing.temp
+        if not ARTIFACT.match(n)
     ]
+    artifacts = tuple(
+        Entry(name=f"{TEMP_SUBDIR}/{n}", kind=Kind.ARTIFACT, job=None)
+        for n in sorted(listing.temp)
+        if ARTIFACT.match(n)
+    )
 
     targeted = tuple(sorted((e for e in entries if e.job in jobs), key=lambda e: e.name))
     others = tuple(sorted((e for e in entries if e.job not in jobs), key=lambda e: e.name))
     verdict = Verdict.RETAINED if entries else Verdict.CLEAN
-    return Audit(verdict, targeted, others, asked_for_jobs=bool(jobs))
+    return Audit(verdict, targeted, others, asked_for_jobs=bool(jobs), artifacts=artifacts)
 
 
 def victims_for(audit: Audit) -> tuple[Entry, ...]:
@@ -174,8 +194,15 @@ def victims_for(audit: Audit) -> tuple[Entry, ...]:
     return audit.targeted if audit.asked_for_jobs else audit.targeted + audit.others
 
 
-def render(audit: Audit, jobs: frozenset[int]) -> list[str]:
-    """Format an Audit for a human. Returns lines; printing is the caller's job."""
+def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) -> list[str]:
+    """Format an Audit for a human. Returns lines; printing is the caller's job.
+
+    `retention` is whether CUPS is currently configured to keep documents, read
+    from cupsd.conf. It is deliberately a separate input: inferring it from
+    "are there files here" told Joe the host still retained data immediately
+    after a successful --fix had turned retention off, because leftover
+    documents from before the fix were still on disk.
+    """
     if audit.verdict is Verdict.DENIED:
         return [
             "COULD NOT READ THE SPOOL (permission denied).",
@@ -217,12 +244,21 @@ def render(audit: Audit, jobs: frozenset[int]) -> list[str]:
         lines.append("  document content but carry no job id, so they cannot be")
         lines.append("  targeted by job number. Purge without job ids to remove them.")
 
+    if audit.artifacts:
+        lines.append("")
+        lines.append(f"CUPS RUNTIME FILES (not document content, never purged): {len(audit.artifacts)}")
+        lines += [f"  {e.name}" for e in audit.artifacts]
+
     lines.append("")
+    if retention is True:
+        lines.append("RETENTION: ON. CUPS is keeping documents. --fix stops that.")
+    elif retention is False:
+        lines.append("RETENTION: OFF (PreserveJobFiles No). Anything below predates the fix.")
+    else:
+        lines.append("RETENTION: unknown (could not read cupsd.conf).")
+
     if audit.verdict is Verdict.RETAINED:
-        lines += [
-            "VERDICT: this host RETAINS printed data.",
-            "         --fix stops that permanently; --purge clears what is there.",
-        ]
+        lines.append(f"VERDICT: {audit.total} retained file(s) still on disk. --purge clears them.")
     else:
         lines.append("VERDICT: spool is clean.")
     return lines
@@ -301,6 +337,21 @@ def delete(spool: str, entries: tuple[Entry, ...]) -> tuple[int, int]:  # pragma
         else:
             failed += 1
     return deleted, failed
+
+
+def retention_state(conf: str) -> bool | None:  # pragma: no cover
+    """Is CUPS configured to keep job files? None if the config is unreadable."""
+    read = subprocess.run(["sudo", "-n", "cat", conf], capture_output=True, text=True, check=False)
+    if read.returncode != 0:
+        return None
+    for line in read.stdout.splitlines():
+        m = re.match(r"^\s*PreserveJobFiles\s+(\S+)", line, re.IGNORECASE)
+        if m:
+            return m.group(1).lower() not in ("no", "off", "false", "0")
+    # Unset means the compiled default, which on the hosts measured here keeps
+    # documents. Reporting "off" on an absent directive would be a guess in the
+    # dangerous direction.
+    return True
 
 
 def _restart_cups() -> tuple[bool, str]:  # pragma: no cover
@@ -394,6 +445,8 @@ def main(argv: list[str] | None = None) -> int:
             print(line)
         return 2
 
+    retention = retention_state(args.conf)
+
     if args.purge:
         victims = victims_for(audit)
         if not victims:
@@ -415,7 +468,7 @@ def main(argv: list[str] | None = None) -> int:
         print("SCOPE CLEAN." if remaining == 0 else "STILL PRESENT after a successful delete.")
         return 0 if remaining == 0 else 1
 
-    for line in render(audit, jobs):
+    for line in render(audit, jobs, retention):
         print(line)
     return audit.exit_code
 

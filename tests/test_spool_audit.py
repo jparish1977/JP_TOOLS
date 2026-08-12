@@ -36,6 +36,17 @@ All were found by running the tool or by mutating it, never by reading it.
   6. Exit code re-merged the two states the data model keeps apart, so
      `spool-audit.py 85 && echo SAFE` never fired even when job 85 was gone.
 
+  7. CUPS runtime files counted as leaked content. Found on the real machine,
+     not in any fixture: tmp/ held cups-dbus-notifier-lockfile alongside the
+     document temporaries. It inflated every count, and --purge deleted a
+     lockfile out from under a running cupsd.
+
+  8. The verdict lied after a successful --fix. It inferred "this host RETAINS
+     printed data" from files being present, so immediately after --fix turned
+     retention off it still told Joe retention was on, because documents from
+     before the fix were still on disk. Retention is now read from cupsd.conf
+     and reported as its own line.
+
 MUTATION TESTED
 Breaking each behaviour above must make this suite fail. Three mutations
 survived the first version of these tests -- "purge deletes nothing", "exit
@@ -158,7 +169,7 @@ def test_targeted_gone_but_spool_not_clean() -> None:
 
     text = "\n".join(render(audit, frozenset({85, 86})))
     check_true("says they are gone", "Those documents are GONE" in text)
-    check_true("still warns", "RETAINS printed data" in text)
+    check_true("still reports leftovers", "retained file(s) still on disk" in text)
 
 
 def test_targeted_still_present() -> None:
@@ -250,6 +261,46 @@ def test_long_listing_is_truncated_but_says_so() -> None:
     text = "\n".join(render(audit, frozenset()))
     check_true("reports the true total", "30 retained file(s)" in text)
     check_true("admits truncation", "and 10 more" in text)
+
+
+def test_cups_runtime_files_are_not_leaks() -> None:
+    """Found on joe-Inspiron-17-7778, not in any fixture I invented."""
+    audit = classify(spool(top=[], temp=["cups-dbus-notifier-lockfile", "006816a8026a5"]))
+
+    check("only the real temp file counts", audit.total, 1)
+    check("one artifact", len(audit.artifacts), 1)
+    check("artifact kind", audit.artifacts[0].kind, Kind.ARTIFACT)
+
+    # Never deleted: removing a lockfile under a running cupsd is not cleanup.
+    names = [e.name for e in victims_for(audit)]
+    check_true("lockfile not a purge victim", "tmp/cups-dbus-notifier-lockfile" not in names)
+
+    text = "\n".join(render(audit, frozenset()))
+    check_true("reported separately", "CUPS RUNTIME FILES" in text)
+    check_true("says never purged", "never purged" in text)
+
+
+def test_artifact_only_spool_is_clean() -> None:
+    """A spool holding nothing but a lockfile is clean, not retained."""
+    audit = classify(spool(top=[], temp=["cups-dbus-notifier-lockfile"]))
+    check("clean", audit.verdict, Verdict.CLEAN)
+    check("exit 0", audit.exit_code, 0)
+
+
+def test_retention_is_read_not_inferred() -> None:
+    """The 2026-08-12 case: --fix succeeded, next report still said RETAINS."""
+    audit = classify(spool(["d00079-001"]))
+
+    off = "\n".join(render(audit, frozenset(), retention=False))
+    check_true("says retention off", "RETENTION: OFF" in off)
+    check_true("does not claim host retains", "CUPS is keeping documents" not in off)
+    check_true("still reports the leftovers", "retained file(s) still on disk" in off)
+
+    on = "\n".join(render(audit, frozenset(), retention=True))
+    check_true("says retention on", "RETENTION: ON" in on)
+
+    unknown = "\n".join(render(audit, frozenset(), retention=None))
+    check_true("admits not knowing", "RETENTION: unknown" in unknown)
 
 
 def test_no_jobs_requested() -> None:
