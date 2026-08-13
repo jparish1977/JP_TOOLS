@@ -69,6 +69,7 @@ import argparse
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -96,6 +97,19 @@ ARTIFACT = re.compile(r"^cups-.*(lockfile|notifier|socket)$|^cups-dbus-")
 # ValueError: embedded null byte. That crashed every sudo TempDir listing, and
 # no amount of running the tool as root would have shown it.
 FIND_FORMAT = "%y\\t%l\\t%P\\0"
+
+# Names only, NUL-separated, for the top-level listing. `ls -1` was used here
+# and splits on newlines: a spool file named "evil\nd00099-001" came back as
+# two entries, the real one (holding content) matching no regex and vanishing
+# from the audit while a phantom was reported in its place. Same bug as the
+# TempDir path had, on the more commonly taken path.
+FIND_NAMES = "%P\\0"
+
+# Directory levels below TempDir that are walked. Both traversals must agree:
+# _walk_temp allowed one level more than `find -maxdepth`, and find exits 0
+# with no marker when it truncates, so a document nested past the limit on a
+# sudo path yielded "spool is clean".
+MAX_TEMP_DEPTH = 8
 
 # Print-job formats. Content beats location: a file whose first bytes say it is
 # a document is counted even if it sits somewhere caches normally live.
@@ -510,7 +524,9 @@ def _head(path: Path, n: int = 32) -> str:  # pragma: no cover
         return ""
 
 
-def _sudo_ls(path: str, files_only: bool = False) -> tuple[Verdict, tuple[str, ...]]:  # pragma: no cover
+def _sudo_ls(  # pragma: no cover
+    path: str, files_only: bool = False, at_depth: int | None = None
+) -> tuple[Verdict, tuple[str, ...]]:
     """List a directory, optionally regular files only.
 
     `files_only` matters: the direct-read path filters with `p.is_file()`, so
@@ -519,27 +535,34 @@ def _sudo_ls(path: str, files_only: bool = False) -> tuple[Verdict, tuple[str, .
     DIRECTORY, which `ls -1` would have reported as leaked document content
     whenever the tool escalated through sudo rather than running as root.
     """
-    argv = (
-        # Recursive, relative paths, and the type letter so symlinks and
-        # non-regular files are classified rather than silently dropped. The
-        # earlier -maxdepth 1 -printf %f disagreed with the recursive direct
-        # walk and hid nested documents in neither temp nor unexamined, and
-        # basenames alone would collide across directories and make delete()
-        # build the wrong path.
-        ["find", path, "-mindepth", "1", "-maxdepth", "8", "-printf", FIND_FORMAT]
-        if files_only
-        else ["ls", "-1", path]
+    if at_depth is not None:
+        # Directories sitting exactly at the walk limit. Each is a point where
+        # `find -maxdepth` stopped without saying so.
+        argv = ["find", path, "-mindepth", str(at_depth), "-maxdepth", str(at_depth),
+                "-type", "d", "-printf", FIND_NAMES]
+    elif files_only:
+        argv = ["find", path, "-mindepth", "1", "-maxdepth", str(MAX_TEMP_DEPTH),
+                "-printf", FIND_FORMAT]
+    else:
+        # find, not `ls -1`, so both paths are NUL-separated and neither can be
+        # fooled by a newline in a filename. -maxdepth 1 keeps this a top-level
+        # listing, and directories are included because `tmp` must appear here.
+        argv = ["find", path, "-mindepth", "1", "-maxdepth", "1", "-printf", FIND_NAMES]
+
+    # LC_ALL=C so the stderr match below is not locale-dependent, and
+    # surrogateescape so a non-UTF-8 filename cannot crash the decode. Names are
+    # bytes on Linux and this tool is pointed at directories it does not own.
+    env = {**os.environ, "LC_ALL": "C"}
+    proc = subprocess.run(
+        _priv(argv), capture_output=True, text=True,
+        errors="surrogateescape", env=env, check=False,
     )
-    proc = subprocess.run(_priv(argv), capture_output=True, text=True, check=False)
     if proc.returncode == 0:
-        # NUL-separated when listing files: a filename containing a newline
-        # split into two rows, truncating the real name and inventing a
-        # phantom entry. --purge then tried to delete a path that does not
-        # exist, counted the FileNotFoundError as a successful delete, and the
-        # file stayed. Verified with a file named "evil\nd00099-001".
+        # files_only returns the raw stream for parse_find_rows; every other
+        # mode returns NUL-separated names.
         if files_only:
-            return Verdict.CLEAN, (proc.stdout,)   # parsed by parse_find_rows
-        return Verdict.CLEAN, tuple(x for x in proc.stdout.splitlines() if x)
+            return Verdict.CLEAN, (proc.stdout,)
+        return Verdict.CLEAN, tuple(x for x in proc.stdout.split("\0") if x)
     if "No such file" in proc.stderr:
         return Verdict.MISSING, ()
     return Verdict.DENIED, ()
@@ -563,8 +586,10 @@ def _walk_temp(  # pragma: no cover
 
     Symlinks are never followed, at any depth.
     """
-    if depth > 8:
-        unexamined.append(f"{label}/{prefix} (nested deeper than 8, not examined)")
+    if depth >= MAX_TEMP_DEPTH:
+        unexamined.append(
+            f"{label}/{prefix} (nested deeper than {MAX_TEMP_DEPTH}, not examined)"
+        )
         return
     try:
         children = sorted(directory.iterdir())
@@ -573,27 +598,33 @@ def _walk_temp(  # pragma: no cover
         return
 
     for f in children:
-        link = f.is_symlink()
+        name = f"{prefix}{f.name}"
+        # ONE lstat decides the type. is_symlink()/is_dir()/is_file() each
+        # swallow errors and return False, so a file deleted mid-walk was
+        # classified "not a regular file" and the race branch below could never
+        # execute -- while its test passed by asserting only counts.
+        try:
+            st = f.lstat()
+        except OSError:
+            unexamined.append(f"{label}/{name} (vanished while reading)")
+            continue
+
+        link = stat.S_ISLNK(st.st_mode)
+        if not link and stat.S_ISDIR(st.st_mode):
+            _walk_temp(f, label, f"{name}/", found, unexamined, depth + 1)
+            continue
         try:
             target = os.readlink(f) if link else "?"
         except OSError:
             target = "?"
-        name = f"{prefix}{f.name}"
-        if not link and f.is_dir():
-            _walk_temp(f, label, f"{name}/", found, unexamined, depth + 1)
-            continue
         note = temp_child_note(
             label, name, is_symlink=link, is_dir=False,
-            is_regular=not link and f.is_file(), target=target,
+            is_regular=stat.S_ISREG(st.st_mode), target=target,
         )
         if note is None:
             try:
-                found.append(TempFile(name=name, size=f.stat().st_size, head=_head(f)))
+                found.append(TempFile(name=name, size=st.st_size, head=_head(f)))
             except OSError:
-                # A live spool deletes temp files continuously. Letting this
-                # escape discarded every file already collected and reported
-                # the whole TempDir unreadable -- losing the audit on exactly
-                # the busy machine worth auditing.
                 unexamined.append(f"{label}/{name} (vanished while reading)")
         else:
             unexamined.append(note)
@@ -618,8 +649,18 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
 
     temp: tuple[TempFile, ...] = ()
     unexamined: list[str] = []
-    tdir = Path(temp_dir) if temp_dir else root / TEMP_SUBDIR
-    label = TEMP_SUBDIR if tdir == root / TEMP_SUBDIR else str(tdir)
+    # resolve() so the label and the path delete() builds agree. A relative
+    # --temp made entries "reltmp/<file>" while delete() joined that onto the
+    # spool, unlinking <spool>/reltmp/<file> and hitting FileNotFoundError --
+    # which counts as a successful delete, so "N removed" was printed for files
+    # still on disk. The absolute case worked only by accident of pathlib's
+    # absolute-operand rule.
+    default_tmp = root / TEMP_SUBDIR
+    tdir = Path(temp_dir).resolve() if temp_dir else default_tmp
+    # Compare against BOTH forms. Comparing a resolved --temp against an
+    # unresolved default never matched, so the ordinary case started labelling
+    # entries with the whole spool path instead of "tmp".
+    label = TEMP_SUBDIR if tdir in (default_tmp, default_tmp.resolve()) else str(tdir)
     # If TempDir is elsewhere, <spool>/tmp is stripped from the top-level
     # listing but never walked, so documents left there vanished from the audit
     # entirely and the tool reported clean. Record it rather than drop it.
@@ -627,44 +668,61 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
         unexamined.append(
             f"{TEMP_SUBDIR}/ (present but TempDir points at {tdir}; not examined)"
         )
-    if True:
-        try:
-            # Path.exists() does NOT swallow EACCES, so probing it outside this
-            # try crashed the tool with a traceback on a real 0710 spool and
-            # made the sudo escalation below unreachable dead code.
-            next(tdir.iterdir(), None)
-            found: list[TempFile] = []
-            _walk_temp(tdir, label, "", found, unexamined)
-            temp = tuple(found)
-        except PermissionError:
-            # Names only through this path. Size and header are unknown, which
-            # is_harmless_temp() treats as "possibly document content" rather
-            # than assuming the safe answer.
-            tverdict, raw = _sudo_ls(str(tdir), files_only=True)
-            if tverdict is Verdict.CLEAN:
-                collected = []
-                for kind, target, name in parse_find_rows(raw[0] if raw else ""):
-                    if kind == "d":
-                        continue
-                    note = temp_child_note(
-                        label, name,
-                        is_symlink=kind == "l",
-                        is_dir=False,
-                        is_regular=kind == "f",
-                        target=target or "?",
-                    )
-                    if note is None:
-                        collected.append(TempFile(name=name, size=-1, head=""))
-                    else:
-                        unexamined.append(note)
-                temp = tuple(collected)
-            else:
-                # Do NOT fall through with an empty tuple. That turned an
-                # unreadable TempDir into an empty one and printed
-                # "VERDICT: spool is clean" over a readable document.
-                unexamined.append(f"{label}/ (permission denied)")
-        except OSError as exc:
-            unexamined.append(f"{label}/ (unreadable: {exc.__class__.__name__})")
+    try:
+        # Path.exists() does NOT swallow EACCES, so probing it outside this try
+        # crashed the tool with a traceback on a real 0710 spool and made the
+        # sudo escalation below unreachable dead code.
+        next(tdir.iterdir(), None)
+        found: list[TempFile] = []
+        _walk_temp(tdir, label, "", found, unexamined)
+        temp = tuple(found)
+    except PermissionError:
+        # Names only through this path. Size and header are unknown, which
+        # is_harmless_temp() treats as "possibly document content" rather
+        # than assuming the safe answer.
+        tverdict, raw = _sudo_ls(str(tdir), files_only=True)
+        if tverdict is Verdict.CLEAN:
+            collected = []
+            for kind, target, name in parse_find_rows(raw[0] if raw else ""):
+                if kind == "d":
+                    continue
+                note = temp_child_note(
+                    label, name,
+                    is_symlink=kind == "l",
+                    is_dir=False,
+                    is_regular=kind == "f",
+                    target=target or "?",
+                )
+                if note is None:
+                    collected.append(TempFile(name=name, size=-1, head=""))
+                else:
+                    unexamined.append(note)
+            temp = tuple(collected)
+            # find -maxdepth exits 0 with no marker when it truncates, so
+            # anything below the limit was in neither temp nor unexamined and
+            # the tool could print "spool is clean" over it. Probe for
+            # directories sitting AT the limit; each is a truncation point.
+            deep_v, deep = _sudo_ls(str(tdir), at_depth=MAX_TEMP_DEPTH)
+            if deep_v is Verdict.CLEAN:
+                unexamined += [
+                    f"{label}/{d} (nested deeper than {MAX_TEMP_DEPTH}, not examined)"
+                    for d in deep
+                ]
+        else:
+            # Do NOT fall through with an empty tuple. That turned an
+            # unreadable TempDir into an empty one and printed
+            # "VERDICT: spool is clean" over a readable document.
+            unexamined.append(f"{label}/ (permission denied)")
+    except FileNotFoundError:
+        # No TempDir at all. Nothing to examine is not the same as something
+        # unexamined: treating it as unexamined meant `--spool DIR` on any
+        # directory without a tmp/ was permanently INCOMPLETE and could never
+        # exit 0.
+        pass
+    except NotADirectoryError:
+        unexamined.append(f"{label} (exists but is not a directory, not examined)")
+    except OSError as exc:
+        unexamined.append(f"{label}/ (unreadable: {exc.__class__.__name__})")
 
     return Listing(
         verdict,
@@ -694,6 +752,14 @@ def delete(spool: str, entries: tuple[Entry, ...]) -> tuple[int, int]:  # pragma
             continue
         except PermissionError:
             pass
+        except OSError:
+            # IsADirectoryError (a directory named d00085-001 matches DOCUMENT
+            # and both listing paths return directory names), EROFS on a
+            # read-only --spool, ELOOP, EBUSY. Any of these used to escape and
+            # kill the purge mid-way, after files were already gone and before
+            # any summary was printed.
+            failed += 1
+            continue
         rc = subprocess.run(_priv(["rm", "-f", str(target)]), check=False).returncode
         if rc != 0:
             failed += 1
@@ -812,6 +878,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     jobs = frozenset(args.jobs)
+    # Path comparison, not string: shell tab-completion appends a trailing
+    # slash, and "/var/spool/cups/" != "/var/spool/cups" as strings routed
+    # around the configured TempDir entirely, so a host that moved TempDir got
+    # "spool is clean" while content sat in the real one.
     # Only consult the system cups-files.conf when auditing the system spool.
     # Otherwise `--spool /mnt/backup --purge` picked up an absolute TempDir from
     # the live config, and Path("/mnt/backup") / "/var/spool/cups/tmp/x"
@@ -819,7 +889,7 @@ def main(argv: list[str] | None = None) -> int:
     # the user did not name.
     if args.temp:
         temp_dir: str | None = args.temp
-    elif args.spool == DEFAULT_SPOOL:
+    elif Path(args.spool) == Path(DEFAULT_SPOOL):
         temp_dir = configured_tempdir(str(Path(args.conf).parent / "cups-files.conf"))
     else:
         temp_dir = None
@@ -846,7 +916,12 @@ def main(argv: list[str] | None = None) -> int:
         deleted, failed = delete(args.spool, victims)
         if failed:
             print(f"DELETE FAILED for {failed} file(s); {deleted} removed.")
-            print("This is a permissions problem, not files being recreated.")
+            # Do not name a cause. Permissions is the common one, but a
+            # directory matching the document pattern, a read-only mount and a
+            # symlink loop all land here, and asserting the wrong cause sends
+            # the user somewhere useless -- which is the mistake this line was
+            # written to fix in the first place.
+            print("Not files being recreated: the removals themselves failed.")
             return 1
         after = classify(read_spool(args.spool, temp_dir), jobs, args.include_control)
         if not after.readable:
