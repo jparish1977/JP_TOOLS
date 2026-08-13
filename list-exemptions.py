@@ -55,9 +55,12 @@ def _load_check() -> object:
 def gather(target: Path, check_mod: object) -> tuple[list[dict], int]:
     """Exemptions across `target`, and the total line count scanned."""
     if target.is_dir():
+        # check_mod.is_project_file, not a second skip list here. Two
+        # implementations of "is this our code" would drift, and the gate and
+        # the report disagreeing about what was scanned is worse than either.
         files = sorted(
             p for p in target.rglob("*.py")
-            if ".git" not in p.parts and "__pycache__" not in p.parts
+            if check_mod.is_project_file(p, target)  # type: ignore[attr-defined]
         )
     else:
         files = [target]
