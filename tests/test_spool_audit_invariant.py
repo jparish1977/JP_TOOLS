@@ -122,6 +122,22 @@ def main() -> int:
         assert_invariant("bak only, scoped purge", s, "85", "--purge")
         assert_invariant("bak only, report", s, "85")
 
+        # 3b. A SECOND, untargeted job. Every scoped fixture above pairs job 85
+        #     with an unattributable leftover, which the job-is-None caveat
+        #     happens to catch. A document belonging to job 77 is attributable
+        #     -- just not to the job asked about -- and slipped through both
+        #     purge branches. The oracle flags it by name, so only the fixture
+        #     was missing.
+        s = build(tmp, "other-job")
+        (s / "d00085-001").write_bytes(b"%PDF-1.7\n")
+        (s / "d00077-001").write_bytes(b"%PDF-1.7\n")
+        assert_invariant("other job, scoped purge", s, "85", "--purge")
+        assert_invariant("other job, report", s, "85")
+
+        s = build(tmp, "other-job-only")
+        (s / "d00077-001").write_bytes(b"%PDF-1.7\n")
+        assert_invariant("other job only, scoped purge", s, "85", "--purge")
+
         # 4. Document inside TempDir.
         s = build(tmp, "intmp")
         (s / "tmp" / "filter.ps").write_bytes(b"%!PS-Adobe-3.0\n")

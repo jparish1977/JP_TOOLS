@@ -97,9 +97,17 @@ def add_directories(image: Path, mountpoint: Path) -> bool:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
     try:
+        # Guarded like the mount itself: a loop image that mounts read-only or
+        # degraded raises here, and an escaping OSError turns CI red for an
+        # environment problem -- the failure the mkntfs and ntfscp conversions
+        # in this same diff were written to prevent, one function further on.
         (mountpoint / "realdir" / "deeper").mkdir(parents=True, exist_ok=True)
         (mountpoint / "realdir" / "inner.bin").touch()
         (mountpoint / "realdir" / "deeper" / "deep.bin").touch()
+    except OSError:
+        # A read-only or degraded mount lands here. The caller treats False as
+        # "directory cases not exercised" and carries on, which is a SKIP.
+        return False
     finally:
         subprocess.run(["umount", str(mountpoint)], check=False, capture_output=True)
     return True
