@@ -825,7 +825,7 @@ def purge_outcome(
 # above stays testable without a printer, a spool or root.
 
 
-def _head(path: Path, n: int = 32) -> str:  # pragma: no cover
+def _head(path: Path, n: int = 32) -> str:  # pragma: no cover -- reason: a read
     """First bytes of a file, decoded lossily. Used only to recognise known
     harmless formats such as PPDs. Never printed, never logged."""
     try:
@@ -1207,7 +1207,7 @@ def parse_retention(body: bytes) -> bool:
     return True
 
 
-def retention_state(conf: str) -> bool | None:  # pragma: no cover
+def retention_state(conf: str) -> bool | None:  # pragma: no cover -- reason: read only, parse_retention decides
     """Is CUPS configured to keep job files? None if the config is unreadable.
 
     Nothing but the read lives here now. Read as bytes for the same reason
@@ -1222,7 +1222,7 @@ def retention_state(conf: str) -> bool | None:  # pragma: no cover
     return parse_retention(body)
 
 
-def _restart_cups() -> tuple[bool, str]:  # pragma: no cover
+def _restart_cups() -> tuple[bool, str]:  # pragma: no cover -- reason: PENDING seams, runs a live init
     """Restart CUPS via whatever init this host has. Returns (ok, how)."""
     if shutil.which("systemctl"):
         rc = subprocess.run(["systemctl", "restart", "cups"], check=False)
@@ -1235,7 +1235,7 @@ def _restart_cups() -> tuple[bool, str]:  # pragma: no cover
     return False, "no working init command"
 
 
-def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
+def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover -- reason: PENDING seams, rewrites a live cupsd.conf as root
     """Set PreserveJobFiles No and restart CUPS. Returns (ok, detail).
 
     The path is passed as an argument, never interpolated into a shell string:

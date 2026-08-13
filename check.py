@@ -14,6 +14,7 @@ Exit codes:
 """
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -667,8 +668,98 @@ def run_cppcheck(target: str) -> dict:
     return {"tool": "cppcheck", "status": _status(issues), "issues": issues}
 
 
+# A coverage exemption is a CLAIM: that the function is a thin wrapper with
+# nothing in it worth testing. Nothing rechecks that claim, so it goes stale
+# silently as the function grows, and the exempt region becomes the region
+# nobody looks at.
+#
+# Measured on spool-audit.py, 2026-08-13: `# pragma: no cover` covered 430 lines
+# of 1350, 32% of the file, holding 51 branch, loop and try statements. A thin
+# wrapper has none. Every serious defect on that branch came from inside that
+# region, and ruff and mypy together caught 0 of 112 findings. This check exists
+# because the gate had no opinion about the one region that mattered.
+#
+# Worse, nothing in this repo measures coverage at all, so these pragmas never
+# suppressed a measurement. They only ever told a reader not to look. See
+# docs/coverage-not-wired.md.
+#
+# The rule is not "no exemptions". It is that an exemption must SAY WHY, so the
+# claim is visible and can be disagreed with:
+#
+#     def _unlink(p): ...                    # pragma: no cover
+#     def restart():  ...                    # pragma: no cover -- reason: runs systemctl
+#
+# A pragma on a function with no branches needs no reason: it is self-evidently
+# a wrapper. One with branches is making a decision, and decisions are testable.
+_NO_COVER = re.compile(r"#\s*pragma:\s*no\s*cover(?P<rest>.*)$")
+_HAS_REASON = re.compile(r"reason:\s*\S")
+_BRANCHY = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try)
+
+
+def _branchy_no_cover(path: Path) -> list[dict]:
+    try:
+        src = path.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(src)
+    except (OSError, SyntaxError, ValueError):
+        # Not this check's job to report unparseable files; ruff already does,
+        # and reporting it twice makes one problem look like two.
+        return []
+    lines = src.splitlines()
+    issues: list[dict] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.body:
+            continue
+        # The pragma may sit anywhere in the signature, which can span lines:
+        # `def f(  # pragma: no cover` and `def f(x) -> y:  # pragma: no cover`
+        # are both in use.
+        signature = lines[node.lineno - 1 : node.body[0].lineno - 1] or [
+            lines[node.lineno - 1]
+        ]
+        match = None
+        for text in signature:
+            match = _NO_COVER.search(text)
+            if match:
+                break
+        if not match:
+            continue
+        if _HAS_REASON.search(match.group("rest")):
+            continue
+        branches = sum(isinstance(n, _BRANCHY) for n in ast.walk(node))
+        if not branches:
+            continue
+        issues.append({
+            "file":     str(path),
+            "line":     node.lineno,
+            "col":      1,
+            "severity": "error",
+            "rule":     "no-cover-branchy",
+            "message":  (
+                f"'{node.name}' is exempt from coverage but contains {branches} "
+                f"branch/loop/try statement(s) over "
+                f"{node.end_lineno - node.lineno if node.end_lineno else 0} lines. "
+                "An exemption claims there is nothing to test. Extract the "
+                "decision, or state the claim: '# pragma: no cover -- reason: ...'"
+            ),
+            "fixable":        False,
+            "fixable_unsafe": False,
+        })
+    return issues
+
+
+def run_no_cover(target: str) -> dict:
+    p = Path(target)
+    files = sorted(p.rglob("*.py")) if p.is_dir() else [p]
+    issues: list[dict] = []
+    for f in files:
+        issues.extend(_branchy_no_cover(f))
+    return {"tool": "no-cover", "status": _status(issues), "issues": issues}
+
+
 TOOL_RUNNERS = {
     "cppcheck":       run_cppcheck,
+    "no-cover":       run_no_cover,
     "ruff":           run_ruff,
     "mypy":           run_mypy,
     "eslint":         run_eslint,
@@ -683,7 +774,7 @@ TOOL_RUNNERS = {
 }
 
 DEFAULT_TOOLS = {
-    "python": ["ruff", "mypy"],
+    "python": ["ruff", "mypy", "no-cover"],
     "js":     ["eslint", "prettier"],
     "css":    ["stylelint", "prettier"],
     "html":   ["eslint", "stylelint", "prettier"],
@@ -698,7 +789,7 @@ AUDIT_TOOLS = {
 }
 
 # Tools that accept directories natively (pass the dir, not individual files)
-_DIR_CAPABLE = {"ruff", "mypy", "phpstan", "phpcs", "rector",
+_DIR_CAPABLE = {"ruff", "mypy", "no-cover", "phpstan", "phpcs", "rector",
                 "pip-audit", "npm-audit", "composer-audit"}
 # cppcheck is deliberately not in _DIR_CAPABLE: the .ino suppression is decided
 # per file, and passing a directory would apply sketch rules to every .cpp.
