@@ -97,19 +97,7 @@ CONTROL = re.compile(r"^c(\d+)$")
 # purged.
 ARTIFACT = re.compile(r"^cups-.*(lockfile|notifier|socket)$|^cups-dbus-")
 
-# Passed to `find -printf`, which interprets the escapes itself. The backslashes
-# MUST stay literal: writing "%y\t%l\t%P\0" in Python embeds a real NUL byte,
-# and argv strings are NUL-terminated, so subprocess rejects it outright with
-# ValueError: embedded null byte. That crashed every sudo TempDir listing, and
-# no amount of running the tool as root would have shown it.
-FIND_FORMAT = "%y\\t%l\\t%P\\0"
 
-# Names only, NUL-separated, for the top-level listing. `ls -1` was used here
-# and splits on newlines: a spool file named "evil\nd00099-001" came back as
-# two entries, the real one (holding content) matching no regex and vanishing
-# from the audit while a phantom was reported in its place. Same bug as the
-# TempDir path had, on the more commonly taken path.
-FIND_NAMES = "%P\\0"
 
 # Directory levels below TempDir that are walked. Both traversals must agree:
 # _walk_temp allowed one level more than `find -maxdepth`, and find exits 0
@@ -343,13 +331,13 @@ def is_harmless_temp(f: TempFile) -> bool:
         return False
     if ARTIFACT.match(f.name.rsplit("/", 1)[-1]):
         return True
-    # Unknown content. The sudo listing path cannot stat or read children, so
-    # it yields size -1 and an empty head -- and every rule below reasons from
-    # content or size. Without this, the .cache/ exemption fired on a document
-    # the root path counted, so `tmp/.cache/leak.ps` was reported as leaked
-    # content when run as root and dismissed as a cache when run via sudo.
-    # Nothing may be excused by location when its content was never read.
-    if f.size < 0 and not f.head:
+    # Content that could NOT be read. Every rule below reasons from the first
+    # bytes or the size, so a file whose header is unavailable must not be
+    # excused by where it sits. This originally keyed on size == -1, a sentinel
+    # only the removed sudo listing produced -- so deleting that path silently
+    # disarmed the guard, and an unreadable file under tmp/.cache/ was
+    # classified a harmless cache and reported "spool is clean".
+    if not f.head and f.size > 0:
         return False
     # CUPS runs filters with HOME pointed at TempDir, so a filter's XDG cache
     # lands in tmp/.cache/. Measured in a container with a real filter chain:
@@ -542,6 +530,117 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
     return lines
 
 
+@dataclass(frozen=True)
+class Outcome:
+    """What to print and what to exit with. Pure: no I/O, no printing.
+
+    main()'s decision logic lived inline and untested, and it produced findings
+    in every review round of this branch: a --fix failure discarded so the run
+    exited 0, a caveat present in one branch and missing from its twin, an exit
+    code that collapsed two states. The tested parts of this file stopped
+    generating defects; this part never did, because nothing exercised it.
+    """
+
+    lines: tuple[str, ...] = ()
+    code: int = 0
+
+
+def leftover_caveats(audit: Audit, jobs: frozenset[int]) -> tuple[str, ...]:
+    """What a purge could not remove, and why. ONE function, both call sites.
+
+    The "nothing to purge" branch and the post-purge branch each grew their own
+    version of this and drifted: the caveat about files carrying no job id was
+    added to one and not the other, so `85 --purge` over a spool holding only a
+    d00085-001.bak printed "Nothing to purge." and exited 0 over a file it had
+    just classified as a PDF. Sharing the function is what stops the twins
+    diverging again.
+    """
+    out = []
+    if audit.uncounted_control:
+        out.append(
+            f"{audit.uncounted_control} control file(s) were not counted or removed; "
+            "they carry the job title. Use --include-control."
+        )
+    unattributable = [e for e in audit.others if e.job is None]
+    if jobs and unattributable:
+        out.append(
+            f"{len(unattributable)} file(s) carry no job id and cannot be purged by "
+            "number. Re-run --purge without job ids to clear them."
+        )
+    return tuple(out)
+
+
+def fix_outcome(ok: bool, detail: str, also_purging: bool) -> Outcome:
+    """Result of --fix. A failure must never be forgotten by a later success."""
+    if ok:
+        line = f"PreserveJobFiles set to No; {detail}."
+        if also_purging:
+            return Outcome((line,), 0)
+        return Outcome((line, "Existing files are untouched. Run --purge to clear them."), 0)
+    lines = [f"FAILED: {detail}"]
+    if also_purging:
+        # The config may be written and only the restart failed, so the files on
+        # disk are still worth clearing -- but the failure has to survive into
+        # the exit code, or `--fix --purge && echo SAFE` fires with retention
+        # still on and the next print leaks again.
+        lines.append("Continuing to --purge anyway; files on disk are unaffected.")
+    return Outcome(tuple(lines), 1)
+
+
+def purge_precheck(audit: Audit, jobs: frozenset[int], roots_ok: bool) -> Outcome | None:
+    """Decide before deleting. None means "go ahead and delete"."""
+    if not roots_ok:
+        return Outcome((
+            "REFUSING TO PURGE: the audited path could not be resolved,",
+            "  so nothing can be proven to be inside it.",
+        ), 2)
+    if victims_for(audit):
+        return None
+
+    lines = ["Nothing to purge."]
+    caveats = leftover_caveats(audit, jobs)
+    if caveats:
+        lines = ["Nothing to purge, but:"] + [f"  {c}" for c in caveats]
+    if audit.unexamined:
+        lines += [f"{len(audit.unexamined)} area(s) could not be examined:"]
+        lines += [f"  {u}" for u in audit.unexamined]
+        lines += ["This is NOT a clean result."]
+        return Outcome(tuple(lines), 2)
+    return Outcome(tuple(lines), 0)
+
+
+def purge_outcome(
+    deleted: int, failed: int, after: Audit | None, jobs: frozenset[int]
+) -> Outcome:
+    """Decide after deleting. `after` is None when the re-read failed."""
+    if failed:
+        return Outcome((
+            f"DELETE FAILED for {failed} file(s); {deleted} removed.",
+            # Do not name a cause: permissions, a directory matching the
+            # document pattern, a read-only mount and a symlink loop all land
+            # here, and asserting the wrong one sends the user somewhere
+            # useless.
+            "Not files being recreated: the removals themselves failed.",
+        ), 1)
+    if after is None:
+        return Outcome((f"{deleted} removed, but the spool could not be re-read to confirm.",), 2)
+
+    remaining = len(victims_for(after))
+    lines = [f"{deleted} removed. Remaining in scope: {remaining}"]
+    if after.unexamined:
+        lines += [f"NOT CLEAN: {len(after.unexamined)} area(s) could not be examined:"]
+        lines += [f"  {u}" for u in after.unexamined]
+        return Outcome(tuple(lines), 2)
+    if remaining:
+        return Outcome((*lines, "STILL PRESENT after a successful delete."), 1)
+    caveats = leftover_caveats(after, jobs)
+    if caveats:
+        lines += ["SCOPE CLEAN for the jobs named, but:"] + [f"  {c}" for c in caveats]
+        return Outcome(tuple(lines), 0)
+    return Outcome((*lines, "SCOPE CLEAN."), 0)
+
+
+
 # --- I/O boundary ----------------------------------------------------------
 # Thin wrappers over privileged operations, kept free of logic so everything
 # above stays testable without a printer, a spool or root.
@@ -691,18 +790,42 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
     except OSError as exc:
         unexamined.append(f"{TEMP_SUBDIR}/ (unreadable: {exc.__class__.__name__})")
 
-    # Anything at the top level that is neither a document, a control file nor
-    # the TempDir. Read the same way TempDir files are, so a document copied to
-    # d00085-001.bak is counted rather than dropped; `ls` would have shown it.
+    # Every top-level name is stat'd, including ones matching the document and
+    # control patterns. They used to skip straight past this check, so the
+    # never-follow-symlinks rule applied only to TempDir: a symlink named
+    # d00085-001 was unlinked, "1 removed" was printed, and the target survived.
+    # False assurance of destruction, the worst failure this tool can have.
+    #
+    # Names matching neither pattern are read the same way TempDir files are,
+    # so a document copied to d00085-001.bak is counted rather than dropped;
+    # `ls` would have shown it.
+    suspect: list[str] = []
     extra: list[TempFile] = []
     for n in top:
-        if n == TEMP_SUBDIR or DOCUMENT.match(n) or CONTROL.match(n):
+        if n == TEMP_SUBDIR:
             continue
         f = root / n
         try:
             st = f.lstat()
         except OSError:
             unexamined.append(f"{n} (vanished while reading)")
+            suspect.append(n)
+            continue
+        if DOCUMENT.match(n) or CONTROL.match(n):
+            if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+                try:
+                    tgt = os.readlink(f) if stat.S_ISLNK(st.st_mode) else "?"
+                except OSError:
+                    tgt = "?"
+                note = temp_child_note(
+                    ".", n,
+                    is_symlink=stat.S_ISLNK(st.st_mode),
+                    is_dir=stat.S_ISDIR(st.st_mode),
+                    is_regular=False,
+                    target=tgt,
+                )
+                unexamined.append((note or f"{n} (not examined)").replace("./", "", 1))
+                suspect.append(n)
             continue
         if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
             note = temp_child_note(
@@ -720,7 +843,7 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
 
     return Listing(
         verdict,
-        tuple(n for n in top if n != TEMP_SUBDIR),
+        tuple(n for n in top if n != TEMP_SUBDIR and n not in suspect),
         temp,
         tuple(unexamined),
         TEMP_SUBDIR,
@@ -771,20 +894,11 @@ def delete(  # pragma: no cover
             # any summary was printed.
             failed += 1
             continue
-        rc = subprocess.run(["rm", "-f", str(target)], check=False).returncode
-        if rc != 0:
-            failed += 1
-            continue
-        # Reaching the sudo fallback means unlink() already hit EACCES, so the
-        # invoker cannot stat children either and target.exists() RAISES rather
-        # than returning False. Letting that escape aborted a purge mid-way
-        # with a traceback and no summary of what had been removed.
-        try:
-            gone = not target.exists()
-        except OSError:
-            gone = True  # rm reported success and we cannot see the file
-        deleted += 1 if gone else 0
-        failed += 0 if gone else 1
+        # No `rm` fallback: it would run as the same uid with the same
+        # directory permissions and fail identically. It was a leftover from
+        # the removed escalation path and contradicted the documented "no
+        # privilege-escalation path inside the tool".
+        failed += 1
     return deleted, failed
 
 
@@ -849,6 +963,11 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     # daemon's config empty and nothing to restore from. Copy it aside first.
     backup = f"{conf}.spool-audit.bak"
     saved = subprocess.run(["cp", "-p", conf, backup], check=False)
+    if saved.returncode != 0:
+        # The copy exists precisely because tee opens O_TRUNC. Proceeding
+        # without it means an interrupted write leaves an empty cupsd.conf and
+        # nothing to restore from.
+        return False, f"could not back up {conf}; refusing to rewrite it"
     write = subprocess.run(
         ["tee", conf], input=body, capture_output=True, text=True, check=False
     )
@@ -895,21 +1014,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--conf", default=DEFAULT_CONF, help=f"cupsd.conf path (default {DEFAULT_CONF})")
     args = ap.parse_args(argv)
 
-    # --fix and --purge are independent and both may be requested. Returning
-    # after --fix silently dropped the purge and still exited 0.
+    # --fix and --purge are independent and both may be requested.
+    fix_code = 0
     if args.fix:
-        ok, detail = disable_retention(args.conf)
-        print(f"PreserveJobFiles set to No; {detail}." if ok else f"FAILED: {detail}")
-        if not ok and not args.purge:
-            return 1
-        if not ok:
-            # The config may be written and only the restart failed. Returning
-            # here dropped the purge -- the same early-return this block was
-            # rewritten to remove, in the failure branch instead of the success
-            # one. The documents on disk are still worth clearing.
-            print("Continuing to --purge anyway; files on disk are unaffected by the restart.")
-        elif not args.purge:
-            print("Existing files are untouched. Run --purge to clear them.")
+        outcome = fix_outcome(*disable_retention(args.conf), also_purging=args.purge)
+        for line in outcome.lines:
+            print(line)
+        fix_code = outcome.code
+        if fix_code and not args.purge:
+            return fix_code
+        if not fix_code and not args.purge:
             return 0
 
     jobs = frozenset(args.jobs)
@@ -924,84 +1038,30 @@ def main(argv: list[str] | None = None) -> int:
     if not audit.readable:
         for line in render(audit, jobs):
             print(line)
-        return 2
+        return max(fix_code, 2)
 
     if args.purge:
-        if spool_root is None:
-            print("REFUSING TO PURGE: the audited path could not be resolved,")
-            print("  so nothing can be proven to be inside it.")
-            return 2
+        pre = purge_precheck(audit, jobs, roots_ok=spool_root is not None)
+        if pre is not None:
+            for line in pre.lines:
+                print(line)
+            return max(fix_code, pre.code)
+
         victims = victims_for(audit)
-        if not victims:
-            if audit.uncounted_control:
-                print(
-                    f"Nothing to purge, but {audit.uncounted_control} control file(s) "
-                    "remain, carrying the job title. Use --include-control."
-                )
-            if audit.unexamined:
-                print(f"Nothing to purge, but {len(audit.unexamined)} area(s) could not be examined:")
-                for u in audit.unexamined:
-                    print(f"  {u}")
-                print("This is NOT a clean result.")
-                return 2
-            if not audit.uncounted_control:
-                print("Nothing to purge.")
-            return 0
         scope = f"job(s) {', '.join(str(j) for j in sorted(jobs))}" if jobs else "all retained files"
         print(f"Deleting {len(victims)} file(s) [{scope}]...")
         deleted, failed = delete(args.spool, victims, allowed)
-        if failed:
-            print(f"DELETE FAILED for {failed} file(s); {deleted} removed.")
-            # Do not name a cause. Permissions is the common one, but a
-            # directory matching the document pattern, a read-only mount and a
-            # symlink loop all land here, and asserting the wrong cause sends
-            # the user somewhere useless -- which is the mistake this line was
-            # written to fix in the first place.
-            print("Not files being recreated: the removals themselves failed.")
-            return 1
-        after = classify(read_spool(args.spool), jobs, args.include_control)
-        if not after.readable:
-            print(f"{deleted} removed, but the spool could not be re-read to confirm.")
-            return 2
-        remaining = len(victims_for(after))
-        print(f"{deleted} removed. Remaining in scope: {remaining}")
-        if after.unexamined:
-            # The re-read goes through the same path, so an unreadable TempDir
-            # would otherwise be counted as zero and announced as clean.
-            print(f"NOT CLEAN: {len(after.unexamined)} area(s) could not be examined:")
-            for u in after.unexamined:
-                print(f"  {u}")
-            return 2
-        if remaining:
-            print("STILL PRESENT after a successful delete.")
-            return 1
-        caveats = []
-        if after.uncounted_control:
-            caveats.append(
-                f"{after.uncounted_control} control file(s) were not counted or "
-                "removed; they carry the job title. Use --include-control."
-            )
-        # Files with no job id cannot be targeted by job number, so a scoped
-        # purge leaves them -- including ones this tool classified as print
-        # data. Saying only "SCOPE CLEAN" made `85 --purge && echo SAFE` fire
-        # over a d00085-001.bak it had just called a PDF.
-        unattributable = [e for e in after.others if e.job is None]
-        if jobs and unattributable:
-            caveats.append(
-                f"{len(unattributable)} file(s) carry no job id and cannot be purged "
-                "by number. Re-run --purge without job ids to clear them."
-            )
-        if caveats:
-            print("SCOPE CLEAN for the jobs named, but:")
-            for c in caveats:
-                print(f"  {c}")
-            return 0
-        print("SCOPE CLEAN.")
-        return 0
+        after = classify(read_spool(args.spool), jobs, args.include_control) if not failed else None
+        post = purge_outcome(deleted, failed, after if (after and after.readable) else None, jobs)
+        for line in post.lines:
+            print(line)
+        # max(), not the post code alone: a --fix that failed must not be
+        # erased by a purge that succeeded.
+        return max(fix_code, post.code)
 
     for line in render(audit, jobs, retention_state(args.conf)):
         print(line)
-    return audit.exit_code
+    return max(fix_code, audit.exit_code)
 
 
 if __name__ == "__main__":

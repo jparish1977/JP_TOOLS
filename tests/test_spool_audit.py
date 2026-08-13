@@ -94,6 +94,11 @@ classify = spool_audit.classify
 parse_entry = spool_audit.parse_entry
 render = spool_audit.render
 victims_for = spool_audit.victims_for
+Outcome = spool_audit.Outcome
+leftover_caveats = spool_audit.leftover_caveats
+fix_outcome = spool_audit.fix_outcome
+purge_precheck = spool_audit.purge_precheck
+purge_outcome = spool_audit.purge_outcome
 Audit = spool_audit.Audit
 Listing = spool_audit.Listing
 TempFile = spool_audit.TempFile
@@ -535,17 +540,22 @@ def test_xdg_cache_under_tempdir_is_not_content() -> None:
     decoy = TempFile(name="job.cache-backup/blob", size=4096, head="\x00\x01binary")
     check_true("substring in a name is not a cache dir", not is_harmless_temp(decoy))
 
-    # The sudo listing path cannot read headers, so it reports size -1 and an
-    # empty head. Location must not excuse a file whose content was never read:
-    # the same .cache/ document was counted as content when run as root and
-    # dismissed as a cache when run via sudo.
-    unread = TempFile(name=".cache/deep/leak.ps", size=-1, head="")
-    check_true("unknown content under .cache is NOT harmless", not is_harmless_temp(unread))
-    unread_ppd = TempFile(name="ppd", size=-1, head="")
-    check_true("nor is an unread file named like a PPD", not is_harmless_temp(unread_ppd))
-    # A named CUPS runtime file is still recognised by name alone.
-    lock = TempFile(name="cups-dbus-notifier-lockfile", size=-1, head="")
-    check_true("named artifacts still recognised unread", is_harmless_temp(lock))
+    # A file whose content could NOT be read: _head() returns "" on any OSError,
+    # so a mode-000 file has a real size and an empty header. Location must not
+    # excuse it. This guard originally keyed on size == -1, a sentinel only the
+    # since-removed sudo listing produced, so deleting that path silently
+    # disarmed it and an unreadable file under .cache/ was called a cache and
+    # the spool reported clean.
+    unread = TempFile(name=".cache/deep/leak.ps", size=4096, head="")
+    check_true("unreadable content under .cache is NOT harmless", not is_harmless_temp(unread))
+    unread_ppd = TempFile(name="ppd", size=10917, head="")
+    check_true("nor is an unreadable file named like a PPD", not is_harmless_temp(unread_ppd))
+    # A named CUPS runtime file is still recognised by name alone, and a
+    # genuinely empty file is still harmless.
+    lock = TempFile(name="cups-dbus-notifier-lockfile", size=0, head="")
+    check_true("named artifacts still recognised", is_harmless_temp(lock))
+    empty = TempFile(name="whatever", size=0, head="")
+    check_true("zero-length is still harmless", is_harmless_temp(empty))
 
     audit = classify(Listing(Verdict.CLEAN, (), (fc, doc)))
     check("only the document counts", audit.total, 1)
@@ -784,6 +794,81 @@ def test_walk_against_a_real_filesystem() -> None:
         check_true("nested ppd is an artifact", any("driver.ppd" in e.name for e in audit.artifacts))
         check_true("empty file is an artifact", any("empty" in e.name for e in audit.artifacts))
         check("cannot be clean with a symlink present", audit.exit_code, 2)
+
+
+# --- main()'s decision logic, which was inline and untested ---------------
+#
+# It produced findings in EVERY review round of this branch while the pure,
+# tested functions above produced almost none. That was the pattern, and these
+# tests are the response to it.
+
+def test_a_failed_fix_is_never_erased_by_a_later_success() -> None:
+    """`--fix --purge && echo SAFE` fired with retention still on.
+
+    disable_retention() failing printed FAILED, fell through to the purge, and
+    if the purge succeeded main returned 0. Nothing carried the failure
+    forward, so a caller could not tell that the next print would leak again.
+    """
+    failed = fix_outcome(False, "cups was not restarted", also_purging=True)
+    check("a failed fix is a failure", failed.code, 1)
+    check_true("but it does not stop the purge", "Continuing" in "\n".join(failed.lines))
+
+    ok_then_purge = fix_outcome(True, "restarted via systemctl", also_purging=True)
+    check("a good fix does not poison anything", ok_then_purge.code, 0)
+    check_true("and does not tell you to purge", "Run --purge" not in "\n".join(ok_then_purge.lines))
+
+    ok_alone = fix_outcome(True, "restarted", also_purging=False)
+    check("fix alone succeeds", ok_alone.code, 0)
+    check_true("and points at --purge", "Run --purge" in "\n".join(ok_alone.lines))
+
+    # The composition main() performs: max() of the two, so 1 survives 0.
+    post = purge_outcome(3, 0, classify(spool([])), frozenset())
+    check("purge alone is clean", post.code, 0)
+    check("but a failed fix wins", max(failed.code, post.code), 1)
+
+
+def test_both_purge_branches_share_one_caveat_function() -> None:
+    """The caveat lived twice and drifted: added to the post-purge branch and
+    not to "nothing to purge", so `85 --purge` over a spool holding only a
+    d00085-001.bak printed "Nothing to purge." and exited 0."""
+    bak = TempFile(name="d00085-001.bak", size=99, head="%PDF-1.7")
+    audit = classify(Listing(Verdict.CLEAN, (), (), (), TEMP_SUBDIR, (bak,)), frozenset({85}))
+
+    check("nothing is targetable", len(victims_for(audit)), 0)
+    caveats = leftover_caveats(audit, frozenset({85}))
+    check_true("but the leftover is named", any("no job id" in c for c in caveats))
+
+    pre = purge_precheck(audit, frozenset({85}), roots_ok=True)
+    assert pre is not None
+    text = "\n".join(pre.lines)
+    check_true("the nothing-to-purge branch says so too", "no job id" in text)
+    check_true("and does not claim plain success", text.strip() != "Nothing to purge.")
+
+
+def test_purge_precheck_refuses_when_the_root_is_unresolvable() -> None:
+    audit = classify(spool(["d00085-001"]))
+    out = purge_precheck(audit, frozenset(), roots_ok=False)
+    assert out is not None
+    check("cannot prove containment, so refuse", out.code, 2)
+    check_true("and says why", "REFUSING TO PURGE" in "\n".join(out.lines))
+
+    ok = purge_precheck(audit, frozenset(), roots_ok=True)
+    check("otherwise proceed to delete", ok, None)
+
+
+def test_purge_outcome_states() -> None:
+    clean = classify(spool([]))
+    check("a clean re-read is success", purge_outcome(2, 0, clean, frozenset()).code, 0)
+    check("a failed delete is 1", purge_outcome(0, 1, clean, frozenset()).code, 1)
+    check("an unreadable re-read is 2", purge_outcome(2, 0, None, frozenset()).code, 2)
+
+    unexamined = classify(Listing(Verdict.CLEAN, (), (), ("tmp/ (permission denied)",)))
+    out = purge_outcome(2, 0, unexamined, frozenset())
+    check("unexamined areas after a purge are 2", out.code, 2)
+    check_true("and never say clean", "SCOPE CLEAN" not in "\n".join(out.lines))
+
+    still = classify(spool(["d00085-001"]))
+    check("files remaining in scope is 1", purge_outcome(1, 0, still, frozenset()).code, 1)
 
 
 def main() -> int:

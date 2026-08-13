@@ -36,6 +36,7 @@ jobs:
           done
           exit $rc
       - name: Report which Python files are NOT checked
+        if: always()
         run: |
           # The list above is manual and cannot become a glob today: 17 of the
           # repo's 22 root scripts have pre-existing findings (127 in total),
@@ -50,6 +51,7 @@ jobs:
             case " $checked " in *" $f "*) ;; *) echo "  $f" ;; esac
           done
       - name: Run test suites
+        if: always()
         run: |
           # Nothing ran tests/ at all before. A suite that CI never executes is
           # documentation, not a gate. Each suite skips rather than fails when

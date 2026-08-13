@@ -393,9 +393,9 @@ def run_prettier(target: str) -> dict:
     cmd = shutil.which("prettier") or shutil.which("prettier.cmd")
     if not cmd:
         return _tool_missing("prettier")
-    result = subprocess.run([cmd, "--check", target], capture_output=True, text=True, check=False)
+    result = subprocess.run([cmd, "--check", target], capture_output=True, text=True, check=False, env=_plain_env())
     issues = []
-    for line in (result.stdout + result.stderr).splitlines():
+    for line in (strip_ansi(result.stdout + result.stderr)).splitlines():
         line = line.strip()
         if line.startswith("[warn]"):
             fp = line[len("[warn]"):].strip()
@@ -646,10 +646,10 @@ def run_cppcheck(target: str) -> dict:
         *[f"--suppress={s}" for s in suppress],
         target,
     ]
-    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    result = subprocess.run(args, capture_output=True, text=True, check=False, env=_plain_env())
     issues = []
     # cppcheck writes findings to stderr, not stdout.
-    for line in result.stderr.splitlines():
+    for line in strip_ansi(result.stderr).splitlines():
         parts = line.split("|", 5)
         if len(parts) < 6:
             continue
