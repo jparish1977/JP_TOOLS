@@ -869,6 +869,7 @@ def read_spool(  # pragma: no cover
     # the TempDir. Read the same way TempDir files are read; a directory is
     # recorded as unexamined rather than dropped.
     extra: list[TempFile] = []
+    top_kinds: dict[str, str] | None = None
     for n in top:
         if n == TEMP_SUBDIR or DOCUMENT.match(n) or CONTROL.match(n):
             continue
@@ -881,10 +882,17 @@ def read_spool(  # pragma: no cover
             # DIRECTORY into counted content, and --purge then unlink()ed it,
             # failed, and exited 1 on a spool that was fine -- a different
             # classification from the direct path, not the intended superset.
-            kinds = {
-                row[2]: row[0]
-                for row in parse_find_rows(_sudo_ls(str(root), files_only=True)[1][0] or "")
-            }
+            # Guarded, and hoisted: the unguarded [1][0] raised IndexError
+            # whenever find failed (_sudo_ls returns an empty tuple then), and
+            # re-running a recursive find once per stray entry was quadratic.
+            if top_kinds is None:
+                kv, kraw = _sudo_ls(str(root), files_only=True)
+                top_kinds = (
+                    {r[2]: r[0] for r in parse_find_rows(kraw[0])}
+                    if kv is Verdict.CLEAN and kraw
+                    else {}
+                )
+            kinds = top_kinds
             if kinds.get(n) == "d":
                 unexamined.append(f"{n}/ (subdirectory, not examined)")
             elif kinds.get(n) == "l":
