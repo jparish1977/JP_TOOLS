@@ -80,6 +80,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -1046,14 +1047,35 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
 
 
 
-def delete(  # pragma: no cover
-    spool: str, entries: tuple[Entry, ...], roots: tuple[Path, ...]
+def _unlink_path(p: Path) -> None:  # pragma: no cover
+    p.unlink()
+
+
+def _resolve_path(p: Path) -> Path:  # pragma: no cover
+    return p.resolve()
+
+
+def delete(
+    spool: str,
+    entries: tuple[Entry, ...],
+    roots: tuple[Path, ...],
+    *,
+    unlink: Callable[[Path], None] = _unlink_path,
+    resolve: Callable[[Path], Path] = _resolve_path,
 ) -> tuple[int, int]:
     """Remove files, refusing anything outside `roots`. Returns (deleted, failed).
 
     A failed delete must be reported as a failed delete. Reporting it as
     "the files are still there" sends the user hunting a process that is
     recreating them, when in fact the removal never had permission.
+
+    `unlink` and `resolve` are injectable because the mapping from error to
+    outcome IS the logic of this function, and it was untestable while the whole
+    thing carried `pragma: no cover`. Getting that mapping wrong is bug 5 in the
+    test suite's header: a permission failure reported as files respawning. The
+    two defaults above are the only part that touches the filesystem, and they
+    have no branches, which is what a wrapper exempt from coverage should look
+    like.
     """
     deleted = failed = 0
     for e in entries:
@@ -1063,7 +1085,7 @@ def delete(  # pragma: no cover
         # resolution. Refusing here is the last line of defence -- the walk
         # should not have offered such a path in the first place.
         try:
-            resolved = target.resolve()
+            resolved = resolve(target)
         except (OSError, RuntimeError):
             failed += 1
             continue
@@ -1072,7 +1094,7 @@ def delete(  # pragma: no cover
             failed += 1
             continue
         try:
-            target.unlink()
+            unlink(target)
             deleted += 1
             continue
         except FileNotFoundError:
@@ -1096,26 +1118,44 @@ def delete(  # pragma: no cover
     return deleted, failed
 
 
-def retention_state(conf: str) -> bool | None:  # pragma: no cover
-    """Is CUPS configured to keep job files? None if the config is unreadable."""
-    try:
-        body = Path(conf).read_text(errors="replace")
-    except OSError:
-        return None
+def parse_retention(body: bytes) -> bool:
+    """Does this config body leave CUPS keeping job files?
+
+    Pure, so the precedence rule can be tested without a filesystem or a CUPS
+    install. It used to live inside retention_state, under `pragma: no cover`,
+    where the rule below was got wrong once already and nothing could have
+    caught it: the exemption is why the only test of this was an end-to-end run
+    on a machine that happened to have the right config.
+    """
     # cupsd honours the LAST matching directive. Returning on the first made a
     # hand-edited config with "No" followed by "Yes" report RETENTION: OFF on a
     # host that was retaining documents -- danger reported as safety.
-    setting: str | None = None
+    setting: bytes | None = None
     for line in body.splitlines():
-        m = re.match(r"^\s*PreserveJobFiles\s+(\S+)", line, re.IGNORECASE)
+        m = re.match(rb"^\s*PreserveJobFiles\s+(\S+)", line, re.IGNORECASE)
         if m:
             setting = m.group(1).lower()
     if setting is not None:
-        return setting not in ("no", "off", "false", "0")
+        return setting not in (b"no", b"off", b"false", b"0")
     # Unset means the compiled default, which on the hosts measured here keeps
     # documents. Reporting "off" on an absent directive would be a guess in the
     # dangerous direction.
     return True
+
+
+def retention_state(conf: str) -> bool | None:  # pragma: no cover
+    """Is CUPS configured to keep job files? None if the config is unreadable.
+
+    Nothing but the read lives here now. Read as bytes for the same reason
+    disable_retention writes bytes: a printer config is not guaranteed UTF-8,
+    and decoding it is a step that can fail or corrupt for no benefit when all
+    that is wanted is a directive match.
+    """
+    try:
+        body = Path(conf).read_bytes()
+    except OSError:
+        return None
+    return parse_retention(body)
 
 
 def _restart_cups() -> tuple[bool, str]:  # pragma: no cover

@@ -55,7 +55,9 @@ code always 0", "others list truncated" -- all in untested main()/CLI logic.
     python tests/test_spool_audit.py
 """
 
+import contextlib
 import importlib.util
+import io
 import os
 import pathlib
 import sys
@@ -107,6 +109,9 @@ TempFile = spool_audit.TempFile
 is_harmless_temp = spool_audit.is_harmless_temp
 temp_child_note = spool_audit.temp_child_note
 is_inside = spool_audit.is_inside
+parse_retention = spool_audit.parse_retention
+delete = spool_audit.delete
+Entry = spool_audit.Entry
 Verdict = spool_audit.Verdict
 Kind = spool_audit.Kind
 TEMP_SUBDIR = spool_audit.TEMP_SUBDIR
@@ -1035,6 +1040,86 @@ def test_purge_outcome_states() -> None:
 
     still = classify(spool(["d00085-001"]))
     check("files remaining in scope is 1", purge_outcome(1, 0, still, frozenset()).code, 1)
+
+
+def test_parse_retention_precedence() -> None:
+    """The last matching directive wins, and an absent one is not "off".
+
+    Both rules were previously reachable only through retention_state, which
+    carried `pragma: no cover`, so the only thing that ever exercised them was
+    an end-to-end run on a machine whose config happened to have the right
+    shape. The "last wins" rule had already been got wrong once: a hand-edited
+    config with No followed by Yes reported RETENTION: OFF on a host that was
+    retaining documents, which is danger reported as safety.
+    """
+    cases = [
+        (b"", True, "an absent directive means the compiled default, which keeps"),
+        (b"PreserveJobFiles No\n", False, "an explicit No"),
+        (b"PreserveJobFiles Yes\n", True, "an explicit Yes"),
+        (b"PreserveJobFiles No\nPreserveJobFiles Yes\n", True, "the LAST wins"),
+        (b"PreserveJobFiles Yes\nPreserveJobFiles No\n", False, "the last wins both ways"),
+        (b"  preservejobfiles   off  \n", False, "case and leading whitespace"),
+        (b"PreserveJobFiles 0\n", False, "0 counts as off"),
+        (b"# PreserveJobFiles Yes\n", True, "a commented directive is not a directive"),
+        (b"# d\xe9partement\nPreserveJobFiles No\n", False, "a non-UTF-8 byte elsewhere"),
+    ]
+    for body, want, why in cases:
+        check(f"retention, {why}", parse_retention(body), want)
+
+
+def test_delete_maps_every_failure_to_the_right_outcome() -> None:
+    """The error-to-outcome mapping IS this function's logic, and it was
+    untestable while the whole function carried `pragma: no cover`.
+
+    Getting it wrong is bug 5 in this file's header: sudo rm's return code was
+    discarded, a permissions failure printed "something is recreating them",
+    and the user went hunting a process that did not exist. A file that could
+    not be removed must be counted as failed, never as deleted, because
+    `deleted` is what the caller turns into "your document is gone".
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        roots = (root,)
+        entries = (Entry(name="d00085-001", kind=Kind.DOCUMENT, job=85),)
+
+        def run(on_unlink: BaseException | None,
+                on_resolve: BaseException | None = None) -> tuple[int, int]:
+            def fake_unlink(p: pathlib.Path) -> None:
+                if on_unlink is not None:
+                    raise on_unlink
+
+            def fake_resolve(p: pathlib.Path) -> pathlib.Path:
+                if on_resolve is not None:
+                    raise on_resolve
+                return p
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                return delete(str(root), entries, roots,
+                              unlink=fake_unlink, resolve=fake_resolve)
+
+        check("a clean unlink is deleted", run(None), (1, 0))
+        check("FileNotFoundError is deleted, the file is gone either way",
+              run(FileNotFoundError()), (1, 0))
+        check("PermissionError is FAILED, never deleted",
+              run(PermissionError()), (0, 1))
+        check("IsADirectoryError is failed", run(IsADirectoryError()), (0, 1))
+        check("EROFS on a read-only spool is failed",
+              run(OSError(30, "Read-only file system")), (0, 1))
+        check("an OSError from resolve is failed", run(None, OSError()), (0, 1))
+        check("a symlink loop, RuntimeError from resolve, is failed",
+              run(None, RuntimeError()), (0, 1))
+
+        # Containment must be decided BEFORE the unlink, not after it. This
+        # unlink fails the test loudly if it is ever reached.
+        def must_not_run(p: pathlib.Path) -> None:
+            raise AssertionError(f"unlink was called on a refused path: {p}")
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            got = delete(str(root), entries, roots, unlink=must_not_run,
+                         resolve=lambda p: pathlib.Path("/somewhere/else/x"))
+        check("a target resolving outside the roots is refused", got, (0, 1))
+        check_true("and the refusal is printed", "REFUSED" in buf.getvalue())
 
 
 def main() -> int:
