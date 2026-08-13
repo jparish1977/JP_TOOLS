@@ -56,8 +56,10 @@ code always 0", "others list truncated" -- all in untested main()/CLI logic.
 """
 
 import importlib.util
+import os
 import pathlib
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -512,6 +514,56 @@ def test_no_jobs_requested() -> None:
     audit = classify(spool(["d00077-001"]))
     check("nothing targeted", len(audit.targeted), 0)
     check_true("no targeted section", "JOBS YOU ASKED ABOUT" not in "\n".join(render(audit, frozenset())))
+
+
+def test_walk_against_a_real_filesystem() -> None:
+    """The one test that touches disk, and it exists on purpose.
+
+    Every test above drives pure functions with literal data, which is why
+    read_spool -- the layer carrying `pragma: no cover` -- produced nearly
+    every serious bug on this branch: an unreadable TempDir read as clean, a
+    subdirectory dropped with its contents, a symlink followed and reported as
+    destroyed. Those live in traversal, not in classification, so classification
+    tests cannot see them. No root and no printer needed.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / ".cache" / "deep").mkdir(parents=True)
+        (root / ".cache" / "deep" / "leak.ps").write_text("%!PS\nnested\n")
+        (root / ".cache" / "driver.ppd").write_text('*PPD-Adobe: "4.3"\n')
+        (root / "plain.ps").write_text("%!PS\ntop level\n")
+        (root / "empty").touch()
+        os.symlink("/etc/passwd", root / "a-link")
+        try:
+            os.mkfifo(root / "a-fifo")
+            have_fifo = True
+        except (OSError, AttributeError):
+            have_fifo = False
+
+        found: list = []
+        unexamined: list = []
+        spool_audit._walk_temp(root, "tmp", "", found, unexamined)
+
+        names = sorted(f.name for f in found)
+        check("nested file found", "\n".join(names).count(".cache/deep/leak.ps"), 1)
+        check_true("top level found", "plain.ps" in names)
+        check_true("nested ppd found", ".cache/driver.ppd" in names)
+
+        notes = "\n".join(unexamined)
+        check_true("symlink not followed", "a-link -> /etc/passwd" in notes)
+        check_true("and says so", "would not remove the target" in notes)
+        check_true("symlink not in found", not any("a-link" in n for n in names))
+        if have_fifo:
+            check_true("fifo reported", "a-fifo" in notes and "not a regular file" in notes)
+
+        # The nested PPD must still classify as a harmless driver cache, and
+        # the nested document must not.
+        audit = classify(Listing(Verdict.CLEAN, (), tuple(found), tuple(unexamined)))
+        content = sorted(e.name for e in audit.others)
+        check_true("nested document counted", any("leak.ps" in c for c in content))
+        check_true("nested ppd is an artifact", any("driver.ppd" in e.name for e in audit.artifacts))
+        check_true("empty file is an artifact", any("empty" in e.name for e in audit.artifacts))
+        check("cannot be clean with a symlink present", audit.exit_code, 2)
 
 
 def main() -> int:

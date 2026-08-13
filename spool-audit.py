@@ -210,6 +210,8 @@ def temp_child_note(
             "removing it would not remove the target)"
         )
     if is_dir:
+        # Callers recurse into real directories. This branch remains for a
+        # directory that cannot be read, and for callers that do not descend.
         return f"{label}/{name}/ (subdirectory, not examined)"
     if not is_regular:
         return f"{label}/{name} (not a regular file, not examined)"
@@ -465,6 +467,53 @@ def _sudo_ls(path: str, files_only: bool = False) -> tuple[Verdict, tuple[str, .
     return Verdict.DENIED, ()
 
 
+def _walk_temp(  # pragma: no cover
+    directory: Path,
+    label: str,
+    prefix: str,
+    found: list[TempFile],
+    unexamined: list[str],
+    depth: int = 0,
+) -> None:
+    """Collect regular files under a TempDir, descending into subdirectories.
+
+    Flagging a subdirectory as unexaminable turned a silent miss into a
+    permanent false alarm: a real filter chain creates tmp/.cache, so the tool
+    reported INCOMPLETE forever on any machine that had ever printed properly
+    and could never say clean. Recurring known-good flags train you to skim the
+    report, which is worse than not running it. So look inside instead.
+
+    Symlinks are never followed, at any depth.
+    """
+    if depth > 8:
+        unexamined.append(f"{label}/{prefix} (nested deeper than 8, not examined)")
+        return
+    try:
+        children = sorted(directory.iterdir())
+    except OSError as exc:
+        unexamined.append(f"{label}/{prefix} (unreadable: {exc.__class__.__name__})")
+        return
+
+    for f in children:
+        link = f.is_symlink()
+        try:
+            target = os.readlink(f) if link else "?"
+        except OSError:
+            target = "?"
+        name = f"{prefix}{f.name}"
+        if not link and f.is_dir():
+            _walk_temp(f, label, f"{name}/", found, unexamined, depth + 1)
+            continue
+        note = temp_child_note(
+            label, name, is_symlink=link, is_dir=False,
+            is_regular=not link and f.is_file(), target=target,
+        )
+        if note is None:
+            found.append(TempFile(name=name, size=f.stat().st_size, head=_head(f)))
+        else:
+            unexamined.append(note)
+
+
 def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: no cover
     """List the spool and its TempDir, distinguishing denied from missing."""
     root = Path(spool)
@@ -488,29 +537,12 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
     label = TEMP_SUBDIR if tdir == root / TEMP_SUBDIR else str(tdir)
     if tdir.exists():
         try:
-            children = sorted(tdir.iterdir())
-            regular = []
-            for f in children:
-                link = f.is_symlink()
-                try:
-                    target = os.readlink(f) if link else "?"
-                except OSError:
-                    target = "?"
-                note = temp_child_note(
-                    label,
-                    f.name,
-                    is_symlink=link,
-                    is_dir=not link and f.is_dir(),
-                    is_regular=not link and f.is_file(),
-                    target=target,
-                )
-                if note is None:
-                    regular.append(f)
-                else:
-                    unexamined.append(note)
-            temp = tuple(
-                TempFile(name=f.name, size=f.stat().st_size, head=_head(f)) for f in regular
-            )
+            # Probe readability here so PermissionError still routes to the
+            # sudo escalation below; _walk_temp records its own read failures.
+            next(tdir.iterdir(), None)
+            found: list[TempFile] = []
+            _walk_temp(tdir, label, "", found, unexamined)
+            temp = tuple(found)
         except PermissionError:
             # Names only through this path. Size and header are unknown, which
             # is_harmless_temp() treats as "possibly document content" rather
