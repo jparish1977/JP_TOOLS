@@ -70,6 +70,10 @@ CONTROL = re.compile(r"^c(\d+)$")
 # purged.
 ARTIFACT = re.compile(r"^cups-.*(lockfile|notifier|socket)$|^cups-dbus-")
 
+# Print-job formats. Content beats location: a file whose first bytes say it is
+# a document is counted even if it sits somewhere caches normally live.
+DOCUMENT_MAGIC = ("%!PS", "%PDF", "\x1b%-12345X", "\x04%!", "@PJL", "\x1b*")
+
 
 class Verdict(Enum):
     """Distinct outcomes. Collapsing any two of these is the bug this prevents."""
@@ -236,7 +240,18 @@ def is_harmless_temp(f: TempFile) -> bool:
     "unknown", which stays classified as possible document content: the safe
     direction is to over-report, not to dismiss.
     """
-    if ARTIFACT.match(f.name):
+    # Checked first, so nothing below can excuse an actual document.
+    if any(f.head.startswith(m) for m in DOCUMENT_MAGIC):
+        return False
+    if ARTIFACT.match(f.name.rsplit("/", 1)[-1]):
+        return True
+    # CUPS runs filters with HOME pointed at TempDir, so a filter's XDG cache
+    # lands in tmp/.cache/. Measured in a container with a real filter chain:
+    # 24 fontconfig cache files, which the recursive walk reported as possible
+    # document content and --purge deleted. They are caches by definition of
+    # where they are. Twenty-four false positives is noise that trains you to
+    # skim the report, which is the failure this tool exists to avoid.
+    if f.name.startswith(".cache/") or "/.cache/" in f.name:
         return True
     if f.size == 0:
         return True
