@@ -100,7 +100,7 @@ jobs:
           # policed by check.py's no-cover check and read with
           # list-exemptions.py. See docs/coverage.md.
           echo "GATED (must not regress):"
-          python -m coverage report --include='spool-audit.py' --fail-under=80
+          python -m coverage report --include='spool-audit.py' --fail-under=90
           echo
           echo "NOT gated, printed so the gap is visible rather than hidden:"
           python -m coverage report || true

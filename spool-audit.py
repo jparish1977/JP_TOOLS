@@ -1222,42 +1222,24 @@ def retention_state(conf: str) -> bool | None:
     return parse_retention(body)
 
 
-def _restart_cups() -> tuple[bool, str]:  # pragma: no cover -- reason: PENDING seams, runs a live init
-    """Restart CUPS via whatever init this host has. Returns (ok, how)."""
-    if shutil.which("systemctl"):
-        rc = subprocess.run(["systemctl", "restart", "cups"], check=False)
-        if rc.returncode == 0:
-            return True, "systemctl"
-    if shutil.which("service"):
-        rc = subprocess.run(["service", "cups", "restart"], check=False)
-        if rc.returncode == 0:
-            return True, "service"
-    return False, "no working init command"
+def rewrite_conf(body: bytes) -> bytes:
+    """The config with PreserveJobFiles set to No, replacing or appending.
 
+    Pure, and bytes end to end. Reading with errors="replace" and writing the
+    result back was a lossy round-trip of the machine's printer config: a
+    Latin-1 comment came back as U+FFFD, and the replacement character is
+    unencodable in an ASCII locale. UnicodeEncodeError is a ValueError, which
+    `except OSError` does not catch, so cupsd.conf was left at 0 bytes with an
+    uncaught traceback and exit 1, the code reserved for "content you care
+    about is still there". Bytes cannot be mistranscoded and cannot raise on
+    encode. This file is a config, not text we need to interpret.
 
-def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover -- reason: PENDING seams, rewrites a live cupsd.conf as root
-    """Set PreserveJobFiles No and restart CUPS. Returns (ok, detail).
-
-    The path is passed as an argument, never interpolated into a shell string:
-    this runs under sudo, and a conf path containing shell metacharacters would
-    otherwise execute as root.
+    EVERY matching directive is replaced, not the first. cupsd honours the last
+    one, so replacing only the first would leave a later Yes in force and the
+    tool would report a fix that had not happened.
     """
-    # Bytes end to end. Reading with errors="replace" and writing the result
-    # back is a lossy round-trip of the machine's printer config: a Latin-1
-    # comment or printer name came back as U+FFFD, so `--fix` silently corrupted
-    # every non-UTF-8 byte in the file. Worse, the replacement character is
-    # unencodable in an ASCII locale, and UnicodeEncodeError is a ValueError,
-    # which `except OSError` does not catch -- cupsd.conf was left at 0 bytes
-    # with an uncaught traceback and exit 1, the code reserved for "content you
-    # care about is still there". Bytes cannot be mistranscoded and cannot raise
-    # on encode. This file is a config, not text we need to interpret.
-    try:
-        lines = Path(conf).read_bytes().splitlines()
-    except OSError as exc:
-        return False, f"could not read {conf}: {exc.__class__.__name__}"
-
     out, replaced = [], False
-    for line in lines:
+    for line in body.splitlines():
         if re.match(rb"^\s*PreserveJobFiles\b", line, re.IGNORECASE):
             out.append(b"PreserveJobFiles No")
             replaced = True
@@ -1265,45 +1247,51 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover -- rea
             out.append(line)
     if not replaced:
         out.append(b"PreserveJobFiles No")
-    body = b"\n".join(out) + b"\n"
+    return b"\n".join(out) + b"\n"
 
-    # The write truncates before it writes, so an interrupted write leaves the
-    # daemon's config empty and nothing to restore from. Copy it aside first.
-    backup = Path(f"{conf}.spool-audit.bak")
-    # Never overwrite: running --fix twice used to replace the pre-fix original
-    # with the already-fixed copy, leaving nothing to restore. Done in Python
-    # rather than `cp -p -n`, which is a crash path when cp is not on PATH and
-    # warns on coreutils >= 9.2.
-    backup_ok = True
-    if not backup.exists():
-        try:
-            shutil.copy2(conf, backup)
-        except OSError:
-            backup_ok = False
-    if not backup_ok:
-        # The copy exists precisely because the write truncates. Proceeding
-        # without it means an interrupted write leaves an empty cupsd.conf and
-        # nothing to restore from.
-        return False, f"could not back up {conf}; refusing to rewrite it"
-    # Written in Python rather than piped through `tee`, for the same reason the
-    # backup above no longer shells out to `cp`: an absent tee raises
-    # FileNotFoundError, which nothing catches and which exits 1 -- the code
-    # this tool reserves for "content you care about is still there", so a
-    # wrapper could not tell a crash from a finding. The script already runs as
-    # root, so tee bought no privilege.
-    #
-    # Written to a temp file and renamed over the original, never truncated in
-    # place: cupsd.conf belongs to a running daemon, and any failure mid-write
-    # leaves it empty. os.replace is atomic within a directory, so the daemon
-    # sees either the old file or the new one and never a partial one. The
-    # backup above stays, because it covers the case this does not: a bad but
-    # complete rewrite.
-    try:
-        src = os.stat(conf)
-    except OSError as exc:
-        return False, f"could not stat {conf} ({exc.__class__.__name__})"
+
+def _read_conf(path: str) -> bytes:  # pragma: no cover
+    return Path(path).read_bytes()
+
+
+def _run_rc(cmd: list[str]) -> int:  # pragma: no cover
+    return subprocess.run(cmd, check=False).returncode
+
+
+def _backup_once(src: str, dest: str) -> None:
+    """Copy src to dest unless dest already exists. Raises OSError on failure.
+
+    Never overwrite: running --fix twice replaced the pre-fix original with the
+    already-fixed copy, leaving nothing to restore from. Done in Python rather
+    than `cp -p -n`, which is a crash path when cp is not on PATH and warns on
+    coreutils >= 9.2.
+    """
+    if not Path(dest).exists():
+        shutil.copy2(src, dest)
+
+
+def _write_atomic(
+    path: str,
+    body: bytes,
+    *,
+    chown: Callable[[str, int, int], None] = os.chown,
+    stat_fn: Callable[[str], os.stat_result] = os.stat,
+) -> None:
+    """Replace `path` with `body`, preserving mode and owner. Raises OSError.
+
+    Written to a temp file and renamed, never truncated in place: cupsd.conf
+    belongs to a running daemon, and any failure mid-write leaves it empty.
+    os.replace is atomic within a directory, so the daemon sees either the old
+    file or the new one and never a partial one.
+
+    `chown` and `stat_fn` are injectable because the dangerous branch is the
+    one where chown fails AND the ownership then differs, which a non-root user
+    cannot provoke: their temp file already has the ownership they wanted, so
+    the tolerant path is the only one they can reach for real.
+    """
+    src = stat_fn(path)
     fd, tmp_name = tempfile.mkstemp(
-        dir=str(Path(conf).parent), prefix=".spool-audit-", suffix=".tmp"
+        dir=str(Path(path).parent), prefix=".spool-audit-", suffix=".tmp"
     )
     try:
         with os.fdopen(fd, "wb") as fh:
@@ -1315,23 +1303,86 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover -- rea
             os.fsync(fh.fileno())
         # mkstemp creates 0600 owned by the caller, and os.replace keeps the
         # REPLACEMENT's mode and owner, not the original's. Renaming without
-        # this would quietly change cupsd.conf from its packaged root:lp 0640 --
+        # this would quietly change cupsd.conf from its packaged root:lp 0640,
         # a permissions change nobody asked for, made by a tool whose whole
         # purpose is not to damage what it touches.
         os.chmod(tmp_name, stat.S_IMODE(src.st_mode))
         try:
-            os.chown(tmp_name, src.st_uid, src.st_gid)
+            chown(tmp_name, src.st_uid, src.st_gid)
         except OSError:
+            # Tolerable only if the file already has the ownership we wanted,
+            # which is the ordinary case when not running as root. Otherwise
+            # the rename would change it, so refuse.
             now = os.stat(tmp_name)
             if (now.st_uid, now.st_gid) != (src.st_uid, src.st_gid):
                 raise
-        os.replace(tmp_name, conf)
-    except OSError as exc:
+        os.replace(tmp_name, path)
+    except OSError:
         with contextlib.suppress(OSError):
             os.unlink(tmp_name)
+        raise
+
+
+def _restart_cups(
+    *,
+    which: Callable[[str], str | None] = shutil.which,
+    run: Callable[[list[str]], int] = _run_rc,
+) -> tuple[bool, str]:
+    """Restart CUPS via whatever init this host has. Returns (ok, how).
+
+    A present-but-failing init falls through to the next one: systemctl exists
+    on hosts where it is not the running init, where it exits non-zero, and
+    stopping there would report "no working init command" on a machine that has
+    `service`.
+    """
+    for name, cmd in (
+        ("systemctl", ["systemctl", "restart", "cups"]),
+        ("service", ["service", "cups", "restart"]),
+    ):
+        if which(name) and run(cmd) == 0:
+            return True, name
+    return False, "no working init command"
+
+
+def disable_retention(
+    conf: str,
+    *,
+    read: Callable[[str], bytes] = _read_conf,
+    backup: Callable[[str, str], None] = _backup_once,
+    write: Callable[[str, bytes], None] = _write_atomic,
+    restart: Callable[[], tuple[bool, str]] = _restart_cups,
+) -> tuple[bool, str]:
+    """Set PreserveJobFiles No and restart CUPS. Returns (ok, detail).
+
+    The path is passed as an argument, never interpolated into a shell string:
+    this runs under sudo, and a conf path containing shell metacharacters would
+    otherwise execute as root.
+
+    Every IO step is injectable. What is left here is the order of operations
+    and the mapping from each failure to what the operator is told, which is
+    the whole logic of a function that rewrites a live system config as root,
+    and which was untestable while the whole thing carried `pragma: no cover`.
+    """
+    try:
+        body = rewrite_conf(read(conf))
+    except OSError as exc:
+        return False, f"could not read {conf}: {exc.__class__.__name__}"
+
+    # The backup comes first because the write replaces the file. Refusing
+    # without one is deliberate: a --fix that cannot be undone on a config it
+    # is about to rewrite is not worth the risk of the fix.
+    backup_path = f"{conf}.spool-audit.bak"
+    try:
+        backup(conf, backup_path)
+    except OSError:
+        return False, f"could not back up {conf}; refusing to rewrite it"
+
+    try:
+        write(conf, body)
+    except OSError as exc:
         return False, (
             f"could not write {conf} ({exc.__class__.__name__}); "
-            f"original untouched, backup at {backup}"
+            f"original untouched, backup at {backup_path}"
         )
 
     if not should_restart_cups(conf):
@@ -1340,27 +1391,30 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover -- rea
         # reported success while /etc/cups/cupsd.conf was untouched, then
         # "verified" by re-reading the file it had just written.
         return True, f"wrote {conf} (not the system config, so cups was not restarted)"
-    ok, how = _restart_cups()
+    ok, how = restart()
     if not ok:
         return False, (
             f"config updated but CUPS was NOT restarted ({how}). "
             "The running daemon still has the old setting."
         )
 
-    # Re-read from disk rather than trusting `body`: the point is to confirm what
-    # the daemon will actually read. An unreadable file here is a failure, not a
-    # pass -- returning True on an empty read would report a fix that may not be
-    # on disk at all.
+    # Re-read from disk rather than trusting `body`: the point is to confirm
+    # what the daemon will actually read. An unreadable file here is a failure,
+    # not a pass.
     try:
-        verified = Path(conf).read_bytes()
+        verified = read(conf)
     except OSError as exc:
         return False, (
             f"wrote and restarted, but could not re-read {conf} "
             f"({exc.__class__.__name__}) to confirm the setting"
         )
-    for line in verified.splitlines():
-        if re.match(rb"^\s*PreserveJobFiles\s+No\b", line, re.IGNORECASE):
-            return True, f"restarted via {how}"
+    # parse_retention, NOT a second matcher. The check that used to live here
+    # returned True on the FIRST "PreserveJobFiles No" while parse_retention
+    # honours the LAST directive, so on a config saying No then Yes the two
+    # disagreed: --fix would report success over a host still retaining. One
+    # rule, one function, both callers.
+    if not parse_retention(verified):
+        return True, f"restarted via {how}"
     return False, "config did not contain PreserveJobFiles No after writing"
 
 

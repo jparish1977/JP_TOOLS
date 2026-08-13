@@ -1271,6 +1271,192 @@ def test_retention_state_reads_and_delegates() -> None:
               spool_audit.retention_state(str(latin1)), False)
 
 
+def test_rewrite_conf_replaces_every_directive() -> None:
+    """Replacing only the FIRST would leave a later Yes in force, and cupsd
+    honours the last one, so --fix would report a fix that had not happened."""
+    rewrite = spool_audit.rewrite_conf
+    check("an absent directive is appended", rewrite(b"LogLevel warn\n"),
+          b"LogLevel warn\nPreserveJobFiles No\n")
+    check("an existing one is replaced", rewrite(b"PreserveJobFiles Yes\n"),
+          b"PreserveJobFiles No\n")
+    check("EVERY one is replaced, not just the first",
+          rewrite(b"PreserveJobFiles Yes\nLogLevel warn\nPreserveJobFiles Yes\n"),
+          b"PreserveJobFiles No\nLogLevel warn\nPreserveJobFiles No\n")
+    check("a non-UTF-8 byte elsewhere survives untouched",
+          rewrite(b"# d\xe9partement\nPreserveJobFiles Yes\n"),
+          b"# d\xe9partement\nPreserveJobFiles No\n")
+    # The output of a rewrite must satisfy the reader. These are the two halves
+    # of --fix and they used to use different matching rules.
+    check_true("and the result reads as not retaining",
+               spool_audit.parse_retention(rewrite(b"PreserveJobFiles Yes\n")) is False)
+
+
+def test_restart_cups_falls_through_a_failing_init() -> None:
+    """systemctl exists on hosts where it is not the running init and exits
+    non-zero. Stopping there reports "no working init command" on a machine
+    that has `service` and would have worked."""
+    restart = spool_audit._restart_cups
+
+    def which(present: set) -> object:
+        return lambda name: f"/usr/bin/{name}" if name in present else None
+
+    calls: list = []
+
+    def runner(rcs: dict) -> object:
+        def go(cmd: list) -> int:
+            calls.append(cmd[0])
+            return rcs.get(cmd[0], 0)
+        return go
+
+    calls.clear()
+    check("systemctl working is used",
+          restart(which=which({"systemctl", "service"}), run=runner({})),
+          (True, "systemctl"))
+    check("and service is never tried", calls, ["systemctl"])
+
+    calls.clear()
+    check("a FAILING systemctl falls through to service",
+          restart(which=which({"systemctl", "service"}), run=runner({"systemctl": 1})),
+          (True, "service"))
+    check("and both were attempted", calls, ["systemctl", "service"])
+
+    check("no systemctl at all uses service",
+          restart(which=which({"service"}), run=runner({})), (True, "service"))
+    check("neither present is an honest failure",
+          restart(which=which(set()), run=runner({})),
+          (False, "no working init command"))
+    check("both present and both failing is a failure",
+          restart(which=which({"systemctl", "service"}),
+                  run=runner({"systemctl": 1, "service": 1})),
+          (False, "no working init command"))
+
+
+def test_write_atomic_preserves_mode_and_never_half_writes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        conf = root / "cupsd.conf"
+        conf.write_bytes(b"original\n")
+        os.chmod(conf, 0o640)
+
+        spool_audit._write_atomic(str(conf), b"replaced\n")
+        check("the content is replaced", conf.read_bytes(), b"replaced\n")
+        check("the mode is preserved", oct(conf.stat().st_mode & 0o777), "0o640")
+        check("no temp file is left behind",
+              [p.name for p in root.iterdir() if p.name.startswith(".spool-audit-")], [])
+
+        def bad_chown(_p: str, _u: int, _g: int) -> None:
+            raise PermissionError(1, "Operation not permitted")
+
+        # A chown that fails but leaves the ownership already correct is fine,
+        # and is the ordinary case for a non-root user: their temp file is
+        # already theirs. This is the only branch reachable without injection,
+        # which is exactly why the dangerous one below needed a seam.
+        conf.write_bytes(b"original\n")
+        spool_audit._write_atomic(str(conf), b"tolerated\n", chown=bad_chown)
+        check("a chown failure with ownership already correct proceeds",
+              conf.read_bytes(), b"tolerated\n")
+
+        # A chown that fails AND leaves the WRONG owner must abort: the rename
+        # would otherwise hand cupsd.conf to a different user, quietly, from a
+        # tool whose entire purpose is not to damage what it touches.
+        real = os.stat(conf)
+        alien = os.stat_result((real.st_mode, 0, 0, 1, 999999, 999999, 0, 0, 0, 0))
+        conf.write_bytes(b"original\n")
+        try:
+            spool_audit._write_atomic(str(conf), b"nope\n", chown=bad_chown,
+                                      stat_fn=lambda _p: alien)
+            check("a chown failure that would change ownership must raise",
+                  "no raise", "OSError")
+        except OSError:
+            pass
+        check("and the original is untouched", conf.read_bytes(), b"original\n")
+        check("and no temp file is left behind",
+              [p.name for p in root.iterdir() if p.name.startswith(".spool-audit-")], [])
+
+
+def test_backup_once_never_overwrites() -> None:
+    """Running --fix twice replaced the pre-fix original with the already-fixed
+    copy, leaving nothing to restore from."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        conf = root / "c.conf"
+        bak = root / "c.conf.bak"
+        conf.write_bytes(b"before the fix\n")
+        spool_audit._backup_once(str(conf), str(bak))
+        check("the first backup is taken", bak.read_bytes(), b"before the fix\n")
+
+        conf.write_bytes(b"after the fix\n")
+        spool_audit._backup_once(str(conf), str(bak))
+        check("the second run does NOT overwrite it", bak.read_bytes(), b"before the fix\n")
+
+
+def test_disable_retention_maps_each_failure_to_what_it_tells_the_operator() -> None:
+    """The order of operations and the failure messages are the whole logic of
+    a function that rewrites a live system config as root. Every step is
+    injected here, so no cupsd.conf is touched and no daemon is restarted."""
+    disable = spool_audit.disable_retention
+    ok_read = lambda _p: b"PreserveJobFiles No\n"  # noqa: E731
+    noop = lambda *_a: None  # noqa: E731
+
+    def boom(exc: BaseException) -> object:
+        def go(*_a: object) -> None:
+            raise exc
+        return go
+
+    # A conf that is not the system one must not restart the daemon at all.
+    ok, detail = disable("/tmp/not-the-system-conf", read=ok_read, backup=noop,
+                         write=noop, restart=boom(AssertionError("restarted!")))
+    check_true("a non-system conf is written without restarting", ok)
+    check_true("and says so", "not the system config" in detail)
+
+    ok, detail = disable("/tmp/x", read=boom(PermissionError()), backup=noop,
+                         write=noop, restart=lambda: (True, "systemctl"))
+    check("an unreadable conf fails", ok, False)
+    check_true("naming the error class", "PermissionError" in detail)
+
+    # The backup must be taken BEFORE the write, and a failed backup must stop
+    # the whole thing: a --fix that cannot be undone is not worth the risk.
+    ok, detail = disable("/tmp/x", read=ok_read, backup=boom(OSError()),
+                         write=boom(AssertionError("wrote without a backup!")),
+                         restart=lambda: (True, "systemctl"))
+    check("a failed backup refuses to rewrite", ok, False)
+    check_true("and says why", "refusing to rewrite" in detail)
+
+    ok, detail = disable("/tmp/x", read=ok_read, backup=noop, write=boom(OSError()),
+                         restart=lambda: (True, "systemctl"))
+    check("a failed write fails", ok, False)
+    check_true("and promises the original is untouched", "original untouched" in detail)
+
+    # Written but not restarted is NOT success: the daemon still has the old
+    # setting, so documents are still being kept.
+    ok, detail = disable("/etc/cups/cupsd.conf", read=ok_read, backup=noop,
+                         write=noop, restart=lambda: (False, "no working init command"))
+    check("a failed restart is a failure", ok, False)
+    check_true("and says the running daemon is unchanged",
+               "still has the old setting" in detail)
+
+    # The verify re-reads from disk. A config that does not actually say No
+    # must not be reported as fixed, however well the write went.
+    ok, detail = disable("/etc/cups/cupsd.conf", read=lambda _p: b"PreserveJobFiles Yes\n",
+                         backup=noop, write=noop, restart=lambda: (True, "systemctl"))
+    check("a config that still retains is not a success", ok, False)
+
+    # The case that separates a shared rule from a second matcher. cupsd
+    # honours the LAST directive, so this config RETAINS. A verify that stops
+    # at the first "PreserveJobFiles No" reports the fix as done over a host
+    # that is still keeping documents, which is danger reported as safety, and
+    # it is why the verify calls parse_retention rather than matching again.
+    ok, detail = disable("/etc/cups/cupsd.conf",
+                         read=lambda _p: b"PreserveJobFiles No\nPreserveJobFiles Yes\n",
+                         backup=noop, write=noop, restart=lambda: (True, "systemctl"))
+    check("No followed by Yes is NOT a successful fix", ok, False)
+
+    ok, detail = disable("/etc/cups/cupsd.conf", read=ok_read, backup=noop,
+                         write=noop, restart=lambda: (True, "systemctl"))
+    check("the whole happy path succeeds", ok, True)
+    check_true("naming how it restarted", "systemctl" in detail)
+
+
 def main() -> int:
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
