@@ -66,6 +66,7 @@ WHAT COUNTS AS A LEAK
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import re
 import shutil
@@ -244,6 +245,20 @@ class Audit:
         if self.asked_for_jobs:
             return 0 if self.targeted_are_gone else 1
         return 0 if self.verdict is Verdict.CLEAN else 1
+
+
+def _safe_resolve(p: Path) -> Path | None:  # pragma: no cover
+    """resolve() or None. It touches the filesystem and CAN raise.
+
+    Same class as Path.exists() not swallowing EACCES: an unreadable component
+    anywhere in the path makes resolve() raise, and `--spool /proc/1/root/x`
+    crashed with a traceback. The containment roots are the safety boundary, so
+    a root that cannot be resolved must stop a purge rather than be guessed at.
+    """
+    try:
+        return p.resolve()
+    except OSError:
+        return None
 
 
 def is_inside(candidate: Path, roots: tuple[Path, ...]) -> bool:
@@ -716,8 +731,16 @@ def _walk_temp(  # pragma: no cover
             unexamined.append(note)
 
 
-def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: no cover
-    """List the spool and its TempDir, distinguishing denied from missing."""
+def read_spool(  # pragma: no cover
+    spool: str, temp_dir: str | None = None, user_named_temp: bool = False
+) -> Listing:
+    """List the spool and its TempDir, distinguishing denied from missing.
+
+    `user_named_temp` is True only for an explicit --temp. A TempDir that came
+    from cups-files.conf is NOT user-chosen, and gating the symlink guard on
+    "temp_dir is None" let a config-derived symlink be followed with no warning
+    -- the same "the user chose it" reasoning applied to a path they never saw.
+    """
     root = Path(spool)
     try:
         top = tuple(sorted(p.name for p in root.iterdir()))
@@ -730,8 +753,10 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
         return Listing(Verdict.MISSING)
     except NotADirectoryError:
         return Listing(Verdict.NOT_A_DIRECTORY)
-    except OSError:
-        return Listing(Verdict.DENIED)
+    except OSError as exc:
+        # ELOOP, ESTALE, EIO. Calling all of them "permission denied, re-run
+        # with sudo" sends the user to do something that will fail identically.
+        return Listing(Verdict.DENIED, (f"({exc.__class__.__name__})",))
 
     temp: tuple[TempFile, ...] = ()
     unexamined: list[str] = []
@@ -742,16 +767,17 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
     # still on disk. The absolute case worked only by accident of pathlib's
     # absolute-operand rule.
     default_tmp = root / TEMP_SUBDIR
-    tdir = Path(temp_dir).resolve() if temp_dir else default_tmp
+    tdir = (_safe_resolve(Path(temp_dir)) or Path(temp_dir)) if temp_dir else default_tmp
     # A TempDir that is ITSELF a symlink was never checked -- only its children
     # were -- so `<spool>/tmp -> /anywhere` made --purge delete outside the
     # named spool and print SCOPE CLEAN. If the user named it with --temp they
     # chose it; the implicit default must not silently leave the spool.
-    if temp_dir is None:
+    if not user_named_temp:
         try:
-            if default_tmp.is_symlink():
+            if Path(temp_dir).is_symlink() if temp_dir else default_tmp.is_symlink():
+                which = Path(temp_dir) if temp_dir else default_tmp
                 unexamined.append(
-                    f"{TEMP_SUBDIR} -> {os.readlink(default_tmp)} "
+                    f"{which} -> {os.readlink(which)} "
                     "(TempDir is a symlink, NOT followed; pass --temp to audit it)"
                 )
                 tdir = None  # type: ignore[assignment]
@@ -760,9 +786,10 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
     # Compare against BOTH forms. Comparing a resolved --temp against an
     # unresolved default never matched, so the ordinary case started labelling
     # entries with the whole spool path instead of "tmp".
+    resolved_default = _safe_resolve(default_tmp)
     label = (
         TEMP_SUBDIR
-        if tdir is not None and tdir in (default_tmp, default_tmp.resolve())
+        if tdir is not None and tdir in (default_tmp, resolved_default)
         else str(tdir)
     )
     # If TempDir is elsewhere, <spool>/tmp is stripped from the top-level
@@ -774,7 +801,7 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
     # exit 0.
     if (
         tdir is not None
-        and tdir not in (default_tmp, default_tmp.resolve())
+        and tdir not in (default_tmp, resolved_default)
         and TEMP_SUBDIR in top
     ):
         unexamined.append(
@@ -849,11 +876,21 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
         try:
             st = f.lstat()
         except PermissionError:
-            # The sudo listing path cannot stat children. Unknown size and
-            # header means is_harmless_temp() treats it as possible content --
-            # the same answer the sudo TempDir path gives, so the two paths
-            # agree instead of one reporting "vanished".
-            extra.append(TempFile(name=n, size=-1, head=""))
+            # The sudo listing path cannot stat children, so ask find what type
+            # it is rather than guessing. Guessing "file" turned a top-level
+            # DIRECTORY into counted content, and --purge then unlink()ed it,
+            # failed, and exited 1 on a spool that was fine -- a different
+            # classification from the direct path, not the intended superset.
+            kinds = {
+                row[2]: row[0]
+                for row in parse_find_rows(_sudo_ls(str(root), files_only=True)[1][0] or "")
+            }
+            if kinds.get(n) == "d":
+                unexamined.append(f"{n}/ (subdirectory, not examined)")
+            elif kinds.get(n) == "l":
+                unexamined.append(f"{n} (symlink, NOT followed)")
+            else:
+                extra.append(TempFile(name=n, size=-1, head=""))
             continue
         except OSError:
             unexamined.append(f"{n} (vanished while reading)")
@@ -992,9 +1029,15 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
         out.append("PreserveJobFiles No")
     body = "\n".join(out) + "\n"
 
+    # tee opens with O_TRUNC before writing, so an interrupted write leaves the
+    # daemon's config empty and nothing to restore from. Copy it aside first.
+    backup = f"{conf}.spool-audit.bak"
+    saved = subprocess.run(_priv(["cp", "-p", conf, backup]), check=False)
     write = subprocess.run(
         _priv(["tee", conf]), input=body, capture_output=True, text=True, check=False
     )
+    if write.returncode != 0 and saved.returncode == 0:
+        return False, f"could not write {conf}; original preserved at {backup}"
     if write.returncode != 0:
         return False, f"could not write {conf}"
 
@@ -1013,6 +1056,14 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Filenames are bytes on Linux and arrive as str with lone surrogates, from
+    # both listing paths. print() encodes strictly and dies mid-report with
+    # UnicodeEncodeError, exit 1 -- which this tool uses for "content is still
+    # there", so a wrapper cannot tell a crash from a finding. The parsing side
+    # was hardened for hostile names; the output side undid it.
+    with contextlib.suppress(AttributeError, ValueError):
+        sys.stdout.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
+
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -1035,9 +1086,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.fix:
         ok, detail = disable_retention(args.conf)
         print(f"PreserveJobFiles set to No; {detail}." if ok else f"FAILED: {detail}")
-        if not ok:
+        if not ok and not args.purge:
             return 1
-        if not args.purge:
+        if not ok:
+            # The config may be written and only the restart failed. Returning
+            # here dropped the purge -- the same early-return this block was
+            # rewritten to remove, in the failure branch instead of the success
+            # one. The documents on disk are still worth clearing.
+            print("Continuing to --purge anyway; files on disk are unaffected by the restart.")
+        elif not args.purge:
             print("Existing files are untouched. Run --purge to clear them.")
             return 0
 
@@ -1057,15 +1114,17 @@ def main(argv: list[str] | None = None) -> int:
         temp_dir = configured_tempdir(str(Path(args.conf).parent / "cups-files.conf"))
     else:
         temp_dir = None
-    audit = classify(read_spool(args.spool, temp_dir), jobs, args.include_control)
+    audit = classify(
+        read_spool(args.spool, temp_dir, user_named_temp=bool(args.temp)),
+        jobs, args.include_control,
+    )
 
     # The audited region: the spool, plus an explicitly named --temp. Anything
     # resolving outside these is refused by delete(). A TempDir reached only
     # through a symlink is deliberately NOT a root.
-    roots = [Path(args.spool).resolve()]
-    if temp_dir:
-        roots.append(Path(temp_dir).resolve())
-    allowed = tuple(roots)
+    spool_root = _safe_resolve(Path(args.spool))
+    temp_root = _safe_resolve(Path(temp_dir)) if temp_dir else None
+    allowed = tuple(r for r in (spool_root, temp_root) if r is not None)
 
     if not audit.readable:
         for line in render(audit, jobs):
@@ -1073,15 +1132,25 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.purge:
+        if spool_root is None or (temp_dir and temp_root is None):
+            print("REFUSING TO PURGE: the audited path could not be resolved,")
+            print("  so nothing can be proven to be inside it.")
+            return 2
         victims = victims_for(audit)
         if not victims:
+            if audit.uncounted_control:
+                print(
+                    f"Nothing to purge, but {audit.uncounted_control} control file(s) "
+                    "remain, carrying the job title. Use --include-control."
+                )
             if audit.unexamined:
                 print(f"Nothing to purge, but {len(audit.unexamined)} area(s) could not be examined:")
                 for u in audit.unexamined:
                     print(f"  {u}")
                 print("This is NOT a clean result.")
                 return 2
-            print("Nothing to purge.")
+            if not audit.uncounted_control:
+                print("Nothing to purge.")
             return 0
         scope = f"job(s) {', '.join(str(j) for j in sorted(jobs))}" if jobs else "all retained files"
         print(f"Deleting {len(victims)} file(s) [{scope}]...")
@@ -1095,7 +1164,10 @@ def main(argv: list[str] | None = None) -> int:
             # written to fix in the first place.
             print("Not files being recreated: the removals themselves failed.")
             return 1
-        after = classify(read_spool(args.spool, temp_dir), jobs, args.include_control)
+        after = classify(
+            read_spool(args.spool, temp_dir, user_named_temp=bool(args.temp)),
+            jobs, args.include_control,
+        )
         if not after.readable:
             print(f"{deleted} removed, but the spool could not be re-read to confirm.")
             return 2
