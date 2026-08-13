@@ -111,6 +111,9 @@ temp_child_note = spool_audit.temp_child_note
 is_inside = spool_audit.is_inside
 parse_retention = spool_audit.parse_retention
 delete = spool_audit.delete
+read_spool = spool_audit.read_spool
+classify_top = spool_audit.classify_top
+TopEntry = spool_audit.TopEntry
 Entry = spool_audit.Entry
 Verdict = spool_audit.Verdict
 Kind = spool_audit.Kind
@@ -891,12 +894,11 @@ def test_unreadable_tempdir_is_never_clean() -> None:
         def deny(*_args: object, **_kwargs: object) -> None:
             raise PermissionError(13, "Permission denied")
 
-        original = spool_audit._walk_temp
-        spool_audit._walk_temp = deny  # type: ignore[assignment]
-        try:
-            listing = spool_audit.read_spool(str(root))
-        finally:
-            spool_audit._walk_temp = original  # type: ignore[assignment]
+        # Passed in, not monkeypatched onto the module. The first version of
+        # this test swapped spool_audit._walk_temp, which worked only while
+        # read_spool looked the function up as a global; giving read_spool a
+        # real seam broke it immediately and correctly.
+        listing = read_spool(str(root), walk=deny)
 
         audit = classify(listing, frozenset(), include_control=True)
         report = "\n".join(render(audit, frozenset()))
@@ -1120,6 +1122,96 @@ def test_delete_maps_every_failure_to_the_right_outcome() -> None:
                          resolve=lambda p: pathlib.Path("/somewhere/else/x"))
         check("a target resolving outside the roots is refused", got, (0, 1))
         check_true("and the refusal is printed", "REFUSED" in buf.getvalue())
+
+
+def test_classify_top_treats_named_and_unnamed_alike() -> None:
+    """The rule that must hold at BOTH sites, now that there is only one.
+
+    This was two near-identical blocks, and the bug they produced is the worst
+    this tool can have: the never-follow-symlinks rule was applied to TempDir
+    and not to the top level, so a symlink named d00085-001 was unlinked, "1
+    removed" was printed, and the target stayed readable. False assurance of
+    destruction.
+    """
+    def top(name: str, **kw: bool) -> object:
+        opts = {"is_symlink": False, "is_dir": False, "is_regular": True}
+        opts.update(kw)
+        return classify_top(TopEntry(name=name, target="/elsewhere", **opts))  # type: ignore[arg-type]
+
+    plain = top("d00085-001")
+    check("a real document file is examined normally", (plain.note, plain.suspect), (None, False))
+    check_true("and is not read as extra content", not plain.wants_content)
+
+    link = top("d00085-001", is_symlink=True, is_regular=False)
+    check_true("a symlink NAMED like a document is not examined", link.note is not None)
+    check_true("and is suppressed from top, so it cannot become a job", link.suspect)
+
+    d = top("d00085-001", is_dir=True, is_regular=False)
+    check_true("a DIRECTORY named like a document is not examined", d.note is not None)
+    check_true("and is suppressed too", d.suspect)
+
+    ctl = top("c00085")
+    check("a real control file is examined normally", (ctl.note, ctl.suspect), (None, False))
+
+    stray = top("stray-file")
+    check_true("an unrecognised regular file is read as possible content", stray.wants_content)
+    check("and is not flagged unexamined", stray.note, None)
+
+    odd = top("stray-file", is_symlink=True, is_regular=False)
+    check_true("an unrecognised symlink is flagged, not read", odd.note is not None)
+    check_true("and is not read as content", not odd.wants_content)
+
+    fifo = top("a-pipe", is_regular=False)
+    check_true("a non-regular file is flagged rather than dropped", fifo.note is not None)
+
+
+def test_read_spool_maps_every_listing_failure_to_its_own_verdict() -> None:
+    """Four outcomes, four verdicts. Collapsing any two is the bug this tool
+    exists to prevent: the one-liner it replaced could not tell "could not
+    read" from "nothing there"."""
+    def raiser(exc: BaseException) -> object:
+        def go(_p: object) -> list[str]:
+            raise exc
+        return go
+
+    for exc, want, why in [
+        (PermissionError(), Verdict.DENIED, "unreadable"),
+        (FileNotFoundError(), Verdict.MISSING, "no such path"),
+        (NotADirectoryError(), Verdict.NOT_A_DIRECTORY, "a file, not a directory"),
+    ]:
+        got = read_spool("/does-not-matter", lister=raiser(exc))
+        check(f"listing failure, {why}", got.verdict, want)
+
+    # ELOOP, ESTALE and EIO must NOT be reported as "permission denied, re-run
+    # with sudo", which sends the user to do something that fails identically.
+    odd = read_spool("/x", lister=raiser(OSError(40, "Too many levels of symbolic links")))
+    check("an unexpected OSError is DENIED", odd.verdict, Verdict.DENIED)
+    check_true("and names the error class instead of blaming permissions",
+               any("OSError" in u for u in odd.unexamined))
+
+
+def test_read_spool_distinguishes_the_tempdir_failures() -> None:
+    """An absent TempDir is not an unexamined one. Treating it as unexamined
+    meant a spool without a tmp/ could never exit 0."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "tmp").mkdir()
+
+        def raiser(exc: BaseException) -> object:
+            def go(*_a: object, **_k: object) -> None:
+                raise exc
+            return go
+
+        gone = read_spool(str(root), walk=raiser(FileNotFoundError()))
+        check("no TempDir at all leaves nothing unexamined", list(gone.unexamined), [])
+
+        notdir = read_spool(str(root), walk=raiser(NotADirectoryError()))
+        check_true("a TempDir that is not a directory is unexamined",
+                   any("not a directory" in u for u in notdir.unexamined))
+
+        io_err = read_spool(str(root), walk=raiser(OSError(5, "I/O error")))
+        check_true("an I/O error on TempDir names the class",
+                   any("OSError" in u for u in io_err.unexamined))
 
 
 def main() -> int:

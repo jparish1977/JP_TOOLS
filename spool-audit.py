@@ -259,7 +259,7 @@ def should_restart_cups(conf: str) -> bool:
     return conf == DEFAULT_CONF
 
 
-def _safe_resolve(p: Path) -> Path | None:  # pragma: no cover
+def _safe_resolve(p: Path) -> Path | None:
     """resolve() or None. It touches the filesystem and CAN raise.
 
     Same class as Path.exists() not swallowing EACCES: an unreadable component
@@ -835,7 +835,7 @@ def _head(path: Path, n: int = 32) -> str:  # pragma: no cover
         return ""
 
 
-def _walk_temp(  # pragma: no cover
+def _walk_temp(
     directory: Path,
     label: str,
     prefix: str,
@@ -904,8 +904,84 @@ def _walk_temp(  # pragma: no cover
             unexamined.append(note)
 
 
-def read_spool(spool: str) -> Listing:  # pragma: no cover
+@dataclass(frozen=True)
+class TopEntry:
+    """One top-level spool name, with the facts read from disk about it.
+
+    Everything read_spool learns from lstat and readlink, and nothing else, so
+    the decision below can be made without a filesystem.
+    """
+
+    name: str
+    is_symlink: bool
+    is_dir: bool
+    is_regular: bool
+    target: str = "?"
+
+
+@dataclass(frozen=True)
+class TopDecision:
+    """Where a top-level entry goes. `wants_content` means read its head."""
+
+    note: str | None = None
+    suspect: bool = False
+    wants_content: bool = False
+
+
+def classify_top(e: TopEntry) -> TopDecision:
+    """Which bucket a top-level spool entry belongs in.
+
+    This was two near-identical blocks inside read_spool, one for names
+    matching d<n>-<n> or c<n> and one for everything else, differing only in
+    whether the name was suppressed from `top`. Duplicated blocks that must
+    agree are the single most repeated defect on this branch: the
+    never-follow-symlinks rule was applied to TempDir and not here, and a
+    symlink named d00085-001 was unlinked, "1 removed" printed, and the target
+    left readable. One function now, so there is no second site to forget.
+    """
+    named = bool(DOCUMENT.match(e.name) or CONTROL.match(e.name))
+    if e.is_symlink or not e.is_regular:
+        note = temp_child_note(
+            ".", e.name,
+            is_symlink=e.is_symlink,
+            is_dir=e.is_dir,
+            is_regular=False,
+            target=e.target,
+        )
+        # `suspect` removes the name from Listing.top, which is the list
+        # classify() turns into jobs. Only a name that PARSES as a job file
+        # needs that: an unexamined symlink called d00085-001 must not become a
+        # document. A name matching neither pattern is ignored by classify()
+        # anyway, so it is left alone rather than given a second meaning here.
+        return TopDecision(
+            note=(note or f"{e.name} (not examined)").replace("./", "", 1),
+            suspect=named,
+        )
+    if named:
+        return TopDecision()
+    # Read the same way TempDir files are, so a document copied to
+    # d00085-001.bak is counted rather than dropped; `ls` would have shown it.
+    return TopDecision(wants_content=True)
+
+
+def _list_names(p: Path) -> list[str]:  # pragma: no cover
+    return sorted(q.name for q in p.iterdir())
+
+
+def read_spool(
+    spool: str,
+    *,
+    lister: Callable[[Path], list[str]] = _list_names,
+    walk: Callable[..., None] = _walk_temp,
+) -> Listing:
     """List the spool and its TempDir. Direct reads only.
+
+    `lister` and `walk` are injectable so the two error-to-verdict mappings can
+    be tested without needing a filesystem that produces ELOOP or ESTALE on
+    demand, and without needing to be a particular user. Both mappings have
+    been wrong before, and the TempDir one in the way that matters most: an
+    unreadable TempDir fell through as an empty one and printed "spool is
+    clean" over a readable document.
 
     The sudo escalation path is gone. It was a second implementation of this
     same listing and the two disagreed repeatedly -- different depth limits,
@@ -921,7 +997,7 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
     """
     root = Path(spool)
     try:
-        top = tuple(sorted(p.name for p in root.iterdir()))
+        top = tuple(lister(root))
         verdict = Verdict.CLEAN
     except PermissionError:
         return Listing(Verdict.DENIED)
@@ -957,9 +1033,9 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
             raise FileNotFoundError  # symlinked TempDir, already recorded
         # Path.exists() does NOT swallow EACCES, so probing it outside this try
         # crashed with a traceback on a real 0710 spool.
-        next(tdir.iterdir(), None)
+        lister(tdir)
         found: list[TempFile] = []
-        _walk_temp(tdir, TEMP_SUBDIR, "", found, unexamined)
+        walk(tdir, TEMP_SUBDIR, "", found, unexamined)
         temp = tuple(found)
     except PermissionError:
         # Do NOT fall through with an empty tuple: that turned an unreadable
@@ -1001,40 +1077,28 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
             unexamined.append(f"{n} (vanished while reading)")
             suspect.append(n)
             continue
-        if DOCUMENT.match(n) or CONTROL.match(n):
-            if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
-                try:
-                    tgt = os.readlink(f) if stat.S_ISLNK(st.st_mode) else "?"
-                except OSError:
-                    tgt = "?"
-                note = temp_child_note(
-                    ".", n,
-                    is_symlink=stat.S_ISLNK(st.st_mode),
-                    is_dir=stat.S_ISDIR(st.st_mode),
-                    is_regular=False,
-                    target=tgt,
-                )
-                unexamined.append((note or f"{n} (not examined)").replace("./", "", 1))
-                suspect.append(n)
-            continue
-        if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        tgt = "?"
+        if stat.S_ISLNK(st.st_mode):
             try:
-                tgt = os.readlink(f) if stat.S_ISLNK(st.st_mode) else "?"
+                tgt = os.readlink(f)
             except OSError:
                 tgt = "?"
-            note = temp_child_note(
-                ".", n,
-                is_symlink=stat.S_ISLNK(st.st_mode),
-                is_dir=stat.S_ISDIR(st.st_mode),
-                is_regular=False,
-                target=tgt,
-            )
-            unexamined.append((note or f"{n} (not examined)").replace("./", "", 1))
-            continue
-        try:
-            extra.append(TempFile(name=n, size=st.st_size, head=_head(f)))
-        except OSError:
-            unexamined.append(f"{n} (vanished while reading)")
+        d = classify_top(TopEntry(
+            name=n,
+            is_symlink=stat.S_ISLNK(st.st_mode),
+            is_dir=stat.S_ISDIR(st.st_mode),
+            is_regular=stat.S_ISREG(st.st_mode),
+            target=tgt,
+        ))
+        if d.note is not None:
+            unexamined.append(d.note)
+        if d.suspect:
+            suspect.append(n)
+        if d.wants_content:
+            try:
+                extra.append(TempFile(name=n, size=st.st_size, head=_head(f)))
+            except OSError:
+                unexamined.append(f"{n} (vanished while reading)")
 
     return Listing(
         verdict,
