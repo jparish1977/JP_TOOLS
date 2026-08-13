@@ -1153,7 +1153,7 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
         out.append("PreserveJobFiles No")
     body = "\n".join(out) + "\n"
 
-    # tee opens with O_TRUNC before writing, so an interrupted write leaves the
+    # The write truncates before it writes, so an interrupted write leaves the
     # daemon's config empty and nothing to restore from. Copy it aside first.
     backup = Path(f"{conf}.spool-audit.bak")
     # Never overwrite: running --fix twice used to replace the pre-fix original
@@ -1167,15 +1167,23 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
         except OSError:
             backup_ok = False
     if not backup_ok:
-        # The copy exists precisely because tee opens O_TRUNC. Proceeding
+        # The copy exists precisely because the write truncates. Proceeding
         # without it means an interrupted write leaves an empty cupsd.conf and
         # nothing to restore from.
         return False, f"could not back up {conf}; refusing to rewrite it"
-    write = subprocess.run(
-        ["tee", conf], input=body, capture_output=True, text=True, check=False
-    )
-    if write.returncode != 0:
-        return False, f"could not write {conf}; original preserved at {backup}"
+    # Written in Python rather than piped through `tee`, for the same reason the
+    # backup above no longer shells out to `cp`: an absent tee raises
+    # FileNotFoundError, which nothing catches and which exits 1 -- the code
+    # this tool reserves for "content you care about is still there", so a
+    # wrapper could not tell a crash from a finding. The script already runs as
+    # root, so tee bought no privilege.
+    try:
+        Path(conf).write_text(body)
+    except OSError as exc:
+        return False, (
+            f"could not write {conf} ({exc.__class__.__name__}); "
+            f"original preserved at {backup}"
+        )
 
     if not should_restart_cups(conf):
         # Do NOT restart the live daemon for a config it does not read.
@@ -1190,8 +1198,18 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
             "The running daemon still has the old setting."
         )
 
-    verify = subprocess.run(["cat", conf], capture_output=True, text=True, check=False)
-    for line in verify.stdout.splitlines():
+    # Re-read from disk rather than trusting `body`: the point is to confirm what
+    # the daemon will actually read. An unreadable file here is a failure, not a
+    # pass -- returning True on an empty read would report a fix that may not be
+    # on disk at all.
+    try:
+        verified = Path(conf).read_text(errors="replace")
+    except OSError as exc:
+        return False, (
+            f"wrote and restarted, but could not re-read {conf} "
+            f"({exc.__class__.__name__}) to confirm the setting"
+        )
+    for line in verified.splitlines():
         if re.match(r"^\s*PreserveJobFiles\s+No\b", line, re.IGNORECASE):
             return True, f"restarted via {how}"
     return False, "config did not contain PreserveJobFiles No after writing"
