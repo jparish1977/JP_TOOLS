@@ -433,6 +433,43 @@ def test_zero_length_temp_is_harmless() -> None:
     check("reported as runtime", len(audit.artifacts), 1)
 
 
+def test_xdg_cache_under_tempdir_is_not_content() -> None:
+    """CUPS runs filters with HOME=TempDir, so filters write .cache/ there.
+
+    Measured in a container with a real filter chain: 24 fontconfig cache
+    files, reported by the recursive walk as possible document content and
+    deleted by --purge. They are caches by virtue of their location.
+    """
+    fc = TempFile(name=".cache/fontconfig/d589a488-le64.cache-9", size=8192, head="\x02\x00")
+    check_true("cache is harmless", is_harmless_temp(fc))
+
+    nested = TempFile(name="sub/.cache/other", size=10, head="x")
+    check_true("nested cache too", is_harmless_temp(nested))
+
+    doc = TempFile(name=".cachey/leak.ps", size=10, head="%!PS")
+    check_true("a lookalike directory is NOT exempt", not is_harmless_temp(doc))
+
+    # Content beats location. A PostScript file parked under .cache/ is still
+    # a document, and exempting it by path would be dismissal, which this tool
+    # is not allowed to do.
+    planted = TempFile(name=".cache/deep/leak.ps", size=64, head="%!PS-Adobe-3.0")
+    check_true("a document under .cache is still counted", not is_harmless_temp(planted))
+
+    pdf = TempFile(name=".cache/x", size=64, head="%PDF-1.7")
+    check_true("PDF too", not is_harmless_temp(pdf))
+
+    # The exemption is for a .cache DIRECTORY component, not any path that
+    # happens to contain the string. This decoy carries no document magic, so
+    # only the anchoring can save it -- an unanchored match would wrongly
+    # exempt it.
+    decoy = TempFile(name="job.cache-backup/blob", size=4096, head="\x00\x01binary")
+    check_true("substring in a name is not a cache dir", not is_harmless_temp(decoy))
+
+    audit = classify(Listing(Verdict.CLEAN, (), (fc, doc)))
+    check("only the document counts", audit.total, 1)
+    check_true("cache not purged", ".cache/fontconfig" not in "".join(e.name for e in victims_for(audit)))
+
+
 def test_ppd_match_is_anchored() -> None:
     """A substring match would under-report, which is the harmful direction.
 
@@ -484,9 +521,17 @@ def test_cups_runtime_files_are_not_leaks() -> None:
 
 def test_artifact_only_spool_is_clean() -> None:
     """A spool holding nothing but a lockfile is clean, not retained."""
-    audit = classify(spool(top=[], temp=["cups-dbus-notifier-lockfile"]))
+    # A real lockfile is zero bytes with no content. The generic fixture
+    # stamps PostScript magic on every temp file, which would make this one
+    # look like a document -- correctly, since content beats name.
+    lock = TempFile(name="cups-dbus-notifier-lockfile", size=0, head="")
+    audit = classify(Listing(Verdict.CLEAN, (), (lock,)))
     check("clean", audit.verdict, Verdict.CLEAN)
     check("exit 0", audit.exit_code, 0)
+
+    # And if something with that name did contain a document, content wins.
+    impostor = TempFile(name="cups-dbus-notifier-lockfile", size=99, head="%!PS-Adobe")
+    check_true("content beats the name", not is_harmless_temp(impostor))
 
 
 def test_retention_is_read_not_inferred() -> None:
