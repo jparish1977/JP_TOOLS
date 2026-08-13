@@ -58,8 +58,19 @@ jobs:
           # its environment is unavailable, so this stays green on the runner.
           rc=0
           for t in tests/test_*.py; do
+            [ -e "$t" ] || continue
             echo "--- $t ---"
             python "$t" || rc=1
+          done
+          # .sh as well as .py. The acceptance suite is the black-box half of
+          # the coverage and it is a shell script, so a *.py glob ran every
+          # unit test and silently skipped the only suite that drives the real
+          # CLI -- documentation rather than a gate, which is the exact thing
+          # this step was added to stop.
+          for t in tests/test_*.sh; do
+            [ -e "$t" ] || continue
+            echo "--- $t ---"
+            bash "$t" || rc=1
           done
           exit $rc
 
