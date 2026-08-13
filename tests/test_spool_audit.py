@@ -351,6 +351,30 @@ def test_find_output_survives_hostile_filenames() -> None:
     check("empty output is no rows", parse_find_rows(""), [])
 
 
+def test_unread_files_are_counted_and_explained() -> None:
+    """The sudo listing path cannot open files, so it reports a SUPERSET.
+
+    Measured in a container: the same spool gave 3 retained as root and 4 via
+    sudo, because a PPD it could not read cannot be recognised as a PPD. That
+    is the safe direction, but two numbers with no explanation is misleading in
+    its own right, so the report says why.
+    """
+    unread = TempFile(name="ppd", size=-1, head="")
+    known = TempFile(name="ppd2", size=99, head='*PPD-Adobe: "4.3"')
+
+    blind = classify(Listing(Verdict.CLEAN, (), (unread,)))
+    seeing = classify(Listing(Verdict.CLEAN, (), (known,)))
+
+    check("unread counts as content", blind.total, 1)
+    check("read is recognised as an artifact", seeing.total, 0)
+    check("and the blind run says how many", blind.unread, 1)
+    check("the seeing run has none", seeing.unread, 0)
+
+    text = "\n".join(render(blind, frozenset()))
+    check_true("explains the difference", "could not be opened" in text)
+    check_true("says root may report fewer", "may report" in text)
+
+
 def test_containment_invariant() -> None:
     """The rule that collapses five findings from three review rounds.
 
@@ -543,6 +567,18 @@ def test_xdg_cache_under_tempdir_is_not_content() -> None:
     decoy = TempFile(name="job.cache-backup/blob", size=4096, head="\x00\x01binary")
     check_true("substring in a name is not a cache dir", not is_harmless_temp(decoy))
 
+    # The sudo listing path cannot read headers, so it reports size -1 and an
+    # empty head. Location must not excuse a file whose content was never read:
+    # the same .cache/ document was counted as content when run as root and
+    # dismissed as a cache when run via sudo.
+    unread = TempFile(name=".cache/deep/leak.ps", size=-1, head="")
+    check_true("unknown content under .cache is NOT harmless", not is_harmless_temp(unread))
+    unread_ppd = TempFile(name="ppd", size=-1, head="")
+    check_true("nor is an unread file named like a PPD", not is_harmless_temp(unread_ppd))
+    # A named CUPS runtime file is still recognised by name alone.
+    lock = TempFile(name="cups-dbus-notifier-lockfile", size=-1, head="")
+    check_true("named artifacts still recognised unread", is_harmless_temp(lock))
+
     audit = classify(Listing(Verdict.CLEAN, (), (fc, doc)))
     check("only the document counts", audit.total, 1)
     check_true("cache not purged", ".cache/fontconfig" not in "".join(e.name for e in victims_for(audit)))
@@ -670,6 +706,47 @@ def test_walk_survives_a_file_vanishing() -> None:
         # error first and the file was reported as "not a regular file", which
         # on a busy spool misdescribes every racing temp file as a device.
         check_true("reported as a race, not as a device", "vanished" in unexamined[0])
+
+
+def test_nothing_is_invisible() -> None:
+    """The "not worse than ls" guarantee, as a test.
+
+    The baseline this tool replaced was `sudo ls` read by a human, and `ls`
+    never hides a file. Measured 2026-08-12: the tool hid three -- a document
+    copied to d00085-001.bak, an unrecognised stray file, and a subdirectory --
+    while printing a verdict. Anything present must appear SOMEWHERE in the
+    report: as content, as a runtime artifact, or as unexamined.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "tmp" / ".cache").mkdir(parents=True)
+        (root / "d00085-001").write_text("%!PS\n")
+        (root / "c00085").touch()
+        (root / "d00085-001.bak").write_text("%!PS\ncopy\n")
+        (root / "stray-file").write_text("data\n")
+        (root / "weird-dir").mkdir()
+        (root / "tmp" / "ppd").write_text('*PPD-Adobe: "4.3"\n')
+        (root / "tmp" / "real.ps").write_text("%!PS\n")
+        (root / "tmp" / ".cache" / "fc").write_text("binary\n")
+
+        listing = spool_audit.read_spool(str(root))
+        audit = classify(listing, frozenset(), include_control=True)
+        report = "\n".join(render(audit, frozenset()))
+
+        present = sorted(
+            str(q.relative_to(root)) for q in root.rglob("*")
+        )
+        invisible = [
+            name for name in present
+            if pathlib.PurePath(name).name not in report
+        ]
+        check("every path appears in the report", invisible, [])
+
+        # And the ones that matter are counted as content, not merely mentioned.
+        counted = " ".join(e.name for e in audit.others)
+        check_true("a .bak of a document is counted", "d00085-001.bak" in counted)
+        check_true("an unrecognised stray is counted", "stray-file" in counted)
+        check_true("a subdirectory is flagged", any("weird-dir" in u for u in audit.unexamined))
 
 
 def test_walk_has_a_depth_limit() -> None:
