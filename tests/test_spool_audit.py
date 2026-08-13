@@ -1214,6 +1214,63 @@ def test_read_spool_distinguishes_the_tempdir_failures() -> None:
                    any("OSError" in u for u in io_err.unexamined))
 
 
+def test_head_reads_a_prefix_and_never_raises() -> None:
+    """`_head` carried `pragma: no cover -- reason: a read`, which is three
+    words that satisfy a regex rather than a justification. It is testable with
+    a temp file, so it is now tested and the exemption is gone."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        f = root / "doc.ps"
+        f.write_bytes(b"%!PS-Adobe-3.0\nlots more content after the prefix\n")
+        check("reads only the first n bytes", spool_audit._head(f, 4), "%!PS")
+        check_true("and the default reads enough to recognise a format",
+                   spool_audit._head(f).startswith("%!PS-Adobe"))
+
+        empty = root / "empty"
+        empty.touch()
+        check("an empty file gives an empty head", spool_audit._head(empty), "")
+
+        # An unreadable file must arrive as "" rather than raising: callers
+        # treat "" as UNKNOWN, which is_harmless_temp then declines to dismiss.
+        # Raising here would abort the whole listing over one file.
+        missing = root / "not-there"
+        check("a missing file gives '' and does not raise",
+              spool_audit._head(missing), "")
+
+        binary = root / "raw"
+        binary.write_bytes(b"\xff\xfe\x00garbage")
+        check_true("undecodable bytes are replaced, not raised",
+                   isinstance(spool_audit._head(binary), str))
+
+
+def test_retention_state_reads_and_delegates() -> None:
+    """The reader half of the retention check. parse_retention has the rule;
+    this has the file handling, including the case that matters most: an
+    unreadable config is None, which is not the same as "not retaining"."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        off = root / "off.conf"
+        off.write_bytes(b"PreserveJobFiles No\n")
+        check("an explicit No reads as not retaining",
+              spool_audit.retention_state(str(off)), False)
+
+        on = root / "on.conf"
+        on.write_bytes(b"PreserveJobFiles Yes\n")
+        check("an explicit Yes reads as retaining",
+              spool_audit.retention_state(str(on)), True)
+
+        # None, not False. Reporting an unreadable config as "not retaining"
+        # would print RETENTION: OFF over a host that is keeping documents,
+        # which is danger reported as safety.
+        check("an unreadable config is None, never False",
+              spool_audit.retention_state(str(root / "nope.conf")), None)
+
+        latin1 = root / "latin1.conf"
+        latin1.write_bytes(b"# Imprimante d\xe9partement\nPreserveJobFiles No\n")
+        check("a non-UTF-8 byte does not break the read",
+              spool_audit.retention_state(str(latin1)), False)
+
+
 def main() -> int:
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
