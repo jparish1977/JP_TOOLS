@@ -26,17 +26,28 @@ if [ ! -f "$T" ]; then
   exit 2
 fi
 W=$(mktemp -d); trap 'chmod -R u+rwX "$W" 2>/dev/null; rm -rf "$W"' EXIT
-pass=0; fail=0
+pass=0; fail=0; skip=0
 ok () { echo "  PASS  $1"; pass=$((pass+1)); }
 no () { echo "  FAIL  $1"; fail=$((fail+1)); }
+sk () { echo "  SKIP  $1"; skip=$((skip+1)); }
 ck () { if [ "$2" = "$3" ]; then ok "$1"; else no "$1 (got '$2', want '$3')"; fi; }
 
 echo "FLAW 1: a check that did not run must never read as a pass"
-mkdir -p "$W/denied/tmp"; printf '%%!PS\n' > "$W/denied/tmp/doc.ps"; chmod 000 "$W/denied/tmp"
-out=$(python3 $T --spool "$W/denied" --conf /dev/null 2>&1); rc=$?
-ck "unreadable TempDir exits 2" "$rc" "2"
-case "$out" in *"spool is clean"*) no "unreadable never says clean";; *) ok "unreadable never says clean";; esac
-chmod 755 "$W/denied/tmp"
+# Root bypasses permission bits, so chmod 000 does not make a directory
+# unreadable to it and these two cannot be tested as root -- and the tool is
+# normally run under sudo, so that is not a hypothetical. Skipped loudly and
+# counted separately rather than silently passing, which would make this suite
+# commit the very flaw it is named after.
+if [ "$(id -u)" = 0 ]; then
+  sk "unreadable TempDir exits 2 (running as root; chmod 000 does not apply)"
+  sk "unreadable never says clean (running as root)"
+else
+  mkdir -p "$W/denied/tmp"; printf '%%!PS\n' > "$W/denied/tmp/doc.ps"; chmod 000 "$W/denied/tmp"
+  out=$(python3 $T --spool "$W/denied" --conf /dev/null 2>&1); rc=$?
+  ck "unreadable TempDir exits 2" "$rc" "2"
+  case "$out" in *"spool is clean"*) no "unreadable never says clean";; *) ok "unreadable never says clean";; esac
+  chmod 755 "$W/denied/tmp"
+fi
 python3 $T --spool "$W/nonexistent" --conf /dev/null >/dev/null 2>&1
 ck "missing path exits 2" "$?" "2"
 touch "$W/afile"; python3 $T --spool "$W/afile" --conf /dev/null >/dev/null 2>&1
@@ -81,5 +92,9 @@ ck "a spool of only caches is clean" "$rc" "0"
 case "$out" in *"spool is clean"*) ok "and says so";; *) no "and says so";; esac
 
 echo
-echo "  $pass passed, $fail failed"
+if [ "$skip" -gt 0 ]; then
+  echo "  $pass passed, $fail failed, $skip SKIPPED (not run -- not the same as passed)"
+else
+  echo "  $pass passed, $fail failed"
+fi
 exit $((fail > 0))
