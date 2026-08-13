@@ -516,6 +516,25 @@ def test_no_jobs_requested() -> None:
     check_true("no targeted section", "JOBS YOU ASKED ABOUT" not in "\n".join(render(audit, frozenset())))
 
 
+def test_walk_has_a_depth_limit() -> None:
+    """Unbounded recursion on a hostile or pathological tree is a hang, and a
+    hang in a security tool reads as 'still checking' forever."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        deep = root
+        for i in range(14):
+            deep = deep / f"d{i}"
+        deep.mkdir(parents=True)
+        (deep / "burrowed.ps").write_text("%!PS\n")
+
+        found: list = []
+        unexamined: list = []
+        spool_audit._walk_temp(root, "tmp", "", found, unexamined)
+
+        check("nothing collected past the limit", len(found), 0)
+        check_true("and it says why", any("deeper than" in u for u in unexamined))
+
+
 def test_walk_against_a_real_filesystem() -> None:
     """The one test that touches disk, and it exists on purpose.
 
