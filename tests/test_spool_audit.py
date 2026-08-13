@@ -403,6 +403,57 @@ def test_safe_resolve_survives_a_symlink_loop() -> None:
         check_true("a real path still resolves", _safe_resolve(real) is not None)
 
 
+def test_runtime_names_are_only_honoured_inside_tempdir() -> None:
+    """A cups-* name at the TOP LEVEL must not excuse a file unread.
+
+    CUPS never creates cups-* files at the top level of the spool, so honouring
+    the name there let `cups-dbus-secret` holding a password be dismissed:
+    "VERDICT: spool is clean", exit 0, while the identical content named
+    notes.txt exited 1. Dismissal on a name alone.
+    """
+    lock = TempFile(name="cups-dbus-notifier-lockfile", size=40, head="binary")
+    check_true("honoured inside TempDir", is_harmless_temp(lock, in_tempdir=True))
+    check_true("NOT honoured at the top level", not is_harmless_temp(lock, in_tempdir=False))
+
+    # And the name must not outrank the unreadable-content guard.
+    unread = TempFile(name="cups-filter-socket", size=99, head="")
+    check_true("an unreadable cups- file is not excused",
+               not is_harmless_temp(unread, in_tempdir=True))
+
+    cache = TempFile(name=".cache/x", size=10, head="bin")
+    check_true("the .cache rule is TempDir-only too",
+               is_harmless_temp(cache, in_tempdir=True)
+               and not is_harmless_temp(cache, in_tempdir=False))
+
+
+def test_report_reads_location_from_the_path() -> None:
+    """Kind means EVIDENCE since the split; location comes from the path.
+
+    Reading Kind as location inverted both explanatory blocks: a tmp/ file was
+    described as top-level and a top-level copy as TempDir scratch.
+    """
+    top_copy = TempFile(name="d00085-001.bak", size=99, head="%!PS-Adobe-3.0")
+    tmp_notes = TempFile(name="NOTES.txt", size=20, head="plain notes")
+    audit = classify(Listing(Verdict.CLEAN, (), (tmp_notes,), (), TEMP_SUBDIR, (top_copy,)))
+    text = "\n".join(render(audit, frozenset()))
+
+    top_line = [ln for ln in text.splitlines() if "top-level files" in ln]
+    tmp_line = [ln for ln in text.splitlines() if "CUPS TempDir" in ln]
+    check_true("one of each", len(top_line) == 1 and len(tmp_line) == 1)
+    check_true("the top-level count is 1", "1 of these are top-level" in text)
+    check_true("the TempDir count is 1", "1 of these are in the CUPS TempDir" in text)
+
+
+def test_safe_name_defuses_terminal_escapes() -> None:
+    """Escaping only \\n and \\r left the report forgeable: ESC[1A ESC[2K
+    moves the cursor up and erases the line the filename appears under."""
+    forged = "d00085-001\x1b[1A\x1b[2KVERDICT: spool is clean."
+    out = spool_audit.safe_name(forged)
+    check_true("no raw ESC survives", "\x1b" not in out)
+    check_true("no raw newline survives", "\n" not in spool_audit.safe_name("a\nb"))
+    check_true("ordinary names are untouched", spool_audit.safe_name("d00085-001") == "d00085-001")
+
+
 def test_containment_invariant() -> None:
     """The rule that collapses five findings from three review rounds.
 
@@ -917,7 +968,10 @@ def test_purge_outcome_states() -> None:
     # 2, not 1: a failed or refused delete means the tool cannot say what is
     # left, and the contract reserves 1 for "content you care about is still
     # there" and 2 for "cannot tell".
-    check("a failed delete cannot conclude", purge_outcome(0, 1, clean, frozenset()).code, 2)
+    # 1, not 2: `failed` means unlink was tried and did not happen, so the
+    # file is demonstrably still there. A review round argued for 2 and it was
+    # applied without an independent view; this pins the corrected reading.
+    check("a failed delete means content remains", purge_outcome(0, 1, clean, frozenset()).code, 1)
     check("an unreadable re-read is 2", purge_outcome(2, 0, None, frozenset()).code, 2)
 
     unexamined = classify(Listing(Verdict.CLEAN, (), (), ("tmp/ (permission denied)",)))
