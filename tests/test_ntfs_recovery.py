@@ -49,13 +49,24 @@ def load(name: str, path: Path):
     return module
 
 
+class EnvironmentUnavailable(RuntimeError):
+    """The tools are installed but this machine cannot build the fixture."""
+
+
 def build_image(directory: Path) -> Path:
     """A 20MB NTFS volume holding an empty file and a normal one."""
     image = directory / "test.ntfs"
     with open(image, "wb") as handle:
         handle.truncate(20 * 1024 * 1024)
-    subprocess.run(["mkntfs", "-F", "-q", "-L", "jptest", str(image)],
-                   check=True, capture_output=True)
+    # check=False plus an explicit raise: on a machine where the tools exist
+    # but the environment cannot build an image, check=True raised an uncaught
+    # CalledProcessError and turned CI red for a reason unrelated to any diff.
+    # A missing capability is a SKIP, not a failure.
+    made = subprocess.run(["mkntfs", "-F", "-q", "-L", "jptest", str(image)],
+                          check=False, capture_output=True)
+    if made.returncode != 0:
+        raise EnvironmentUnavailable(
+            f"mkntfs failed: {made.stderr.decode('utf-8', 'replace').strip()[:200]}")
 
     empty = directory / "empty.bin"
     empty.touch()
@@ -102,7 +113,11 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         directory = Path(tmp)
-        image = build_image(directory)
+        try:
+            image = build_image(directory)
+        except EnvironmentUnavailable as exc:
+            print(f"SKIP: cannot build an NTFS fixture here ({exc})")
+            return 0
         have_dirs = add_directories(image, directory / "mnt")
 
         rows = extract.listdir(str(image), "/", 30)

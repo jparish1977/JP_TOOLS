@@ -56,30 +56,35 @@ code always 0", "others list truncated" -- all in untested main()/CLI logic.
 """
 
 import importlib.util
+import pathlib
 import sys
 from pathlib import Path
 from typing import Any
 
+MODULE_PATH = Path(__file__).resolve().parent.parent / "spool-audit.py"
+
 # Load the module under test from source, every time.
 #
-# This test loads spool-audit.py by path, and SourceFileLoader will happily use
-# a cached .pyc whose recorded source size and mtime still match. On 2026-08-12
-# that produced a phantom failure for half an hour: a mutation-testing run left
-# bytecode compiled from a modified source, and because the edit was
-# `return 2` -> `return 0`, byte-for-byte the same length, the cache looked
-# valid. The suite then reported a bug that did not exist in the file on disk,
-# and mutation results taken during that window were meaningless.
+# The bytecode cache must be removed first. spec_from_file_location reads
+# __pycache__/spool-audit.cpython-*.pyc and validates it on the recorded source
+# size and mtime, so bytecode compiled from a modified source is reused when
+# the edit happened to be the same length. On 2026-08-12 a mutation run left
+# exactly that -- `return 2` -> `return 0` -- and the suite reported a bug that
+# did not exist on disk while `git diff` showed a clean tree.
+#
+# `sys.dont_write_bytecode` does NOT fix this. It gates only the write half.
+# Measured directly: with it set, a stale .pyc was still loaded and the module
+# returned 0 while the source said 2. Deleting the cache is what actually
+# works, and it is verified by that same reproduction.
 sys.dont_write_bytecode = True
+_cache = pathlib.Path(importlib.util.cache_from_source(str(MODULE_PATH)))
+if _cache.exists():
+    _cache.unlink()
 importlib.invalidate_caches()
-
-MODULE_PATH = Path(__file__).resolve().parent.parent / "spool-audit.py"
 
 _spec = importlib.util.spec_from_file_location("spool_audit", MODULE_PATH)
 assert _spec is not None and _spec.loader is not None
 spool_audit = importlib.util.module_from_spec(_spec)
-# Register before executing. @dataclass resolves its own module through
-# sys.modules to evaluate annotations, and a module loaded by path alone is not
-# there yet, so every frozen dataclass raises AttributeError on import.
 sys.modules["spool_audit"] = spool_audit
 _spec.loader.exec_module(spool_audit)
 
@@ -294,6 +299,64 @@ def test_ppd_files_are_not_leaks() -> None:
     check("the document is the one kept", audit.others[0].name, "tmp/006816a8026a5")
     check("ppd is an artifact", len(audit.artifacts), 1)
     check_true("ppd not a purge victim", "tmp/0777f6a7dc4fa" not in [e.name for e in victims_for(audit)])
+
+
+def test_unexamined_areas_are_never_clean() -> None:
+    """The cardinal bug, found by review on 2026-08-12 and reproduced.
+
+    An unreadable TempDir was silently turned into an empty one, so a spool
+    holding a readable PostScript document under a mode-000 tmp/ printed
+    "VERDICT: spool is clean" and exited 0. Listing had no way to say "top
+    level readable, TempDir not", so this is a data-model gap, not a missing
+    branch.
+    """
+    listing = Listing(Verdict.CLEAN, (), (), ("tmp/ (permission denied)",))
+    audit = classify(listing)
+
+    check("verdict is not RETAINED", audit.verdict, Verdict.CLEAN)
+    check_true("but it is NOT complete", not audit.complete)
+    check("exit 2, cannot conclude", audit.exit_code, 2)
+
+    text = "\n".join(render(audit, frozenset()))
+    check_true("never claims clean", "spool is clean" not in text)
+    check_true("says incomplete", "INCOMPLETE" in text)
+    check_true("names the area", "tmp/ (permission denied)" in text)
+    check_true("denies cleanliness", "NOT a clean result" in text)
+
+
+def test_subdirectory_under_tempdir_is_reported() -> None:
+    """tmp/.cache is a real directory a filter chain creates. Depth-1 listing
+    dropped it and anything inside, so a document under it appeared in no
+    section and survived --purge."""
+    audit = classify(Listing(Verdict.CLEAN, (), (), ("tmp/.cache/ (subdirectory, not examined)",)))
+    check("exit 2", audit.exit_code, 2)
+    check_true("named", ".cache" in "\n".join(render(audit, frozenset())))
+
+
+def test_not_a_directory_is_its_own_outcome() -> None:
+    """Pointing --spool at a file said "THAT PATH DOES NOT EXIST", a false
+    statement about a file sitting right there."""
+    audit = classify(Listing(Verdict.NOT_A_DIRECTORY))
+    text = "\n".join(render(audit, frozenset()))
+
+    check("exit 2", audit.exit_code, 2)
+    check_true("says not a directory", "NOT A DIRECTORY" in text)
+    check_true("does not claim absence", "DOES NOT EXIST" not in text)
+
+
+def test_uncounted_control_files_qualify_the_clean_message() -> None:
+    """An unqualified "clean" over known-unexamined disclosure is the same
+    collapse of outcomes the tool exists to prevent."""
+    audit = classify(spool(["c00085"]), include_control=False)
+
+    check("not counted", audit.total, 0)
+    check("but known about", audit.uncounted_control, 1)
+    text = "\n".join(render(audit, frozenset()))
+    check_true("mentions them", "NOT COUNTED" in text)
+    check_true("explains why they matter", "job" in text and "title" in text)
+
+    counted = classify(spool(["c00085"]), include_control=True)
+    check("none uncounted when included", counted.uncounted_control, 0)
 
 
 def test_zero_length_temp_is_harmless() -> None:

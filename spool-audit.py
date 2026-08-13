@@ -76,6 +76,7 @@ class Verdict(Enum):
 
     DENIED = "denied"
     MISSING = "missing"
+    NOT_A_DIRECTORY = "not_a_directory"
     CLEAN = "clean"
     RETAINED = "retained"
 
@@ -117,6 +118,15 @@ class Listing:
     verdict: Verdict
     top: tuple[str, ...] = ()
     temp: tuple[TempFile, ...] = ()
+    # Things known to exist but NOT examined: an unreadable TempDir, a
+    # subdirectory under it. Without this the model could not express "top
+    # level readable, TempDir not", and the code silently turned an unreadable
+    # TempDir into an empty one and announced "spool is clean".
+    unexamined: tuple[str, ...] = ()
+    # How to name the temp directory in output. Defaults to CUPS's "tmp", but
+    # --temp can point elsewhere, and reporting a path that does not exist is
+    # the tool telling you something false about where your data is.
+    temp_label: str = TEMP_SUBDIR
 
 
 @dataclass(frozen=True)
@@ -128,6 +138,8 @@ class Audit:
     others: tuple[Entry, ...]
     asked_for_jobs: bool = False
     artifacts: tuple[Entry, ...] = ()
+    unexamined: tuple[str, ...] = ()
+    uncounted_control: int = 0
 
     @property
     def total(self) -> int:
@@ -136,6 +148,16 @@ class Audit:
     @property
     def readable(self) -> bool:
         return self.verdict in (Verdict.CLEAN, Verdict.RETAINED)
+
+    @property
+    def complete(self) -> bool:
+        """Was everything actually examined?
+
+        A readable spool with an unreadable TempDir is NOT a clean result, and
+        conflating the two is the failure this tool exists to prevent. Nothing
+        may report "clean" while this is False.
+        """
+        return self.readable and not self.unexamined
 
     @property
     def targeted_are_gone(self) -> bool:
@@ -155,7 +177,7 @@ class Audit:
         it on the whole spool would re-merge the two states the data model
         keeps apart, and `spool-audit.py 85 && echo SAFE` would never fire.
         """
-        if not self.readable:
+        if not self.complete:
             return 2
         if self.asked_for_jobs:
             return 0 if self.targeted_are_gone else 1
@@ -204,7 +226,7 @@ def classify(
     include_control: bool = False,
 ) -> Audit:
     """Partition a spool listing into targeted and other retained files."""
-    if listing.verdict in (Verdict.DENIED, Verdict.MISSING):
+    if listing.verdict in (Verdict.DENIED, Verdict.MISSING, Verdict.NOT_A_DIRECTORY):
         return Audit(listing.verdict, (), (), asked_for_jobs=bool(jobs))
 
     entries = [e for e in (parse_entry(n, include_control) for n in listing.top) if e is not None]
@@ -212,12 +234,12 @@ def classify(
     # never be "targeted" by job number. They still count as retained data.
     temps = sorted(listing.temp, key=lambda f: f.name)
     entries += [
-        Entry(name=f"{TEMP_SUBDIR}/{f.name}", kind=Kind.TEMP, job=None)
+        Entry(name=f"{listing.temp_label}/{f.name}", kind=Kind.TEMP, job=None)
         for f in temps
         if not is_harmless_temp(f)
     ]
     artifacts = tuple(
-        Entry(name=f"{TEMP_SUBDIR}/{f.name}", kind=Kind.ARTIFACT, job=None)
+        Entry(name=f"{listing.temp_label}/{f.name}", kind=Kind.ARTIFACT, job=None)
         for f in temps
         if is_harmless_temp(f)
     )
@@ -225,7 +247,16 @@ def classify(
     targeted = tuple(sorted((e for e in entries if e.job in jobs), key=lambda e: e.name))
     others = tuple(sorted((e for e in entries if e.job not in jobs), key=lambda e: e.name))
     verdict = Verdict.RETAINED if entries else Verdict.CLEAN
-    return Audit(verdict, targeted, others, asked_for_jobs=bool(jobs), artifacts=artifacts)
+    uncounted_control = 0 if include_control else sum(1 for n in listing.top if CONTROL.match(n))
+    return Audit(
+        verdict,
+        targeted,
+        others,
+        asked_for_jobs=bool(jobs),
+        artifacts=artifacts,
+        unexamined=listing.unexamined,
+        uncounted_control=uncounted_control,
+    )
 
 
 def victims_for(audit: Audit) -> tuple[Entry, ...]:
@@ -252,6 +283,12 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
             "COULD NOT READ THE SPOOL (permission denied).",
             "Nothing is proven either way. This is NOT a clean result.",
             "Re-run with sudo.",
+        ]
+    if audit.verdict is Verdict.NOT_A_DIRECTORY:
+        return [
+            "THAT PATH IS NOT A DIRECTORY.",
+            "Nothing is proven either way. This is NOT a clean result.",
+            "It exists; --spool needs the spool directory, not a file inside it.",
         ]
     if audit.verdict is Verdict.MISSING:
         return [
@@ -283,7 +320,7 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
     if temp:
         lines.append("")
         lines.append(
-            f"  {len(temp)} of these are in {TEMP_SUBDIR}/ (CUPS TempDir), unrecognised."
+            f"  {len(temp)} of these are in the CUPS TempDir, unrecognised."
         )
         lines.append("  They may be document content mid-filter. They carry no job id,")
         lines.append("  so they cannot be targeted by number. Purge without job ids.")
@@ -293,6 +330,20 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         lines.append(f"CUPS RUNTIME FILES (not document content, never purged): {len(audit.artifacts)}")
         lines += [f"  {e.name}" for e in audit.artifacts]
 
+    if audit.unexamined:
+        lines.append("")
+        lines.append(f"COULD NOT EXAMINE: {len(audit.unexamined)}")
+        lines += [f"  {u}" for u in audit.unexamined]
+        lines.append("  Anything in there is unaccounted for. This is NOT a clean result.")
+
+    if audit.uncounted_control:
+        lines.append("")
+        lines.append(
+            f"NOT COUNTED: {audit.uncounted_control} control file(s). They carry the job"
+        )
+        lines.append("  title and submitting user, which can be disclosure by itself.")
+        lines.append("  Use --include-control to count and purge them.")
+
     lines.append("")
     if retention is True:
         lines.append("RETENTION: ON. CUPS is keeping documents. --fix stops that.")
@@ -301,7 +352,12 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
     else:
         lines.append("RETENTION: unknown (could not read cupsd.conf).")
 
-    if audit.verdict is Verdict.RETAINED:
+    if audit.unexamined:
+        lines.append(
+            f"VERDICT: INCOMPLETE. {audit.total} retained file(s) found, but "
+            f"{len(audit.unexamined)} area(s) could not be examined."
+        )
+    elif audit.verdict is Verdict.RETAINED:
         lines.append(f"VERDICT: {audit.total} retained file(s) still on disk. --purge clears them.")
     else:
         lines.append("VERDICT: spool is clean.")
@@ -325,6 +381,24 @@ def _priv(argv: list[str]) -> list[str]:  # pragma: no cover
     if os.geteuid() != 0 and shutil.which("sudo"):
         return ["sudo", "-n", *argv]
     return argv
+
+
+def configured_tempdir(files_conf: str) -> str | None:  # pragma: no cover
+    """TempDir from cups-files.conf, or None if unset or unreadable.
+
+    TEMP_SUBDIR is only CUPS's default. A host that points TempDir elsewhere
+    was audited by looking at a directory CUPS does not use, and the tool then
+    reported "spool is clean" having never examined the one that holds document
+    content mid-filter. An unperformed check must not read as a pass.
+    """
+    read = subprocess.run(_priv(["cat", files_conf]), capture_output=True, text=True, check=False)
+    if read.returncode != 0:
+        return None
+    for line in read.stdout.splitlines():
+        m = re.match(r"^\s*TempDir\s+(\S+)", line, re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return None
 
 
 def _head(path: Path, n: int = 32) -> str:  # pragma: no cover
@@ -359,7 +433,7 @@ def _sudo_ls(path: str, files_only: bool = False) -> tuple[Verdict, tuple[str, .
     return Verdict.DENIED, ()
 
 
-def read_spool(spool: str) -> Listing:  # pragma: no cover
+def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: no cover
     """List the spool and its TempDir, distinguishing denied from missing."""
     root = Path(spool)
     try:
@@ -372,31 +446,52 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
     except FileNotFoundError:
         return Listing(Verdict.MISSING)
     except NotADirectoryError:
-        return Listing(Verdict.MISSING)
+        return Listing(Verdict.NOT_A_DIRECTORY)
     except OSError:
         return Listing(Verdict.DENIED)
 
     temp: tuple[TempFile, ...] = ()
-    if TEMP_SUBDIR in top:
-        tdir = root / TEMP_SUBDIR
+    unexamined: list[str] = []
+    tdir = Path(temp_dir) if temp_dir else root / TEMP_SUBDIR
+    label = TEMP_SUBDIR if tdir == root / TEMP_SUBDIR else str(tdir)
+    if tdir.exists():
         try:
+            children = sorted(tdir.iterdir())
             temp = tuple(
                 TempFile(name=f.name, size=f.stat().st_size, head=_head(f))
-                for f in sorted(tdir.iterdir())
+                for f in children
                 if f.is_file()
             )
+            # A real filter chain creates tmp/.cache, a directory. Depth-1
+            # filtering silently discarded it along with anything inside, so a
+            # document under it appeared in no section and survived --purge.
+            unexamined += [
+                f"{label}/{f.name}/ (subdirectory, not examined)"
+                for f in children
+                if f.is_dir()
+            ]
         except PermissionError:
             # Names only through this path. Size and header are unknown, which
             # is_harmless_temp() treats as "possibly document content" rather
             # than assuming the safe answer.
             tverdict, names = _sudo_ls(str(tdir), files_only=True)
-            temp = () if tverdict is not Verdict.CLEAN else tuple(
-                TempFile(name=n, size=-1, head="") for n in names
-            )
-        except OSError:
-            temp = ()
+            if tverdict is Verdict.CLEAN:
+                temp = tuple(TempFile(name=n, size=-1, head="") for n in names)
+            else:
+                # Do NOT fall through with an empty tuple. That turned an
+                # unreadable TempDir into an empty one and printed
+                # "VERDICT: spool is clean" over a readable document.
+                unexamined.append(f"{label}/ (permission denied)")
+        except OSError as exc:
+            unexamined.append(f"{label}/ (unreadable: {exc.__class__.__name__})")
 
-    return Listing(verdict, tuple(n for n in top if n != TEMP_SUBDIR), temp)
+    return Listing(
+        verdict,
+        tuple(n for n in top if n != TEMP_SUBDIR),
+        temp,
+        tuple(unexamined),
+        label,
+    )
 
 
 def delete(spool: str, entries: tuple[Entry, ...]) -> tuple[int, int]:  # pragma: no cover
@@ -511,6 +606,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--spool", default=DEFAULT_SPOOL, help=f"spool directory (default {DEFAULT_SPOOL})")
     ap.add_argument("--conf", default=DEFAULT_CONF, help=f"cupsd.conf path (default {DEFAULT_CONF})")
+    ap.add_argument("--temp", default=None,
+                    help="TempDir to audit; default is TempDir from cups-files.conf, else <spool>/tmp")
     args = ap.parse_args(argv)
 
     # --fix and --purge are independent and both may be requested. Returning
@@ -525,14 +622,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     jobs = frozenset(args.jobs)
-    audit = classify(read_spool(args.spool), jobs, args.include_control)
+    temp_dir = args.temp or configured_tempdir(
+        str(Path(args.conf).parent / "cups-files.conf")
+    )
+    audit = classify(read_spool(args.spool, temp_dir), jobs, args.include_control)
 
     if not audit.readable:
         for line in render(audit, jobs):
             print(line)
         return 2
-
-    retention = retention_state(args.conf)
 
     if args.purge:
         victims = victims_for(audit)
@@ -546,16 +644,33 @@ def main(argv: list[str] | None = None) -> int:
             print(f"DELETE FAILED for {failed} file(s); {deleted} removed.")
             print("This is a permissions problem, not files being recreated.")
             return 1
-        after = classify(read_spool(args.spool), jobs, args.include_control)
+        after = classify(read_spool(args.spool, temp_dir), jobs, args.include_control)
         if not after.readable:
             print(f"{deleted} removed, but the spool could not be re-read to confirm.")
             return 2
         remaining = len(victims_for(after))
         print(f"{deleted} removed. Remaining in scope: {remaining}")
-        print("SCOPE CLEAN." if remaining == 0 else "STILL PRESENT after a successful delete.")
-        return 0 if remaining == 0 else 1
+        if after.unexamined:
+            # The re-read goes through the same path, so an unreadable TempDir
+            # would otherwise be counted as zero and announced as clean.
+            print(f"NOT CLEAN: {len(after.unexamined)} area(s) could not be examined:")
+            for u in after.unexamined:
+                print(f"  {u}")
+            return 2
+        if remaining:
+            print("STILL PRESENT after a successful delete.")
+            return 1
+        if after.uncounted_control:
+            print(
+                f"SCOPE CLEAN, but {after.uncounted_control} control file(s) were not "
+                "counted or removed."
+            )
+            print("They carry the job title. Use --include-control to clear them too.")
+            return 0
+        print("SCOPE CLEAN.")
+        return 0
 
-    for line in render(audit, jobs, retention):
+    for line in render(audit, jobs, retention_state(args.conf)):
         print(line)
     return audit.exit_code
 
