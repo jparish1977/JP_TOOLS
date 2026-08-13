@@ -224,7 +224,7 @@ def parse_find_rows(output: str) -> list[tuple[str, str, str]]:
         if not chunk:
             continue
         # maxsplit=2 so tabs inside a filename stay in the name.
-        kind, target, name = (chunk.split("\t", 2) + ["", ""])[:3]
+        kind, target, name = (*chunk.split("\t", 2), "", "")[:3]
         if not name:
             continue
         rows.append((kind, target, name))
