@@ -330,19 +330,36 @@ def test_ppd_files_are_not_leaks() -> None:
 
 
 def test_retention_honours_the_last_directive() -> None:
-    """cupsd uses the LAST PreserveJobFiles line; this returned on the first.
+    """cupsd uses the LAST PreserveJobFiles line; the code returned on the first.
 
     A hand-edited config with No followed by Yes reported RETENTION: OFF on a
     host that was retaining documents. Danger reported as safety.
+
+    The previous version of this test reimplemented the regex loop inline and
+    asserted on its own copy -- it never called retention_state, so reverting
+    that function to first-match left it green. A test that reimplements the
+    thing it is testing tests the reimplementation.
     """
-    text = "PreserveJobFiles No\nSomethingElse 1\nPreserveJobFiles Yes\n"
-    last = None
-    import re as _re
-    for line in text.splitlines():
-        m = _re.match(r"^\s*PreserveJobFiles\s+(\S+)", line, _re.IGNORECASE)
-        if m:
-            last = m.group(1).lower()
-    check("the last directive wins", last, "yes")
+    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
+        fh.write("PreserveJobFiles No\nSomethingElse 1\nPreserveJobFiles Yes\n")
+        last_wins = fh.name
+    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
+        fh.write("PreserveJobFiles Yes\nPreserveJobFiles No\n")
+        last_off = fh.name
+    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
+        fh.write("# nothing relevant here\n")
+        unset = fh.name
+    try:
+        check("No then Yes -> retaining", spool_audit.retention_state(last_wins), True)
+        check("Yes then No -> not retaining", spool_audit.retention_state(last_off), False)
+        # An absent directive means the compiled default, which on the hosts
+        # measured here keeps documents. Guessing "off" would be a guess in the
+        # dangerous direction.
+        check("unset -> assume retaining", spool_audit.retention_state(unset), True)
+        check("unreadable -> unknown", spool_audit.retention_state("/nonexistent/x.conf"), None)
+    finally:
+        for f in (last_wins, last_off, unset):
+            os.unlink(f)
 
 
 def test_scoped_purge_admits_what_it_cannot_touch() -> None:
@@ -897,7 +914,10 @@ def test_purge_precheck_refuses_when_the_root_is_unresolvable() -> None:
 def test_purge_outcome_states() -> None:
     clean = classify(spool([]))
     check("a clean re-read is success", purge_outcome(2, 0, clean, frozenset()).code, 0)
-    check("a failed delete is 1", purge_outcome(0, 1, clean, frozenset()).code, 1)
+    # 2, not 1: a failed or refused delete means the tool cannot say what is
+    # left, and the contract reserves 1 for "content you care about is still
+    # there" and 2 for "cannot tell".
+    check("a failed delete cannot conclude", purge_outcome(0, 1, clean, frozenset()).code, 2)
     check("an unreadable re-read is 2", purge_outcome(2, 0, None, frozenset()).code, 2)
 
     unexamined = classify(Listing(Verdict.CLEAN, (), (), ("tmp/ (permission denied)",)))

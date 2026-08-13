@@ -11,6 +11,7 @@ Usage:
     python spool-audit.py 85 86 --purge      # delete ONLY those jobs' documents
     python spool-audit.py --purge            # delete every retained document
     python spool-audit.py --include-control  # also count/remove job control files
+    python spool-audit.py --include-unrecognised  # also DELETE unidentified files
     python spool-audit.py --fix              # stop CUPS retaining documents
     python spool-audit.py --spool DIR        # audit a directory instead
 
@@ -336,6 +337,17 @@ def temp_child_note(
     return None
 
 
+def identified_as_print(f: TempFile) -> bool:
+    """Does this file's CONTENT say it is print data?
+
+    The positive question, kept separate from is_harmless_temp's negative one.
+    "Not recognised as harmless" is not evidence of anything, and using it to
+    populate a delete set destroyed files whose only crime was being
+    unfamiliar.
+    """
+    return any(f.head.startswith(m) for m in DOCUMENT_MAGIC)
+
+
 def is_harmless_temp(f: TempFile) -> bool:
     """Is this TempDir file known NOT to be document content?
 
@@ -412,7 +424,11 @@ def classify(
     # not.
     extras = sorted(listing.extra, key=lambda f: f.name)
     entries += [
-        Entry(name=f.name, kind=Kind.UNRECOGNISED, job=None)
+        Entry(
+            name=f.name,
+            kind=Kind.TEMP if identified_as_print(f) else Kind.UNRECOGNISED,
+            job=None,
+        )
         for f in extras
         if not is_harmless_temp(f)
     ]
@@ -420,7 +436,15 @@ def classify(
     # never be "targeted" by job number. They still count as retained data.
     temps = sorted(listing.temp, key=lambda f: f.name)
     entries += [
-        Entry(name=f"{listing.temp_label}/{f.name}", kind=Kind.TEMP, job=None)
+        Entry(
+            name=f"{listing.temp_label}/{f.name}",
+            # Positively identified as print data, or merely not ruled out?
+            # Kind drove the delete set, and TempDir files were all TEMP, so
+            # `--purge` destroyed tmp/notes.txt while sparing an identical
+            # README at the top level. Evidence decides, not location.
+            kind=Kind.TEMP if identified_as_print(f) else Kind.UNRECOGNISED,
+            job=None,
+        )
         for f in temps
         if not is_harmless_temp(f)
     ]
@@ -471,6 +495,17 @@ def victims_for(audit: Audit, include_unrecognised: bool = False) -> tuple[Entry
     return tuple(e for e in pool if e.kind is not Kind.UNRECOGNISED)
 
 
+def safe_name(name: str) -> str:
+    """A filename that cannot forge a report line.
+
+    Names are interpolated into the report, and a file called
+    "d00085-001\nVERDICT: spool is clean." printed a forged pass inside the
+    listing. Newlines and carriage returns are escaped; --spool is documented
+    for auditing directories this tool does not control.
+    """
+    return name.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
+
+
 def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) -> list[str]:
     """Format an Audit for a human. Returns lines; printing is the caller's job.
 
@@ -517,7 +552,7 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         if audit.targeted_are_gone:
             lines.append("  none present. Those documents are GONE.")
         else:
-            lines += [f"  >>> {e.name}  STILL PRESENT" for e in audit.targeted]
+            lines += [f"  >>> {safe_name(e.name)}  STILL PRESENT" for e in audit.targeted]
             lines.append("  remove ONLY these with: --purge")
         lines.append("")
 
@@ -527,7 +562,7 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
 
     lines.append(f"OTHER RETAINED FILES: {len(audit.others)}")
     shown = (rest + unknown + temp)[:20]
-    lines += [f"  {e.name}" for e in shown]
+    lines += [f"  {safe_name(e.name)}" for e in shown]
     if len(audit.others) > 20:
         lines.append(f"  ... and {len(audit.others) - 20} more")
     if unknown:
@@ -554,11 +589,11 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         if runtime:
             lines.append("")
             lines.append(f"CUPS RUNTIME FILES (not document content, never purged): {len(runtime)}")
-            lines += [f"  {e.name}" for e in runtime]
+            lines += [f"  {safe_name(e.name)}" for e in runtime]
         if other:
             lines.append("")
             lines.append(f"OTHER FILES, no print-data signature: {len(other)}")
-            lines += [f"  {e.name}" for e in other]
+            lines += [f"  {safe_name(e.name)}" for e in other]
             lines.append("  Empty, or a recognised driver cache. Listed so nothing is hidden.")
 
     if audit.unexamined:
@@ -610,7 +645,9 @@ class Outcome:
     code: int = 0
 
 
-def leftover_caveats(audit: Audit, jobs: frozenset[int]) -> tuple[str, ...]:
+def leftover_caveats(
+    audit: Audit, jobs: frozenset[int], include_unrecognised: bool = False
+) -> tuple[str, ...]:
     """What a purge could not remove, and why. ONE function, both call sites.
 
     The "nothing to purge" branch and the post-purge branch each grew their own
@@ -633,11 +670,20 @@ def leftover_caveats(audit: Audit, jobs: frozenset[int]) -> tuple[str, ...]:
     # every scoped case paired job 85 with an unattributable leftover, never
     # with another job's document.
     unrecognised = [e for e in audit.others if e.kind is Kind.UNRECOGNISED]
-    if unrecognised:
+    if unrecognised and not include_unrecognised:
         out.append(
             f"{len(unrecognised)} file(s) could not be identified and were NOT "
             "deleted. Inspect them, then use --include-unrecognised if they "
             "really are print data."
+        )
+    elif unrecognised and jobs:
+        # Unrecognised files carry no job id, so a scoped purge can never
+        # reach them however the flag is set. Saying "use --include-unrecognised"
+        # to someone who just used it is worse than useless.
+        out.append(
+            f"{len(unrecognised)} unidentified file(s) carry no job id, so "
+            "--include-unrecognised cannot reach them in a scoped run. Re-run "
+            "--purge --include-unrecognised without job ids."
         )
     if jobs:
         no_job = [e for e in audit.others if e.job is None]
@@ -687,7 +733,7 @@ def purge_precheck(
 
     lines = ["Nothing to purge."]
     code = 1 if audit.total else 0
-    caveats = leftover_caveats(audit, jobs)
+    caveats = leftover_caveats(audit, jobs, include_unrecognised)
     if caveats:
         # Previously this printed the single line "Nothing to purge." over a
         # retained document and exited 0, while the report path on the same
@@ -711,6 +757,9 @@ def purge_outcome(
 ) -> Outcome:
     """Decide after deleting. `after` is None when the re-read failed."""
     if failed:
+        # 2, not 1: a refusal or a failed unlink means the tool does not know
+        # what is left, and its own contract reserves 1 for "content you care
+        # about is still there" and 2 for "cannot tell".
         return Outcome((
             f"DELETE FAILED for {failed} file(s); {deleted} removed.",
             # Do not name a cause: permissions, a directory matching the
@@ -718,7 +767,7 @@ def purge_outcome(
             # here, and asserting the wrong one sends the user somewhere
             # useless.
             "Not files being recreated: the removals themselves failed.",
-        ), 1)
+        ), 2)
     if after is None:
         return Outcome((f"{deleted} removed, but the spool could not be re-read to confirm.",), 2)
 
@@ -730,7 +779,7 @@ def purge_outcome(
         return Outcome(tuple(lines), 2)
     if remaining:
         return Outcome((*lines, "STILL PRESENT after a successful delete."), 1)
-    caveats = leftover_caveats(after, jobs)
+    caveats = leftover_caveats(after, jobs, include_unrecognised)
     if caveats:
         # The exit code comes from what REMAINS, not from a caveat string
         # existing: uncounted control files are opt-in by design and the report
@@ -795,6 +844,12 @@ def _walk_temp(  # pragma: no cover
         # execute -- while its test passed by asserting only counts.
         try:
             st = f.lstat()
+        except PermissionError:
+            # Not a race. A directory readable but not traversable lands here,
+            # and calling it "vanished" sends the user hunting a busy spool
+            # instead of running sudo.
+            unexamined.append(f"{label}/{name} (permission denied on stat)")
+            continue
         except OSError:
             unexamined.append(f"{label}/{name} (vanished while reading)")
             continue
@@ -909,6 +964,10 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
         f = root / n
         try:
             st = f.lstat()
+        except PermissionError:
+            unexamined.append(f"{n} (permission denied on stat)")
+            suspect.append(n)
+            continue
         except OSError:
             unexamined.append(f"{n} (vanished while reading)")
             suspect.append(n)
@@ -1073,7 +1132,9 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     # tee opens with O_TRUNC before writing, so an interrupted write leaves the
     # daemon's config empty and nothing to restore from. Copy it aside first.
     backup = f"{conf}.spool-audit.bak"
-    saved = subprocess.run(["cp", "-p", conf, backup], check=False)
+    # -n: never overwrite. Running --fix twice used to replace the pre-fix
+    # original with the already-fixed copy, leaving nothing to restore.
+    saved = subprocess.run(["cp", "-p", "-n", conf, backup], check=False)
     if saved.returncode != 0:
         # The copy exists precisely because tee opens O_TRUNC. Proceeding
         # without it means an interrupted write leaves an empty cupsd.conf and
@@ -1084,8 +1145,6 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     )
     if write.returncode != 0:
         return False, f"could not write {conf}; original preserved at {backup}"
-    if write.returncode != 0:
-        return False, f"could not write {conf}"
 
     if not should_restart_cups(conf):
         # Do NOT restart the live daemon for a config it does not read.
