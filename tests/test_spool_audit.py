@@ -60,6 +60,18 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Load the module under test from source, every time.
+#
+# This test loads spool-audit.py by path, and SourceFileLoader will happily use
+# a cached .pyc whose recorded source size and mtime still match. On 2026-08-12
+# that produced a phantom failure for half an hour: a mutation-testing run left
+# bytecode compiled from a modified source, and because the edit was
+# `return 2` -> `return 0`, byte-for-byte the same length, the cache looked
+# valid. The suite then reported a bug that did not exist in the file on disk,
+# and mutation results taken during that window were meaningless.
+sys.dont_write_bytecode = True
+importlib.invalidate_caches()
+
 MODULE_PATH = Path(__file__).resolve().parent.parent / "spool-audit.py"
 
 _spec = importlib.util.spec_from_file_location("spool_audit", MODULE_PATH)
@@ -282,6 +294,46 @@ def test_ppd_files_are_not_leaks() -> None:
     check("the document is the one kept", audit.others[0].name, "tmp/006816a8026a5")
     check("ppd is an artifact", len(audit.artifacts), 1)
     check_true("ppd not a purge victim", "tmp/0777f6a7dc4fa" not in [e.name for e in victims_for(audit)])
+
+
+def test_zero_length_temp_is_harmless() -> None:
+    """A zero-byte file cannot be document content.
+
+    Mutation testing found the suite did not pin this: disabling the size rule
+    entirely still passed. cups-dbus-notifier-lockfile is the real instance,
+    0 bytes, and treating it as leaked content is what started this whole
+    thread.
+    """
+    empty_named = TempFile(name="cups-dbus-notifier-lockfile", size=0, head="")
+    empty_odd = TempFile(name="0777f6a7dc4fa", size=0, head="")
+
+    check_true("named artifact is harmless", is_harmless_temp(empty_named))
+    check_true("so is any zero-length file", is_harmless_temp(empty_odd))
+
+    nonempty = TempFile(name="0777f6a7dc4fa", size=1, head="%")
+    check_true("one byte is not zero", not is_harmless_temp(nonempty))
+
+    audit = classify(Listing(Verdict.CLEAN, (), (empty_odd,)))
+    check("not counted as content", audit.total, 0)
+    check("reported as runtime", len(audit.artifacts), 1)
+
+
+def test_ppd_match_is_anchored() -> None:
+    """A substring match would under-report, which is the harmful direction.
+
+    Mutation testing found the suite accepted `"PPD" in head` in place of
+    `head.startswith("*PPD-Adobe")`. A printed document whose first bytes merely
+    mention PPD would then be reclassified as a harmless driver cache and
+    dropped from the leak count.
+    """
+    decoy = TempFile(name="0777f6a7dc4fa", size=4096, head="%!PS-Adobe-3.0 PPD notes")
+    check_true("substring is not enough", not is_harmless_temp(decoy))
+
+    real = TempFile(name="0777f6a8bdd78", size=10917, head='*PPD-Adobe: "4.3"')
+    check_true("anchored prefix is", is_harmless_temp(real))
+
+    audit = classify(Listing(Verdict.CLEAN, (), (decoy,)))
+    check("decoy counted as possible content", audit.total, 1)
 
 
 def test_unknown_header_is_treated_as_content() -> None:
