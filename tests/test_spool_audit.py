@@ -561,6 +561,34 @@ def test_no_jobs_requested() -> None:
     check_true("no targeted section", "JOBS YOU ASKED ABOUT" not in "\n".join(render(audit, frozenset())))
 
 
+def test_walk_survives_a_file_vanishing() -> None:
+    """A live spool deletes temp files continuously. Losing the whole walk to
+    one racing file discarded the audit on exactly the busy machine worth
+    auditing."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        for i in range(5):
+            (root / f"f{i}.ps").write_text("%!PS\n")
+
+        real_stat = pathlib.Path.stat
+
+        def flaky(self, *a, **k):  # type: ignore[no-untyped-def]
+            if self.name == "f2.ps":
+                raise FileNotFoundError(2, "gone")
+            return real_stat(self, *a, **k)
+
+        pathlib.Path.stat = flaky  # type: ignore[method-assign]
+        try:
+            found: list = []
+            unexamined: list = []
+            spool_audit._walk_temp(root, "tmp", "", found, unexamined)
+        finally:
+            pathlib.Path.stat = real_stat  # type: ignore[method-assign]
+
+        check("the other four survive", len(found), 4)
+        check_true("the racing file is recorded, not dropped", len(unexamined) == 1)
+
+
 def test_walk_has_a_depth_limit() -> None:
     """Unbounded recursion on a hostile or pathological tree is a hang, and a
     hang in a security tool reads as 'still checking' forever."""
