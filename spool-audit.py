@@ -184,6 +184,38 @@ class Audit:
         return 0 if self.verdict is Verdict.CLEAN else 1
 
 
+def temp_child_note(
+    label: str,
+    name: str,
+    *,
+    is_symlink: bool,
+    is_dir: bool,
+    is_regular: bool,
+    target: str = "?",
+) -> str | None:
+    """Why this TempDir entry was not examined, or None if it is a plain file.
+
+    Pure so it can be tested without a filesystem. This decision lived inside
+    read_spool, which carries `pragma: no cover`, and it silently dropped
+    everything that was not a regular file. A FIFO and a broken symlink
+    vanished from the report entirely, and a symlink to a document was counted,
+    unlinked, and reported as destroyed while the target stayed readable.
+
+    Order matters: is_dir() and is_file() both FOLLOW symlinks, so symlinks
+    must be tested first.
+    """
+    if is_symlink:
+        return (
+            f"{label}/{name} -> {target} (symlink, NOT followed; "
+            "removing it would not remove the target)"
+        )
+    if is_dir:
+        return f"{label}/{name}/ (subdirectory, not examined)"
+    if not is_regular:
+        return f"{label}/{name} (not a regular file, not examined)"
+    return None
+
+
 def is_harmless_temp(f: TempFile) -> bool:
     """Is this TempDir file known NOT to be document content?
 
@@ -457,19 +489,28 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
     if tdir.exists():
         try:
             children = sorted(tdir.iterdir())
+            regular = []
+            for f in children:
+                link = f.is_symlink()
+                try:
+                    target = os.readlink(f) if link else "?"
+                except OSError:
+                    target = "?"
+                note = temp_child_note(
+                    label,
+                    f.name,
+                    is_symlink=link,
+                    is_dir=not link and f.is_dir(),
+                    is_regular=not link and f.is_file(),
+                    target=target,
+                )
+                if note is None:
+                    regular.append(f)
+                else:
+                    unexamined.append(note)
             temp = tuple(
-                TempFile(name=f.name, size=f.stat().st_size, head=_head(f))
-                for f in children
-                if f.is_file()
+                TempFile(name=f.name, size=f.stat().st_size, head=_head(f)) for f in regular
             )
-            # A real filter chain creates tmp/.cache, a directory. Depth-1
-            # filtering silently discarded it along with anything inside, so a
-            # document under it appeared in no section and survived --purge.
-            unexamined += [
-                f"{label}/{f.name}/ (subdirectory, not examined)"
-                for f in children
-                if f.is_dir()
-            ]
         except PermissionError:
             # Names only through this path. Size and header are unknown, which
             # is_harmless_temp() treats as "possibly document content" rather
@@ -635,6 +676,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.purge:
         victims = victims_for(audit)
         if not victims:
+            if audit.unexamined:
+                print(f"Nothing to purge, but {len(audit.unexamined)} area(s) could not be examined:")
+                for u in audit.unexamined:
+                    print(f"  {u}")
+                print("This is NOT a clean result.")
+                return 2
             print("Nothing to purge.")
             return 0
         scope = f"job(s) {', '.join(str(j) for j in sorted(jobs))}" if jobs else "all retained files"

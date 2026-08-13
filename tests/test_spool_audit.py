@@ -96,6 +96,7 @@ Audit = spool_audit.Audit
 Listing = spool_audit.Listing
 TempFile = spool_audit.TempFile
 is_harmless_temp = spool_audit.is_harmless_temp
+temp_child_note = spool_audit.temp_child_note
 Verdict = spool_audit.Verdict
 Kind = spool_audit.Kind
 
@@ -299,6 +300,55 @@ def test_ppd_files_are_not_leaks() -> None:
     check("the document is the one kept", audit.others[0].name, "tmp/006816a8026a5")
     check("ppd is an artifact", len(audit.artifacts), 1)
     check_true("ppd not a purge victim", "tmp/0777f6a7dc4fa" not in [e.name for e in victims_for(audit)])
+
+
+def test_symlinks_are_never_followed() -> None:
+    """The worst failure this tool can have: a false assurance of destruction.
+
+    Peer tested 2026-08-12 before merge. A symlink in TempDir pointing at a
+    document was counted as content, --purge unlinked THE SYMLINK, and the tool
+    printed "SCOPE CLEAN" and exited 0 while the target was still fully
+    readable. Missing a file is bad; telling someone their secret is destroyed
+    when it is not is worse.
+    """
+    note = temp_child_note(
+        "tmp", "a-symlink.ps",
+        is_symlink=True, is_dir=False, is_regular=False, target="../outside/secret.ps",
+    )
+    assert note is not None
+    check_true("not examined", "symlink" in note)
+    check_true("names the target", "../outside/secret.ps" in note)
+    check_true("warns removal is useless", "would not remove the target" in note)
+
+    audit = classify(Listing(Verdict.CLEAN, (), (), (note,)))
+    check("cannot conclude", audit.exit_code, 2)
+    check_true("never clean", "spool is clean" not in "\n".join(render(audit, frozenset())))
+
+
+def test_non_regular_files_are_reported() -> None:
+    """A FIFO and a broken symlink appeared in NO section, and the tool then
+    announced the spool was clean over them."""
+    fifo = temp_child_note("tmp", "a-fifo", is_symlink=False, is_dir=False, is_regular=False)
+    assert fifo is not None
+    check_true("says not regular", "not a regular file" in fifo)
+
+    subdir = temp_child_note("tmp", ".cache", is_symlink=False, is_dir=True, is_regular=False)
+    assert subdir is not None
+    check_true("subdirectory noted", "subdirectory" in subdir)
+
+    plain = temp_child_note("tmp", "0777f6a7", is_symlink=False, is_dir=False, is_regular=True)
+    check("a plain file is examinable", plain, None)
+
+
+def test_symlink_takes_precedence_over_dir_and_file() -> None:
+    """is_dir() and is_file() both follow symlinks, so a symlink to a directory
+    would be classified as a subdirectory and its target walked."""
+    note = temp_child_note(
+        "tmp", "link-to-dir", is_symlink=True, is_dir=True, is_regular=False, target="/etc",
+    )
+    assert note is not None
+    check_true("reported as a symlink, not a subdirectory", "symlink" in note)
+    check_true("not called a subdirectory", "subdirectory" not in note)
 
 
 def test_unexamined_areas_are_never_clean() -> None:
