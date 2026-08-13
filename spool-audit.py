@@ -208,6 +208,29 @@ class Audit:
         return 0 if self.verdict is Verdict.CLEAN else 1
 
 
+def parse_find_rows(output: str) -> list[tuple[str, str, str]]:
+    """Parse NUL-separated `find -printf "%y\t%l\t%P\0"` output.
+
+    Pure, so the parsing can be tested without sudo or a spool. It was inline
+    in read_spool and newline-separated, and a file named "evil\nd00099-001"
+    split into two rows: the real name truncated to "evil", plus a phantom
+    entry. --purge then deleted a path that did not exist, counted the
+    FileNotFoundError as success, and the file stayed.
+
+    Returns (type-letter, symlink-target, path-relative-to-start).
+    """
+    rows = []
+    for chunk in output.split("\0"):
+        if not chunk:
+            continue
+        # maxsplit=2 so tabs inside a filename stay in the name.
+        kind, target, name = (chunk.split("\t", 2) + ["", ""])[:3]
+        if not name:
+            continue
+        rows.append((kind, target, name))
+    return rows
+
+
 def temp_child_note(
     label: str,
     name: str,
@@ -496,13 +519,20 @@ def _sudo_ls(path: str, files_only: bool = False) -> tuple[Verdict, tuple[str, .
         # walk and hid nested documents in neither temp nor unexamined, and
         # basenames alone would collide across directories and make delete()
         # build the wrong path.
-        ["find", path, "-mindepth", "1", "-maxdepth", "8", "-printf", "%y\t%l\t%P\n"]
+        ["find", path, "-mindepth", "1", "-maxdepth", "8", "-printf", "%y\t%l\t%P\0"]
         if files_only
         else ["ls", "-1", path]
     )
     proc = subprocess.run(_priv(argv), capture_output=True, text=True, check=False)
     if proc.returncode == 0:
-        return Verdict.CLEAN, tuple(line for line in proc.stdout.splitlines() if line)
+        # NUL-separated when listing files: a filename containing a newline
+        # split into two rows, truncating the real name and inventing a
+        # phantom entry. --purge then tried to delete a path that does not
+        # exist, counted the FileNotFoundError as a successful delete, and the
+        # file stayed. Verified with a file named "evil\nd00099-001".
+        if files_only:
+            return Verdict.CLEAN, (proc.stdout,)   # parsed by parse_find_rows
+        return Verdict.CLEAN, tuple(x for x in proc.stdout.splitlines() if x)
     if "No such file" in proc.stderr:
         return Verdict.MISSING, ()
     return Verdict.DENIED, ()
@@ -603,11 +633,10 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
             # Names only through this path. Size and header are unknown, which
             # is_harmless_temp() treats as "possibly document content" rather
             # than assuming the safe answer.
-            tverdict, rows = _sudo_ls(str(tdir), files_only=True)
+            tverdict, raw = _sudo_ls(str(tdir), files_only=True)
             if tverdict is Verdict.CLEAN:
                 collected = []
-                for row in rows:
-                    kind, target, name = (row.split("\t", 2) + ["", ""])[:3]
+                for kind, target, name in parse_find_rows(raw[0] if raw else ""):
                     if kind == "d":
                         continue
                     note = temp_child_note(

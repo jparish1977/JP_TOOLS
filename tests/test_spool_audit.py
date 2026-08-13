@@ -99,6 +99,7 @@ Listing = spool_audit.Listing
 TempFile = spool_audit.TempFile
 is_harmless_temp = spool_audit.is_harmless_temp
 temp_child_note = spool_audit.temp_child_note
+parse_find_rows = spool_audit.parse_find_rows
 Verdict = spool_audit.Verdict
 Kind = spool_audit.Kind
 
@@ -302,6 +303,30 @@ def test_ppd_files_are_not_leaks() -> None:
     check("the document is the one kept", audit.others[0].name, "tmp/006816a8026a5")
     check("ppd is an artifact", len(audit.artifacts), 1)
     check_true("ppd not a purge victim", "tmp/0777f6a7dc4fa" not in [e.name for e in victims_for(audit)])
+
+
+def test_find_output_survives_hostile_filenames() -> None:
+    """A newline in a filename split one row into two: the real name truncated,
+    plus a phantom entry. --purge then deleted a path that did not exist,
+    counted the FileNotFoundError as success, and the file stayed. Verified
+    against real find output before the fix."""
+    out = "f\t\tevil\nd00099-001\0f\t\tnormal.ps\0"
+    rows = parse_find_rows(out)
+
+    check("two entries, not three", len(rows), 2)
+    check("newline stays inside the name", rows[0][2], "evil\nd00099-001")
+    check("and the next file is intact", rows[1][2], "normal.ps")
+
+    # Tabs inside a name must survive too: maxsplit=2 keeps them in the name.
+    check("tab in name", parse_find_rows("f\t\ta\tb.ps\0")[0][2], "a\tb.ps")
+
+    # Symlinks carry their target in the middle field.
+    kind, target, name = parse_find_rows("l\t/etc/passwd\tsneaky\0")[0]
+    check("symlink type", kind, "l")
+    check("target preserved", target, "/etc/passwd")
+    check("name preserved", name, "sneaky")
+
+    check("empty output is no rows", parse_find_rows(""), [])
 
 
 def test_symlinks_are_never_followed() -> None:
