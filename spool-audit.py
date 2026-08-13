@@ -14,6 +14,11 @@ Usage:
     python spool-audit.py --fix              # stop CUPS retaining documents
     python spool-audit.py --spool DIR        # audit a directory instead
 
+Reads directly, so it must run as root for the real spool (sudo). There is no
+privilege-escalation path inside the tool: a second implementation of the same
+listing kept disagreeing with the first, and that divergence caused a large
+share of this file's history of bugs.
+
 Reading the spool needs root, so this normally runs under sudo.
 
 WHY THE PROBLEM EXISTS AT ALL
@@ -172,9 +177,8 @@ class Listing:
     # level readable, TempDir not", and the code silently turned an unreadable
     # TempDir into an empty one and announced "spool is clean".
     unexamined: tuple[str, ...] = ()
-    # How to name the temp directory in output. Defaults to CUPS's "tmp", but
-    # --temp can point elsewhere, and reporting a path that does not exist is
-    # the tool telling you something false about where your data is.
+    # Always "tmp" now that --temp is gone. Kept as a field so classify() has
+    # one place to read it from rather than hardcoding the prefix twice.
     temp_label: str = TEMP_SUBDIR
     # Top-level entries matching neither d<n>-<n> nor c<n>. They were dropped
     # silently, so a document left as d00085-001.bak was invisible while the
@@ -197,12 +201,6 @@ class Audit:
     artifacts: tuple[Entry, ...] = ()
     unexamined: tuple[str, ...] = ()
     uncounted_control: int = 0
-    # Files whose content could not be read. The sudo listing path cannot open
-    # children, so it cannot recognise a PPD or a cache and counts them as
-    # possible content -- a superset of what the direct path reports. Without
-    # saying so, the same spool audited two ways gives two numbers and no
-    # explanation, which is its own kind of misleading.
-    unread: int = 0
 
     @property
     def total(self) -> int:
@@ -286,29 +284,6 @@ def is_inside(candidate: Path, roots: tuple[Path, ...]) -> bool:
     this does not.
     """
     return any(candidate == r or candidate.is_relative_to(r) for r in roots)
-
-
-def parse_find_rows(output: str) -> list[tuple[str, str, str]]:
-    """Parse NUL-separated `find -printf "%y\t%l\t%P\0"` output.
-
-    Pure, so the parsing can be tested without sudo or a spool. It was inline
-    in read_spool and newline-separated, and a file named "evil\nd00099-001"
-    split into two rows: the real name truncated to "evil", plus a phantom
-    entry. --purge then deleted a path that did not exist, counted the
-    FileNotFoundError as success, and the file stayed.
-
-    Returns (type-letter, symlink-target, path-relative-to-start).
-    """
-    rows = []
-    for chunk in output.split("\0"):
-        if not chunk:
-            continue
-        # maxsplit=2 so tabs inside a filename stay in the name.
-        kind, target, name = (*chunk.split("\t", 2), "", "")[:3]
-        if not name:
-            continue
-        rows.append((kind, target, name))
-    return rows
 
 
 def temp_child_note(
@@ -444,7 +419,6 @@ def classify(
     others = tuple(sorted((e for e in entries if e.job not in jobs), key=lambda e: e.name))
     verdict = Verdict.RETAINED if entries else Verdict.CLEAN
     uncounted_control = 0 if include_control else sum(1 for n in listing.top if CONTROL.match(n))
-    unread = sum(1 for f in list(temps) + list(extras) if f.size < 0)
     return Audit(
         verdict,
         targeted,
@@ -453,7 +427,6 @@ def classify(
         artifacts=artifacts,
         unexamined=listing.unexamined,
         uncounted_control=uncounted_control,
-        unread=unread,
     )
 
 
@@ -541,15 +514,6 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         lines += [f"  {u}" for u in audit.unexamined]
         lines.append("  Anything in there is unaccounted for. This is NOT a clean result.")
 
-    if audit.unread:
-        lines.append("")
-        lines.append(
-            f"NOTE: {audit.unread} file(s) could not be opened, only listed."
-        )
-        lines.append("  Their content is unknown, so they are counted as possible")
-        lines.append("  document data. Running as root can read them and may report")
-        lines.append("  fewer. Unknown content is never dismissed.")
-
     if audit.uncounted_control:
         lines.append("")
         lines.append(
@@ -583,38 +547,6 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
 # above stays testable without a printer, a spool or root.
 
 
-def _priv(argv: list[str]) -> list[str]:  # pragma: no cover
-    """Prefix with sudo only when we are not root AND sudo exists.
-
-    Unconditionally shelling out to sudo crashed with FileNotFoundError on any
-    system without it -- every container, every minimal image, and the case
-    where the tool is already running as root, which is how it is normally
-    used. Found by running real CUPS in a container on 2026-08-12; neither the
-    fixture nor the real machine could show it, because both had sudo.
-    """
-    if os.geteuid() != 0 and shutil.which("sudo"):
-        return ["sudo", "-n", *argv]
-    return argv
-
-
-def configured_tempdir(files_conf: str) -> str | None:  # pragma: no cover
-    """TempDir from cups-files.conf, or None if unset or unreadable.
-
-    TEMP_SUBDIR is only CUPS's default. A host that points TempDir elsewhere
-    was audited by looking at a directory CUPS does not use, and the tool then
-    reported "spool is clean" having never examined the one that holds document
-    content mid-filter. An unperformed check must not read as a pass.
-    """
-    read = subprocess.run(_priv(["cat", files_conf]), capture_output=True, text=True, check=False)
-    if read.returncode != 0:
-        return None
-    for line in read.stdout.splitlines():
-        m = re.match(r"^\s*TempDir\s+(\S+)", line, re.IGNORECASE)
-        if m:
-            return m.group(1)
-    return None
-
-
 def _head(path: Path, n: int = 32) -> str:  # pragma: no cover
     """First bytes of a file, decoded lossily. Used only to recognise known
     harmless formats such as PPDs. Never printed, never logged."""
@@ -623,50 +555,6 @@ def _head(path: Path, n: int = 32) -> str:  # pragma: no cover
             return fh.read(n).decode("utf-8", "replace")
     except OSError:
         return ""
-
-
-def _sudo_ls(  # pragma: no cover
-    path: str, files_only: bool = False, at_depth: int | None = None
-) -> tuple[Verdict, tuple[str, ...]]:
-    """List a directory, optionally regular files only.
-
-    `files_only` matters: the direct-read path filters with `p.is_file()`, so
-    without the same filter here the two paths disagree about the same spool.
-    Measured 2026-08-12 -- a real filter chain creates `tmp/.cache`, a
-    DIRECTORY, which `ls -1` would have reported as leaked document content
-    whenever the tool escalated through sudo rather than running as root.
-    """
-    if at_depth is not None:
-        # Directories sitting exactly at the walk limit. Each is a point where
-        # `find -maxdepth` stopped without saying so.
-        argv = ["find", path, "-mindepth", str(at_depth), "-maxdepth", str(at_depth),
-                "-type", "d", "-printf", FIND_NAMES]
-    elif files_only:
-        argv = ["find", path, "-mindepth", "1", "-maxdepth", str(MAX_TEMP_DEPTH),
-                "-printf", FIND_FORMAT]
-    else:
-        # find, not `ls -1`, so both paths are NUL-separated and neither can be
-        # fooled by a newline in a filename. -maxdepth 1 keeps this a top-level
-        # listing, and directories are included because `tmp` must appear here.
-        argv = ["find", path, "-mindepth", "1", "-maxdepth", "1", "-printf", FIND_NAMES]
-
-    # LC_ALL=C so the stderr match below is not locale-dependent, and
-    # surrogateescape so a non-UTF-8 filename cannot crash the decode. Names are
-    # bytes on Linux and this tool is pointed at directories it does not own.
-    env = {**os.environ, "LC_ALL": "C"}
-    proc = subprocess.run(
-        _priv(argv), capture_output=True, text=True,
-        errors="surrogateescape", env=env, check=False,
-    )
-    if proc.returncode == 0:
-        # files_only returns the raw stream for parse_find_rows; every other
-        # mode returns NUL-separated names.
-        if files_only:
-            return Verdict.CLEAN, (proc.stdout,)
-        return Verdict.CLEAN, tuple(x for x in proc.stdout.split("\0") if x)
-    if "No such file" in proc.stderr:
-        return Verdict.MISSING, ()
-    return Verdict.DENIED, ()
 
 
 def _walk_temp(  # pragma: no cover
@@ -731,24 +619,27 @@ def _walk_temp(  # pragma: no cover
             unexamined.append(note)
 
 
-def read_spool(  # pragma: no cover
-    spool: str, temp_dir: str | None = None, user_named_temp: bool = False
-) -> Listing:
-    """List the spool and its TempDir, distinguishing denied from missing.
+def read_spool(spool: str) -> Listing:  # pragma: no cover
+    """List the spool and its TempDir. Direct reads only.
 
-    `user_named_temp` is True only for an explicit --temp. A TempDir that came
-    from cups-files.conf is NOT user-chosen, and gating the symlink guard on
-    "temp_dir is None" let a config-derived symlink be followed with no warning
-    -- the same "the user chose it" reasoning applied to a path they never saw.
+    The sudo escalation path is gone. It was a second implementation of this
+    same listing and the two disagreed repeatedly -- different depth limits,
+    different handling of directories, different classification of files whose
+    content could not be read -- and that divergence produced a large share of
+    the defects on this branch. The tool needs root to read /var/spool/cups
+    anyway, so run it under sudo. An unreadable spool now reports DENIED
+    instead of quietly taking a different code path with different rules.
+
+    --temp and the cups-files.conf lookup are gone for the same reason: they
+    multiplied the number of directories that could be "the" TempDir, and every
+    finding about labels, containment and path comparison came from that.
     """
     root = Path(spool)
     try:
         top = tuple(sorted(p.name for p in root.iterdir()))
         verdict = Verdict.CLEAN
     except PermissionError:
-        verdict, top = _sudo_ls(spool)
-        if verdict in (Verdict.DENIED, Verdict.MISSING):
-            return Listing(verdict)
+        return Listing(Verdict.DENIED)
     except FileNotFoundError:
         return Listing(Verdict.MISSING)
     except NotADirectoryError:
@@ -760,146 +651,53 @@ def read_spool(  # pragma: no cover
 
     temp: tuple[TempFile, ...] = ()
     unexamined: list[str] = []
-    # resolve() so the label and the path delete() builds agree. A relative
-    # --temp made entries "reltmp/<file>" while delete() joined that onto the
-    # spool, unlinking <spool>/reltmp/<file> and hitting FileNotFoundError --
-    # which counts as a successful delete, so "N removed" was printed for files
-    # still on disk. The absolute case worked only by accident of pathlib's
-    # absolute-operand rule.
-    default_tmp = root / TEMP_SUBDIR
-    tdir = (_safe_resolve(Path(temp_dir)) or Path(temp_dir)) if temp_dir else default_tmp
-    # A TempDir that is ITSELF a symlink was never checked -- only its children
-    # were -- so `<spool>/tmp -> /anywhere` made --purge delete outside the
-    # named spool and print SCOPE CLEAN. If the user named it with --temp they
-    # chose it; the implicit default must not silently leave the spool.
-    if not user_named_temp:
-        try:
-            if Path(temp_dir).is_symlink() if temp_dir else default_tmp.is_symlink():
-                which = Path(temp_dir) if temp_dir else default_tmp
-                unexamined.append(
-                    f"{which} -> {os.readlink(which)} "
-                    "(TempDir is a symlink, NOT followed; pass --temp to audit it)"
-                )
-                tdir = None  # type: ignore[assignment]
-        except OSError:
-            pass
-    # Compare against BOTH forms. Comparing a resolved --temp against an
-    # unresolved default never matched, so the ordinary case started labelling
-    # entries with the whole spool path instead of "tmp".
-    resolved_default = _safe_resolve(default_tmp)
-    label = (
-        TEMP_SUBDIR
-        if tdir is not None and tdir in (default_tmp, resolved_default)
-        else str(tdir)
-    )
-    # If TempDir is elsewhere, <spool>/tmp is stripped from the top-level
-    # listing but never walked, so documents left there vanished from the audit
-    # entirely and the tool reported clean. Record it rather than drop it.
-    # Same two-form comparison as the label above. Comparing only the
-    # unresolved form meant a TempDir that IS <spool>/tmp was walked AND
-    # reported unexamined at the same time, so a relative --spool could never
-    # exit 0.
-    if (
-        tdir is not None
-        and tdir not in (default_tmp, resolved_default)
-        and TEMP_SUBDIR in top
-    ):
-        unexamined.append(
-            f"{TEMP_SUBDIR}/ (present but TempDir points at {tdir}; not examined)"
-        )
+    tdir: Path | None = root / TEMP_SUBDIR
+    # A TempDir that is ITSELF a symlink is never followed: `<spool>/tmp ->
+    # /anywhere` made --purge delete outside the audited spool and print
+    # SCOPE CLEAN.
+    try:
+        if tdir.is_symlink():
+            unexamined.append(
+                f"{TEMP_SUBDIR} -> {os.readlink(tdir)} (TempDir is a symlink, NOT followed)"
+            )
+            tdir = None
+    except OSError:
+        pass
+
     try:
         if tdir is None:
-            raise FileNotFoundError  # symlinked TempDir, already recorded above
+            raise FileNotFoundError  # symlinked TempDir, already recorded
         # Path.exists() does NOT swallow EACCES, so probing it outside this try
-        # crashed the tool with a traceback on a real 0710 spool and made the
-        # sudo escalation below unreachable dead code.
+        # crashed with a traceback on a real 0710 spool.
         next(tdir.iterdir(), None)
         found: list[TempFile] = []
-        _walk_temp(tdir, label, "", found, unexamined)
+        _walk_temp(tdir, TEMP_SUBDIR, "", found, unexamined)
         temp = tuple(found)
     except PermissionError:
-        # Names only through this path. Size and header are unknown, which
-        # is_harmless_temp() treats as "possibly document content" rather
-        # than assuming the safe answer.
-        tverdict, raw = _sudo_ls(str(tdir), files_only=True)
-        if tverdict is Verdict.CLEAN:
-            collected = []
-            for kind, target, name in parse_find_rows(raw[0] if raw else ""):
-                if kind == "d":
-                    continue
-                note = temp_child_note(
-                    label, name,
-                    is_symlink=kind == "l",
-                    is_dir=False,
-                    is_regular=kind == "f",
-                    target=target or "?",
-                )
-                if note is None:
-                    collected.append(TempFile(name=name, size=-1, head=""))
-                else:
-                    unexamined.append(note)
-            temp = tuple(collected)
-            # find -maxdepth exits 0 with no marker when it truncates, so
-            # anything below the limit was in neither temp nor unexamined and
-            # the tool could print "spool is clean" over it. Probe for
-            # directories sitting AT the limit; each is a truncation point.
-            deep_v, deep = _sudo_ls(str(tdir), at_depth=MAX_TEMP_DEPTH)
-            if deep_v is Verdict.CLEAN:
-                unexamined += [
-                    f"{label}/{d} (nested deeper than {MAX_TEMP_DEPTH}, not examined)"
-                    for d in deep
-                ]
-        else:
-            # Do NOT fall through with an empty tuple. That turned an
-            # unreadable TempDir into an empty one and printed
-            # "VERDICT: spool is clean" over a readable document.
-            unexamined.append(f"{label}/ (permission denied)")
+        # Do NOT fall through with an empty tuple: that turned an unreadable
+        # TempDir into an empty one and printed "spool is clean" over a
+        # readable document.
+        unexamined.append(f"{TEMP_SUBDIR}/ (permission denied)")
     except FileNotFoundError:
         # No TempDir at all. Nothing to examine is not the same as something
-        # unexamined: treating it as unexamined meant `--spool DIR` on any
-        # directory without a tmp/ was permanently INCOMPLETE and could never
-        # exit 0.
+        # unexamined, and treating it as unexamined meant a spool without a
+        # tmp/ could never exit 0.
         pass
     except NotADirectoryError:
-        unexamined.append(f"{label} (exists but is not a directory, not examined)")
+        unexamined.append(f"{TEMP_SUBDIR} (exists but is not a directory, not examined)")
     except OSError as exc:
-        unexamined.append(f"{label}/ (unreadable: {exc.__class__.__name__})")
+        unexamined.append(f"{TEMP_SUBDIR}/ (unreadable: {exc.__class__.__name__})")
 
     # Anything at the top level that is neither a document, a control file nor
-    # the TempDir. Read the same way TempDir files are read; a directory is
-    # recorded as unexamined rather than dropped.
+    # the TempDir. Read the same way TempDir files are, so a document copied to
+    # d00085-001.bak is counted rather than dropped; `ls` would have shown it.
     extra: list[TempFile] = []
-    top_kinds: dict[str, str] | None = None
     for n in top:
         if n == TEMP_SUBDIR or DOCUMENT.match(n) or CONTROL.match(n):
             continue
         f = root / n
         try:
             st = f.lstat()
-        except PermissionError:
-            # The sudo listing path cannot stat children, so ask find what type
-            # it is rather than guessing. Guessing "file" turned a top-level
-            # DIRECTORY into counted content, and --purge then unlink()ed it,
-            # failed, and exited 1 on a spool that was fine -- a different
-            # classification from the direct path, not the intended superset.
-            # Guarded, and hoisted: the unguarded [1][0] raised IndexError
-            # whenever find failed (_sudo_ls returns an empty tuple then), and
-            # re-running a recursive find once per stray entry was quadratic.
-            if top_kinds is None:
-                kv, kraw = _sudo_ls(str(root), files_only=True)
-                top_kinds = (
-                    {r[2]: r[0] for r in parse_find_rows(kraw[0])}
-                    if kv is Verdict.CLEAN and kraw
-                    else {}
-                )
-            kinds = top_kinds
-            if kinds.get(n) == "d":
-                unexamined.append(f"{n}/ (subdirectory, not examined)")
-            elif kinds.get(n) == "l":
-                unexamined.append(f"{n} (symlink, NOT followed)")
-            else:
-                extra.append(TempFile(name=n, size=-1, head=""))
-            continue
         except OSError:
             unexamined.append(f"{n} (vanished while reading)")
             continue
@@ -922,9 +720,10 @@ def read_spool(  # pragma: no cover
         tuple(n for n in top if n != TEMP_SUBDIR),
         temp,
         tuple(unexamined),
-        label,
+        TEMP_SUBDIR,
         tuple(extra),
     )
+
 
 
 def delete(  # pragma: no cover
@@ -969,7 +768,7 @@ def delete(  # pragma: no cover
             # any summary was printed.
             failed += 1
             continue
-        rc = subprocess.run(_priv(["rm", "-f", str(target)]), check=False).returncode
+        rc = subprocess.run(["rm", "-f", str(target)], check=False).returncode
         if rc != 0:
             failed += 1
             continue
@@ -988,13 +787,19 @@ def delete(  # pragma: no cover
 
 def retention_state(conf: str) -> bool | None:  # pragma: no cover
     """Is CUPS configured to keep job files? None if the config is unreadable."""
-    read = subprocess.run(_priv(["cat", conf]), capture_output=True, text=True, check=False)
+    read = subprocess.run(["cat", conf], capture_output=True, text=True, check=False)
     if read.returncode != 0:
         return None
+    # cupsd honours the LAST matching directive. Returning on the first made a
+    # hand-edited config with "No" followed by "Yes" report RETENTION: OFF on a
+    # host that was retaining documents -- danger reported as safety.
+    setting: str | None = None
     for line in read.stdout.splitlines():
         m = re.match(r"^\s*PreserveJobFiles\s+(\S+)", line, re.IGNORECASE)
         if m:
-            return m.group(1).lower() not in ("no", "off", "false", "0")
+            setting = m.group(1).lower()
+    if setting is not None:
+        return setting not in ("no", "off", "false", "0")
     # Unset means the compiled default, which on the hosts measured here keeps
     # documents. Reporting "off" on an absent directive would be a guess in the
     # dangerous direction.
@@ -1004,11 +809,11 @@ def retention_state(conf: str) -> bool | None:  # pragma: no cover
 def _restart_cups() -> tuple[bool, str]:  # pragma: no cover
     """Restart CUPS via whatever init this host has. Returns (ok, how)."""
     if shutil.which("systemctl"):
-        rc = subprocess.run(_priv(["systemctl", "restart", "cups"]), check=False)
+        rc = subprocess.run(["systemctl", "restart", "cups"], check=False)
         if rc.returncode == 0:
             return True, "systemctl"
     if shutil.which("service"):
-        rc = subprocess.run(_priv(["service", "cups", "restart"]), check=False)
+        rc = subprocess.run(["service", "cups", "restart"], check=False)
         if rc.returncode == 0:
             return True, "service"
     return False, "no working init command"
@@ -1021,7 +826,7 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     this runs under sudo, and a conf path containing shell metacharacters would
     otherwise execute as root.
     """
-    read = subprocess.run(_priv(["cat", conf]), capture_output=True, text=True, check=False)
+    read = subprocess.run(["cat", conf], capture_output=True, text=True, check=False)
     if read.returncode != 0:
         return False, f"could not read {conf}"
 
@@ -1040,9 +845,9 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     # tee opens with O_TRUNC before writing, so an interrupted write leaves the
     # daemon's config empty and nothing to restore from. Copy it aside first.
     backup = f"{conf}.spool-audit.bak"
-    saved = subprocess.run(_priv(["cp", "-p", conf, backup]), check=False)
+    saved = subprocess.run(["cp", "-p", conf, backup], check=False)
     write = subprocess.run(
-        _priv(["tee", conf]), input=body, capture_output=True, text=True, check=False
+        ["tee", conf], input=body, capture_output=True, text=True, check=False
     )
     if write.returncode != 0 and saved.returncode == 0:
         return False, f"could not write {conf}; original preserved at {backup}"
@@ -1056,7 +861,7 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
             "The running daemon still has the old setting."
         )
 
-    verify = subprocess.run(_priv(["cat", conf]), capture_output=True, text=True, check=False)
+    verify = subprocess.run(["cat", conf], capture_output=True, text=True, check=False)
     for line in verify.stdout.splitlines():
         if re.match(r"^\s*PreserveJobFiles\s+No\b", line, re.IGNORECASE):
             return True, f"restarted via {how}"
@@ -1085,8 +890,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--spool", default=DEFAULT_SPOOL, help=f"spool directory (default {DEFAULT_SPOOL})")
     ap.add_argument("--conf", default=DEFAULT_CONF, help=f"cupsd.conf path (default {DEFAULT_CONF})")
-    ap.add_argument("--temp", default=None,
-                    help="TempDir to audit; default is TempDir from cups-files.conf, else <spool>/tmp")
     args = ap.parse_args(argv)
 
     # --fix and --purge are independent and both may be requested. Returning
@@ -1107,32 +910,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     jobs = frozenset(args.jobs)
-    # Path comparison, not string: shell tab-completion appends a trailing
-    # slash, and "/var/spool/cups/" != "/var/spool/cups" as strings routed
-    # around the configured TempDir entirely, so a host that moved TempDir got
-    # "spool is clean" while content sat in the real one.
-    # Only consult the system cups-files.conf when auditing the system spool.
-    # Otherwise `--spool /mnt/backup --purge` picked up an absolute TempDir from
-    # the live config, and Path("/mnt/backup") / "/var/spool/cups/tmp/x"
-    # resolves to the LIVE path -- reporting on, and deleting from, a directory
-    # the user did not name.
-    if args.temp:
-        temp_dir: str | None = args.temp
-    elif Path(args.spool) == Path(DEFAULT_SPOOL):
-        temp_dir = configured_tempdir(str(Path(args.conf).parent / "cups-files.conf"))
-    else:
-        temp_dir = None
-    audit = classify(
-        read_spool(args.spool, temp_dir, user_named_temp=bool(args.temp)),
-        jobs, args.include_control,
-    )
+    audit = classify(read_spool(args.spool), jobs, args.include_control)
 
-    # The audited region: the spool, plus an explicitly named --temp. Anything
-    # resolving outside these is refused by delete(). A TempDir reached only
-    # through a symlink is deliberately NOT a root.
+    # The audited region is exactly the spool. Anything resolving outside it is
+    # refused by delete(), which is what stops a symlinked TempDir taking a
+    # purge out of the directory the user named.
     spool_root = _safe_resolve(Path(args.spool))
-    temp_root = _safe_resolve(Path(temp_dir)) if temp_dir else None
-    allowed = tuple(r for r in (spool_root, temp_root) if r is not None)
+    allowed = (spool_root,) if spool_root is not None else ()
 
     if not audit.readable:
         for line in render(audit, jobs):
@@ -1140,7 +924,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.purge:
-        if spool_root is None or (temp_dir and temp_root is None):
+        if spool_root is None:
             print("REFUSING TO PURGE: the audited path could not be resolved,")
             print("  so nothing can be proven to be inside it.")
             return 2
@@ -1172,10 +956,7 @@ def main(argv: list[str] | None = None) -> int:
             # written to fix in the first place.
             print("Not files being recreated: the removals themselves failed.")
             return 1
-        after = classify(
-            read_spool(args.spool, temp_dir, user_named_temp=bool(args.temp)),
-            jobs, args.include_control,
-        )
+        after = classify(read_spool(args.spool), jobs, args.include_control)
         if not after.readable:
             print(f"{deleted} removed, but the spool could not be re-read to confirm.")
             return 2
@@ -1191,12 +972,26 @@ def main(argv: list[str] | None = None) -> int:
         if remaining:
             print("STILL PRESENT after a successful delete.")
             return 1
+        caveats = []
         if after.uncounted_control:
-            print(
-                f"SCOPE CLEAN, but {after.uncounted_control} control file(s) were not "
-                "counted or removed."
+            caveats.append(
+                f"{after.uncounted_control} control file(s) were not counted or "
+                "removed; they carry the job title. Use --include-control."
             )
-            print("They carry the job title. Use --include-control to clear them too.")
+        # Files with no job id cannot be targeted by job number, so a scoped
+        # purge leaves them -- including ones this tool classified as print
+        # data. Saying only "SCOPE CLEAN" made `85 --purge && echo SAFE` fire
+        # over a d00085-001.bak it had just called a PDF.
+        unattributable = [e for e in after.others if e.job is None]
+        if jobs and unattributable:
+            caveats.append(
+                f"{len(unattributable)} file(s) carry no job id and cannot be purged "
+                "by number. Re-run --purge without job ids to clear them."
+            )
+        if caveats:
+            print("SCOPE CLEAN for the jobs named, but:")
+            for c in caveats:
+                print(f"  {c}")
             return 0
         print("SCOPE CLEAN.")
         return 0
