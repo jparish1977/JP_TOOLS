@@ -12,7 +12,7 @@ The check exists because `# pragma: no cover` is a claim that a function has
 nothing worth testing, and nothing rechecks that claim as the function grows.
 On spool-audit.py the exempt region reached 430 lines of 1350 holding 51
 branches, and every serious defect on that branch came from inside it. See
-docs/coverage-not-wired.md.
+docs/coverage.md.
 
 The rule: a pragma on a branchy function must state a reason. A pragma on a
 branchless one need not, because it is self-evidently a wrapper.

@@ -20,7 +20,7 @@ jobs:
       # new linter releases added rules while the source stood still. Bump these
       # on purpose, with the fixes in the same commit, rather than discovering it
       # in whichever unrelated PR happens to be open.
-      - run: pip install ruff==0.16.1 mypy==2.3.0
+      - run: pip install ruff==0.16.1 mypy==2.3.0 coverage==7.15.4
       - name: Self-check Python files
         run: |
           # No `set -e` reliance: the runner aborts the loop on the first
@@ -56,11 +56,22 @@ jobs:
           # Nothing ran tests/ at all before. A suite that CI never executes is
           # documentation, not a gate. Each suite skips rather than fails when
           # its environment is unavailable, so this stays green on the runner.
+          # Suites run UNDER coverage, so they are measured on the same pass
+          # rather than run twice. Subprocess tracing needs this .pth AND
+          # COVERAGE_PROCESS_START: two suites drive the tool as a subprocess,
+          # and without tracing them spool-audit.py measured 71% instead of 82%.
+          # Eleven points of real testing would have read as a gap, and the
+          # obvious fix for a gap is to add a pragma, which is how code stops
+          # being looked at in the first place.
+          site=$(python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+          echo "import coverage; coverage.process_startup()" > "$site/zz-subprocess-coverage.pth"
+          export COVERAGE_PROCESS_START="$PWD/.coveragerc"
+          rm -f .coverage .coverage.*
           rc=0
           for t in tests/test_*.py; do
             [ -e "$t" ] || continue
             echo "--- $t ---"
-            python "$t" || rc=1
+            python -m coverage run "$t" || rc=1
           done
           # .sh as well as .py. The acceptance suite is the black-box half of
           # the coverage and it is a shell script, so a *.py glob ran every
@@ -70,9 +81,32 @@ jobs:
           for t in tests/test_*.sh; do
             [ -e "$t" ] || continue
             echo "--- $t ---"
-            bash "$t" || rc=1
+            # PYTHON=python so the shell suite drives the SAME interpreter the
+            # .pth was installed into. Hardcoded python3 would run untraced.
+            PYTHON=python bash "$t" || rc=1
           done
+          python -m coverage combine || true
           exit $rc
+      - name: Coverage
+        if: always()
+        run: |
+          # Gated per file, not repo-wide. Most root scripts have no suite at
+          # all, so a repo-wide threshold would be red on day one for reasons
+          # unrelated to any diff, and a gate that is red for unrelated reasons
+          # gets ignored and then removed.
+          #
+          # .coveragerc does NOT honour `pragma: no cover`, on purpose. The
+          # pragma buys no better number here; it is a documented claim,
+          # policed by check.py's no-cover check and read with
+          # list-exemptions.py. See docs/coverage.md.
+          echo "GATED (must not regress):"
+          python -m coverage report --include='spool-audit.py' --fail-under=80
+          echo
+          echo "NOT gated, printed so the gap is visible rather than hidden:"
+          python -m coverage report || true
+          echo
+          echo "Coverage exemptions, which coverage does not hide:"
+          python list-exemptions.py . || true
 
   js:
     name: JS (eslint)
