@@ -266,7 +266,66 @@ Checklist for greenfield work that should inherit this discipline:
 
 ---
 
-## 8. Anti-patterns
+## 8. Before opening a PR
+
+Section 7 inverted. Those are the claims you make at the start of a project;
+these are the same claims **verified** at the end of a change, which is the only
+point at which anyone finds out whether they were true.
+
+Written from JP_TOOLS PR #24, where fourteen review rounds produced about 112
+findings and `ruff` plus `mypy` together caught **none of them**. Every item
+below is here because its absence cost a round.
+
+1. **Read your own diff as if someone else wrote it.** Most of what those
+   fourteen rounds found was visible in the diff. A reviewer's attention is the
+   scarcest thing in the loop and it was spent three times on work that had not
+   been read once.
+
+2. **Run the real gate, not a convenient approximation.** `python check.py
+   <file>`, not `ruff check <file>`. They disagree: check.py enables a stricter
+   ruleset, and "ruff clean" was claimed all session on a file the gate failed.
+   Two tools disagreeing about one file is a bug signal on its own.
+
+3. **Read the exemptions**: `python list-exemptions.py <file>`. §7.6 says
+   `pragma: no cover` belongs "only on IO leaves". On this branch it covered
+   430 lines of 1350, holding 51 branch, loop and try statements, and every
+   serious defect came from inside it. The `no-cover` check refuses an
+   unjustified branchy exemption, but **a reason is not a justification**: two
+   of the first four written here said three words and justified nothing.
+   Nothing but a person reading the list catches that.
+
+4. **Confirm CI actually covers the file, by name.** The list in
+   `.github/workflows/check.yml` is manual. `spool-audit.py` was merge-ready
+   with a green badge while no job in that file touched it, so "CI is green"
+   was true and said nothing about the code. Green on a file nobody checks is
+   not a pass, it is a check that did not run.
+
+5. **Run the thing itself, including its destructive paths.** Against a real
+   fixture, and on a real machine if it touches one. Every real-machine run on
+   this branch found something the fixtures did not, because a fixture you
+   invented can only contain bugs you already suspect.
+
+6. **Make sure the decisions have seams.** If a function mixes a decision with
+   the IO around it, the decision cannot be tested and that is where the bugs
+   will be. Extract the decision; leave a wrapper with no branches in it. That
+   is what §2.6 has always meant by "thin".
+
+7. **Push, then confirm CI by SHA.** Not by badge, not by the last run you
+   remember. A force-push leaves `gh pr checks` reporting a stale commit.
+
+8. **Have nothing outstanding before you request review, and freeze while it
+   runs.** If the same message that launches a review also proposes more work,
+   the launch was premature. A round that reports on a tree that has moved is
+   worth nothing, and cancelling it costs nothing.
+
+The through-line, and the one worth keeping if only one survives: **a check
+that did not run looks exactly like a check that passed.** Twelve instances in
+a single session, in twelve different tools, three of them committed while
+actively writing about that failure mode.
+
+---
+
+## 9. Anti-patterns
 
 Things that look like they save time but defeat the methodology:
 
@@ -282,7 +341,7 @@ Things that look like they save time but defeat the methodology:
 
 ---
 
-## 9. Related reading
+## 10. Related reading
 
 - `~/projects/iteration8-core/CLAUDE.md`, domain layer rules (24 lines, prescriptive).
 - `~/projects/iteration8-utilities/CLAUDE.md`, infrastructure layer rules (30 lines), and the FileScanner reference implementation itself.

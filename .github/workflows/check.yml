@@ -30,7 +30,7 @@ jobs:
           # green badge while no job in this file touched it, so "CI green" was
           # true and said nothing about the code. Add new scripts here.
           rc=0
-          for f in check.py fix.py install-hooks.py init-ci.py spool-audit.py; do
+          for f in check.py fix.py install-hooks.py init-ci.py spool-audit.py list-exemptions.py; do
             echo "--- $f ---"
             python check.py "$f" --pretty || rc=1
           done
@@ -44,7 +44,7 @@ jobs:
           # to any diff. Silently excluding them is how spool-audit.py reached
           # a PR with a green badge that said nothing about it, so the gap is
           # printed instead of hidden. Not a failure; a standing reminder.
-          checked="check.py fix.py install-hooks.py init-ci.py spool-audit.py"
+          checked="check.py fix.py install-hooks.py init-ci.py spool-audit.py list-exemptions.py"
           echo "Linted: $checked"
           echo "NOT linted:"
           for f in *.py; do

@@ -696,7 +696,18 @@ _HAS_REASON = re.compile(r"reason:\s*\S")
 _BRANCHY = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try)
 
 
-def _branchy_no_cover(path: Path) -> list[dict]:
+def coverage_exemptions(path: Path) -> list[dict]:
+    """Every `# pragma: no cover` in one file, with the facts about each.
+
+    The inventory, not the violations. Both the `no-cover` check and
+    list-exemptions.py read this, so there is ONE implementation of "what
+    counts as an exemption" rather than two that must agree, which is this
+    repo's most repeated defect.
+
+    Reporting only violations is not enough on its own. On 2026-08-13 the check
+    reported "0 unjustified" on a file whose inventory immediately showed two
+    reasons that were three words long and justified nothing.
+    """
     try:
         src = path.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(src)
@@ -705,7 +716,7 @@ def _branchy_no_cover(path: Path) -> list[dict]:
         # and reporting it twice makes one problem look like two.
         return []
     lines = src.splitlines()
-    issues: list[dict] = []
+    found: list[dict] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -724,28 +735,42 @@ def _branchy_no_cover(path: Path) -> list[dict]:
                 break
         if not match:
             continue
-        if _HAS_REASON.search(match.group("rest")):
-            continue
-        branches = sum(isinstance(n, _BRANCHY) for n in ast.walk(node))
-        if not branches:
-            continue
-        issues.append({
+        rest = match.group("rest")
+        reason = ""
+        if _HAS_REASON.search(rest):
+            reason = rest.split("reason:", 1)[1].strip()
+        found.append({
             "file":     str(path),
             "line":     node.lineno,
+            "function": node.name,
+            "lines":    (node.end_lineno - node.lineno) if node.end_lineno else 0,
+            "branches": sum(isinstance(n, _BRANCHY) for n in ast.walk(node)),
+            "reason":   reason,
+        })
+    return found
+
+
+def _branchy_no_cover(path: Path) -> list[dict]:
+    return [
+        {
+            "file":     e["file"],
+            "line":     e["line"],
             "col":      1,
             "severity": "error",
             "rule":     "no-cover-branchy",
             "message":  (
-                f"'{node.name}' is exempt from coverage but contains {branches} "
-                f"branch/loop/try statement(s) over "
-                f"{node.end_lineno - node.lineno if node.end_lineno else 0} lines. "
-                "An exemption claims there is nothing to test. Extract the "
-                "decision, or state the claim: '# pragma: no cover -- reason: ...'"
+                f"'{e['function']}' is exempt from coverage but contains "
+                f"{e['branches']} branch/loop/try statement(s) over "
+                f"{e['lines']} lines. An exemption claims there is nothing to "
+                "test. Extract the decision, or state the claim: "
+                "'# pragma: no cover -- reason: ...'"
             ),
             "fixable":        False,
             "fixable_unsafe": False,
-        })
-    return issues
+        }
+        for e in coverage_exemptions(path)
+        if e["branches"] and not e["reason"]
+    ]
 
 
 def run_no_cover(target: str) -> dict:

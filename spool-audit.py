@@ -825,7 +825,7 @@ def purge_outcome(
 # above stays testable without a printer, a spool or root.
 
 
-def _head(path: Path, n: int = 32) -> str:  # pragma: no cover -- reason: a read
+def _head(path: Path, n: int = 32) -> str:
     """First bytes of a file, decoded lossily. Used only to recognise known
     harmless formats such as PPDs. Never printed, never logged."""
     try:
@@ -1207,7 +1207,7 @@ def parse_retention(body: bytes) -> bool:
     return True
 
 
-def retention_state(conf: str) -> bool | None:  # pragma: no cover -- reason: read only, parse_retention decides
+def retention_state(conf: str) -> bool | None:
     """Is CUPS configured to keep job files? None if the config is unreadable.
 
     Nothing but the read lives here now. Read as bytes for the same reason
