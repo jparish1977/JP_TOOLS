@@ -131,6 +131,9 @@ class Kind(Enum):
     TEMP = "temp"
     CONTROL = "control"
     ARTIFACT = "artifact"
+    # A top-level file matching no known pattern. Its own kind so the report
+    # cannot describe it as living in TempDir, which it does not.
+    UNRECOGNISED = "unrecognised"
 
 
 @dataclass(frozen=True)
@@ -172,6 +175,14 @@ class Listing:
     # --temp can point elsewhere, and reporting a path that does not exist is
     # the tool telling you something false about where your data is.
     temp_label: str = TEMP_SUBDIR
+    # Top-level entries matching neither d<n>-<n> nor c<n>. They were dropped
+    # silently, so a document left as d00085-001.bak was invisible while the
+    # tool printed "spool is clean" -- strictly worse than the `ls` this
+    # replaced. TempDir already uses over-report-never-dismiss; the top level
+    # now uses the same rule. LAST field on purpose: inserting it mid-struct
+    # shifted every positional construction in the tests, which is the same
+    # "changed one site, not its twins" failure this branch keeps hitting.
+    extra: tuple[TempFile, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -185,6 +196,12 @@ class Audit:
     artifacts: tuple[Entry, ...] = ()
     unexamined: tuple[str, ...] = ()
     uncounted_control: int = 0
+    # Files whose content could not be read. The sudo listing path cannot open
+    # children, so it cannot recognise a PPD or a cache and counts them as
+    # possible content -- a superset of what the direct path reports. Without
+    # saying so, the same spool audited two ways gives two numbers and no
+    # explanation, which is its own kind of misleading.
+    unread: int = 0
 
     @property
     def total(self) -> int:
@@ -336,6 +353,14 @@ def is_harmless_temp(f: TempFile) -> bool:
         return False
     if ARTIFACT.match(f.name.rsplit("/", 1)[-1]):
         return True
+    # Unknown content. The sudo listing path cannot stat or read children, so
+    # it yields size -1 and an empty head -- and every rule below reasons from
+    # content or size. Without this, the .cache/ exemption fired on a document
+    # the root path counted, so `tmp/.cache/leak.ps` was reported as leaked
+    # content when run as root and dismissed as a cache when run via sudo.
+    # Nothing may be excused by location when its content was never read.
+    if f.size < 0 and not f.head:
+        return False
     # CUPS runs filters with HOME pointed at TempDir, so a filter's XDG cache
     # lands in tmp/.cache/. Measured in a container with a real filter chain:
     # 24 fontconfig cache files, which the recursive walk reported as possible
@@ -370,6 +395,15 @@ def classify(
         return Audit(listing.verdict, (), (), asked_for_jobs=bool(jobs))
 
     entries = [e for e in (parse_entry(n, include_control) for n in listing.top) if e is not None]
+    # Unrecognised top-level files go through exactly the same content check as
+    # TempDir files, so a PostScript .bak is counted and an empty stray file is
+    # not.
+    extras = sorted(listing.extra, key=lambda f: f.name)
+    entries += [
+        Entry(name=f.name, kind=Kind.UNRECOGNISED, job=None)
+        for f in extras
+        if not is_harmless_temp(f)
+    ]
     # Temp files carry document content but no recoverable job id, so they can
     # never be "targeted" by job number. They still count as retained data.
     temps = sorted(listing.temp, key=lambda f: f.name)
@@ -379,15 +413,23 @@ def classify(
         if not is_harmless_temp(f)
     ]
     artifacts = tuple(
-        Entry(name=f"{listing.temp_label}/{f.name}", kind=Kind.ARTIFACT, job=None)
-        for f in temps
-        if is_harmless_temp(f)
+        [
+            Entry(name=f"{listing.temp_label}/{f.name}", kind=Kind.ARTIFACT, job=None)
+            for f in temps
+            if is_harmless_temp(f)
+        ]
+        + [
+            Entry(name=f.name, kind=Kind.ARTIFACT, job=None)
+            for f in extras
+            if is_harmless_temp(f)
+        ]
     )
 
     targeted = tuple(sorted((e for e in entries if e.job in jobs), key=lambda e: e.name))
     others = tuple(sorted((e for e in entries if e.job not in jobs), key=lambda e: e.name))
     verdict = Verdict.RETAINED if entries else Verdict.CLEAN
     uncounted_control = 0 if include_control else sum(1 for n in listing.top if CONTROL.match(n))
+    unread = sum(1 for f in list(temps) + list(extras) if f.size < 0)
     return Audit(
         verdict,
         targeted,
@@ -396,6 +438,7 @@ def classify(
         artifacts=artifacts,
         unexamined=listing.unexamined,
         uncounted_control=uncounted_control,
+        unread=unread,
     )
 
 
@@ -450,13 +493,20 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         lines.append("")
 
     temp = [e for e in audit.others if e.kind is Kind.TEMP]
-    rest = [e for e in audit.others if e.kind is not Kind.TEMP]
+    unknown = [e for e in audit.others if e.kind is Kind.UNRECOGNISED]
+    rest = [e for e in audit.others if e.kind not in (Kind.TEMP, Kind.UNRECOGNISED)]
 
     lines.append(f"OTHER RETAINED FILES: {len(audit.others)}")
-    shown = (rest + temp)[:20]
+    shown = (rest + unknown + temp)[:20]
     lines += [f"  {e.name}" for e in shown]
     if len(audit.others) > 20:
         lines.append(f"  ... and {len(audit.others) - 20} more")
+    if unknown:
+        lines.append("")
+        lines.append(
+            f"  {len(unknown)} of these are top-level files matching no known"
+        )
+        lines.append("  spool pattern. Their content looks like print data.")
     if temp:
         lines.append("")
         lines.append(
@@ -475,6 +525,15 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         lines.append(f"COULD NOT EXAMINE: {len(audit.unexamined)}")
         lines += [f"  {u}" for u in audit.unexamined]
         lines.append("  Anything in there is unaccounted for. This is NOT a clean result.")
+
+    if audit.unread:
+        lines.append("")
+        lines.append(
+            f"NOTE: {audit.unread} file(s) could not be opened, only listed."
+        )
+        lines.append("  Their content is unknown, so they are counted as possible")
+        lines.append("  document data. Running as root can read them and may report")
+        lines.append("  fewer. Unknown content is never dismissed.")
 
     if audit.uncounted_control:
         lines.append("")
@@ -779,12 +838,47 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
     except OSError as exc:
         unexamined.append(f"{label}/ (unreadable: {exc.__class__.__name__})")
 
+    # Anything at the top level that is neither a document, a control file nor
+    # the TempDir. Read the same way TempDir files are read; a directory is
+    # recorded as unexamined rather than dropped.
+    extra: list[TempFile] = []
+    for n in top:
+        if n == TEMP_SUBDIR or DOCUMENT.match(n) or CONTROL.match(n):
+            continue
+        f = root / n
+        try:
+            st = f.lstat()
+        except PermissionError:
+            # The sudo listing path cannot stat children. Unknown size and
+            # header means is_harmless_temp() treats it as possible content --
+            # the same answer the sudo TempDir path gives, so the two paths
+            # agree instead of one reporting "vanished".
+            extra.append(TempFile(name=n, size=-1, head=""))
+            continue
+        except OSError:
+            unexamined.append(f"{n} (vanished while reading)")
+            continue
+        if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+            note = temp_child_note(
+                ".", n,
+                is_symlink=stat.S_ISLNK(st.st_mode),
+                is_dir=stat.S_ISDIR(st.st_mode),
+                is_regular=False,
+            )
+            unexamined.append((note or f"{n} (not examined)").replace("./", "", 1))
+            continue
+        try:
+            extra.append(TempFile(name=n, size=st.st_size, head=_head(f)))
+        except OSError:
+            unexamined.append(f"{n} (vanished while reading)")
+
     return Listing(
         verdict,
         tuple(n for n in top if n != TEMP_SUBDIR),
         temp,
         tuple(unexamined),
         label,
+        tuple(extra),
     )
 
 
