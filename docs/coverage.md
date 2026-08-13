@@ -14,7 +14,7 @@ nothing runs twice. Config is `.coveragerc`.
 python -m coverage run tests/test_<name>.py      # each .py suite
 PYTHON=python bash tests/test_<name>.sh          # each .sh suite
 python -m coverage combine
-python -m coverage report --include='spool-audit.py' --fail-under=80
+python -m coverage report --include='spool-audit.py' --fail-under=90
 ```
 
 Locally, coverage is not a dependency of running the suites. Install it in a
@@ -65,7 +65,7 @@ documented claim, policed two ways:
 
 **3. The gate is per file, not repo-wide.**
 
-`spool-audit.py` must hold **80%**. Everything else is reported and not gated.
+`spool-audit.py` must hold **90%**. Everything else is reported and not gated.
 Most root scripts have no suite at all, so a repo-wide threshold would be red on
 day one for reasons unrelated to any diff, and a gate that is red for unrelated
 reasons gets ignored and then removed. This mirrors what the lint step already
@@ -73,17 +73,21 @@ does: a named list that must stay clean, and the gap printed rather than hidden.
 
 ## Where it stands
 
-`spool-audit.py`, 2026-08-13: **82%** with branch coverage, gate at 80.
+`spool-audit.py`, 2026-08-13: **94%** with branch coverage, gate at 90.
 
-Of the 97 uncovered lines, 66 are in `disable_retention` and `_restart_cups`.
-Those are the two functions already marked `# pragma: no cover -- reason:
-PENDING seams`, so coverage found the same gap the exemption inventory did, by a
-different route and without being told. Both are on hold until the tool runs on
-`joe-Inspiron-17-7778`, which is the first time either will meet a real
-`cupsd.conf`, real ownership and a real daemon.
+It reached 82% first, and of the 97 lines uncovered then, 66 were in
+`disable_retention` and `_restart_cups`. Those were the two functions already
+marked `PENDING seams` from an entirely separate line of reasoning, so coverage
+found the same gap the exemption inventory did, by a different route, without
+being told where to look. Building those seams took the file to 94%.
 
-The remaining 31 are scattered error branches: `read_spool` 14, `_walk_temp` 7,
-`main` 6, and single lines in four other functions.
+The 35 that remain are scattered error branches: `read_spool`, `_walk_temp`,
+`main`, and single lines in a handful of others.
+
+**No exemption now hides a decision.** All five that remain are one-line,
+zero-branch wrappers totalling 5 lines of 1508, which is what §2.6 meant by an
+IO leaf: `_list_names`, `_unlink_path`, `_resolve_path`, `_read_conf`,
+`_run_rc`.
 
 `check.py` sits at 17%, and is not gated. Its suites cover the ANSI handling and
 the `no-cover` check; the other eleven tool runners are untested, and most of
