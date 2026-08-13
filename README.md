@@ -113,11 +113,18 @@ which matches [apple/cups#6083](https://github.com/apple/cups/issues/6083)
 (open, no root cause, repo archived March 2026 -- reported there on macOS, and
 this reproduces it on Linux). That is what `--fix` addresses.
 
-It audits `tmp/` as well as the top level. CUPS `TempDir` defaults to
-`/var/spool/cups/tmp` and holds document content during filtering, so a
-top-level-only check reports clean while readable data sits one directory down.
-Passing job ids scopes `--purge` to those jobs only, because on a shared printer
-deleting everything destroys other people's documents.
+It audits `tmp/` as well as the top level. CUPS `TempDir` holds document
+content during filtering, so a top-level-only check reports clean while
+readable data sits one directory down. Passing job ids scopes `--purge` to
+those jobs only, because on a shared printer deleting everything destroys other
+people's documents.
+
+It reads directly and has no privilege-escalation path, so run it under `sudo`
+for the real spool. That is deliberate: an internal sudo fallback was a second
+implementation of the same listing, the two disagreed repeatedly about depth
+limits, directories and unreadable files, and that divergence caused a large
+share of the tool's bug history. One code path with one set of rules is worth
+more than the convenience.
 
 ### Archive Management (Python)
 

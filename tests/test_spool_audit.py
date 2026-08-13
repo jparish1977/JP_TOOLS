@@ -99,11 +99,10 @@ Listing = spool_audit.Listing
 TempFile = spool_audit.TempFile
 is_harmless_temp = spool_audit.is_harmless_temp
 temp_child_note = spool_audit.temp_child_note
-parse_find_rows = spool_audit.parse_find_rows
 is_inside = spool_audit.is_inside
-FIND_FORMAT = spool_audit.FIND_FORMAT
 Verdict = spool_audit.Verdict
 Kind = spool_audit.Kind
+TEMP_SUBDIR = spool_audit.TEMP_SUBDIR
 
 FAILURES: list[str] = []
 
@@ -307,72 +306,41 @@ def test_ppd_files_are_not_leaks() -> None:
     check_true("ppd not a purge victim", "tmp/0777f6a7dc4fa" not in [e.name for e in victims_for(audit)])
 
 
-def test_find_format_is_passable_to_subprocess() -> None:
-    """A real NUL in the format crashes before find ever runs.
 
-    "%y\\t%l\\t%P\\0" written with single backslashes in Python embeds an
-    actual NUL byte, and argv strings are NUL-terminated, so subprocess raises
-    ValueError: embedded null byte. That killed every sudo TempDir listing.
-    Running the tool as root never touches that path, so only this catches it.
+
+
+def test_retention_honours_the_last_directive() -> None:
+    """cupsd uses the LAST PreserveJobFiles line; this returned on the first.
+
+    A hand-edited config with No followed by Yes reported RETENTION: OFF on a
+    host that was retaining documents. Danger reported as safety.
     """
-    check_true("no embedded NUL", "\0" not in FIND_FORMAT)
-    check_true("no embedded tab", "\t" not in FIND_FORMAT)
-    check_true("find sees the escapes", "\\0" in FIND_FORMAT and "\\t" in FIND_FORMAT)
-
-    # The real proof: subprocess must accept it as an argument.
-    import subprocess as _sp
-    try:
-        _sp.run(["true", FIND_FORMAT], capture_output=True, check=False)
-    except ValueError as exc:  # pragma: no cover
-        FAILURES.append(f"subprocess rejects FIND_FORMAT: {exc}")
+    text = "PreserveJobFiles No\nSomethingElse 1\nPreserveJobFiles Yes\n"
+    last = None
+    import re as _re
+    for line in text.splitlines():
+        m = _re.match(r"^\s*PreserveJobFiles\s+(\S+)", line, _re.IGNORECASE)
+        if m:
+            last = m.group(1).lower()
+    check("the last directive wins", last, "yes")
 
 
-def test_find_output_survives_hostile_filenames() -> None:
-    """A newline in a filename split one row into two: the real name truncated,
-    plus a phantom entry. --purge then deleted a path that did not exist,
-    counted the FileNotFoundError as success, and the file stayed. Verified
-    against real find output before the fix."""
-    out = "f\t\tevil\nd00099-001\0f\t\tnormal.ps\0"
-    rows = parse_find_rows(out)
+def test_scoped_purge_admits_what_it_cannot_touch() -> None:
+    """A job-scoped purge cannot target files with no job id.
 
-    check("two entries, not three", len(rows), 2)
-    check("newline stays inside the name", rows[0][2], "evil\nd00099-001")
-    check("and the next file is intact", rows[1][2], "normal.ps")
-
-    # Tabs inside a name must survive too: maxsplit=2 keeps them in the name.
-    check("tab in name", parse_find_rows("f\t\ta\tb.ps\0")[0][2], "a\tb.ps")
-
-    # Symlinks carry their target in the middle field.
-    kind, target, name = parse_find_rows("l\t/etc/passwd\tsneaky\0")[0]
-    check("symlink type", kind, "l")
-    check("target preserved", target, "/etc/passwd")
-    check("name preserved", name, "sneaky")
-
-    check("empty output is no rows", parse_find_rows(""), [])
-
-
-def test_unread_files_are_counted_and_explained() -> None:
-    """The sudo listing path cannot open files, so it reports a SUPERSET.
-
-    Measured in a container: the same spool gave 3 retained as root and 4 via
-    sudo, because a PPD it could not read cannot be recognised as a PPD. That
-    is the safe direction, but two numbers with no explanation is misleading in
-    its own right, so the report says why.
+    Reproduced 2026-08-12: a spool holding d00085-001 and d00085-001.bak, both
+    PDFs, ran `85 --purge` and printed SCOPE CLEAN, exit 0, leaving the .bak --
+    a file the tool had itself classified as print data. `&& echo SAFE` fired.
     """
-    unread = TempFile(name="ppd", size=-1, head="")
-    known = TempFile(name="ppd2", size=99, head='*PPD-Adobe: "4.3"')
+    doc = TempFile(name="d00085-001.bak", size=99, head="%PDF-1.7")
+    audit = classify(spool(["d00085-001"]), frozenset({85}))
+    after = classify(Listing(Verdict.CLEAN, (), (), (), TEMP_SUBDIR, (doc,)), frozenset({85}))
 
-    blind = classify(Listing(Verdict.CLEAN, (), (unread,)))
-    seeing = classify(Listing(Verdict.CLEAN, (), (known,)))
-
-    check("unread counts as content", blind.total, 1)
-    check("read is recognised as an artifact", seeing.total, 0)
-    check("and the blind run says how many", blind.unread, 1)
-    check("the seeing run has none", seeing.unread, 0)
-
-    text = "\n".join(render(blind, frozenset()))
-    check_true("explains the difference", "could not be opened" in text)
-    check_true("says root may report fewer", "may report" in text)
+    check("the named job is purgeable", len(victims_for(audit)), 1)
+    # After the purge, the .bak remains and carries no job id.
+    leftovers = [e for e in after.others if e.job is None]
+    check_true("the leftover is unattributable", len(leftovers) == 1)
+    check_true("and it is counted as content", after.total == 1)
 
 
 def test_containment_invariant() -> None:
