@@ -250,6 +250,9 @@ def should_restart_cups(conf: str) -> bool:
     /etc/cups/cupsd.conf was untouched, then "verified" by re-reading the file
     it had just written -- proof-shaped, and checking the wrong file.
     """
+    here, system = _safe_resolve(Path(conf)), _safe_resolve(Path(DEFAULT_CONF))
+    if here is not None and system is not None:
+        return here == system
     return conf == DEFAULT_CONF
 
 
@@ -449,14 +452,23 @@ def classify(
     )
 
 
-def victims_for(audit: Audit) -> tuple[Entry, ...]:
+def victims_for(audit: Audit, include_unrecognised: bool = False) -> tuple[Entry, ...]:
     """What --purge should delete.
 
     If job ids were given, only those. Deleting everything when the user named
     specific jobs destroys other people's documents on a shared printer, which
     is precisely the machine this tool is aimed at.
     """
-    return audit.targeted if audit.asked_for_jobs else audit.targeted + audit.others
+    pool = audit.targeted if audit.asked_for_jobs else audit.targeted + audit.others
+    if include_unrecognised:
+        return pool
+    # "Over-report, never dismiss" is the right rule for a REPORT and the wrong
+    # one for a DELETE SET, and the same predicate was serving both. A file is
+    # UNRECOGNISED because it failed to be recognised as harmless, not because
+    # it matched a print format -- so `--purge` deleted README-do-not-delete,
+    # plain text with no print magic, and printed SCOPE CLEAN. Never destroy
+    # what could not be identified; say so instead.
+    return tuple(e for e in pool if e.kind is not Kind.UNRECOGNISED)
 
 
 def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) -> list[str]:
@@ -523,7 +535,7 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         lines.append(
             f"  {len(unknown)} of these are top-level files matching no known"
         )
-        lines.append("  spool pattern. Their content looks like print data.")
+        lines.append("  spool pattern. Not identified as harmless, so not ruled out.")
     if temp:
         lines.append("")
         lines.append(
@@ -620,6 +632,13 @@ def leftover_caveats(audit: Audit, jobs: frozenset[int]) -> tuple[str, ...]:
     # a readable PDF on disk. The invariant fixtures had the same blind spot:
     # every scoped case paired job 85 with an unattributable leftover, never
     # with another job's document.
+    unrecognised = [e for e in audit.others if e.kind is Kind.UNRECOGNISED]
+    if unrecognised:
+        out.append(
+            f"{len(unrecognised)} file(s) could not be identified and were NOT "
+            "deleted. Inspect them, then use --include-unrecognised if they "
+            "really are print data."
+        )
     if jobs:
         no_job = [e for e in audit.others if e.job is None]
         other_job = [e for e in audit.others if e.job is not None]
@@ -629,7 +648,7 @@ def leftover_caveats(audit: Audit, jobs: frozenset[int]) -> tuple[str, ...]:
                 "number. Re-run --purge without job ids to clear them."
             )
         if other_job:
-            js = ", ".join(str(j) for j in sorted({e.job for e in other_job if e.job}))
+            js = ", ".join(str(j) for j in sorted({e.job for e in other_job if e.job is not None}))
             out.append(
                 f"{len(other_job)} file(s) belong to other job(s) ({js}) and were "
                 "not touched. Re-run --purge without job ids to clear them."
@@ -654,30 +673,30 @@ def fix_outcome(ok: bool, detail: str, also_purging: bool) -> Outcome:
     return Outcome(tuple(lines), 1)
 
 
-def purge_precheck(audit: Audit, jobs: frozenset[int], roots_ok: bool) -> Outcome | None:
+def purge_precheck(
+    audit: Audit, jobs: frozenset[int], roots_ok: bool, include_unrecognised: bool = False
+) -> Outcome | None:
     """Decide before deleting. None means "go ahead and delete"."""
     if not roots_ok:
         return Outcome((
             "REFUSING TO PURGE: the audited path could not be resolved,",
             "  so nothing can be proven to be inside it.",
         ), 2)
-    if victims_for(audit):
+    if victims_for(audit, include_unrecognised):
         return None
 
     lines = ["Nothing to purge."]
-    code = 0
+    code = 1 if audit.total else 0
     caveats = leftover_caveats(audit, jobs)
     if caveats:
         # Previously this printed the single line "Nothing to purge." over a
         # retained document and exited 0, while the report path on the same
         # spool said "1 retained file(s) still on disk" and exited 1. The tool
         # contradicted itself depending on the flag.
-        headline = (
-            f"Nothing to purge for the job(s) named, and NOT clean: "
-            f"{audit.total} file(s) still on disk."
-        )
+        scope = "for the job(s) named" if jobs else ""
+        state = f"{audit.total} file(s) still on disk" if audit.total else "see below"
+        headline = f"Nothing to purge{' ' + scope if scope else ''}: {state}."
         lines = [headline] + [f"  {c}" for c in caveats]
-        code = 1
     if audit.unexamined:
         lines += [f"{len(audit.unexamined)} area(s) could not be examined:"]
         lines += [f"  {u}" for u in audit.unexamined]
@@ -687,7 +706,8 @@ def purge_precheck(audit: Audit, jobs: frozenset[int], roots_ok: bool) -> Outcom
 
 
 def purge_outcome(
-    deleted: int, failed: int, after: Audit | None, jobs: frozenset[int]
+    deleted: int, failed: int, after: Audit | None, jobs: frozenset[int],
+    include_unrecognised: bool = False,
 ) -> Outcome:
     """Decide after deleting. `after` is None when the re-read failed."""
     if failed:
@@ -702,7 +722,7 @@ def purge_outcome(
     if after is None:
         return Outcome((f"{deleted} removed, but the spool could not be re-read to confirm.",), 2)
 
-    remaining = len(victims_for(after))
+    remaining = len(victims_for(after, include_unrecognised))
     lines = [f"{deleted} removed. Remaining in scope: {remaining}"]
     if after.unexamined:
         lines += [f"NOT CLEAN: {len(after.unexamined)} area(s) could not be examined:"]
@@ -712,11 +732,13 @@ def purge_outcome(
         return Outcome((*lines, "STILL PRESENT after a successful delete."), 1)
     caveats = leftover_caveats(after, jobs)
     if caveats:
-        # A caveat means something is still there. Printing it while returning
-        # 0 is the bug this cost four rounds: the message was added and the
-        # exit code was not, so `&& echo SAFE` kept firing.
-        lines += ["NOT FULLY CLEAN:"] + [f"  {c}" for c in caveats]
-        return Outcome(tuple(lines), 1)
+        # The exit code comes from what REMAINS, not from a caveat string
+        # existing: uncounted control files are opt-in by design and the report
+        # path calls that spool clean, so making them force 1 here had the two
+        # paths contradict each other on the same spool.
+        lines += ["NOT FULLY CLEAN:" if after.total else "Note:"]
+        lines += [f"  {c}" for c in caveats]
+        return Outcome(tuple(lines), 1 if after.total else 0)
     return Outcome((*lines, "SCOPE CLEAN."), 0)
 
 
@@ -989,7 +1011,9 @@ def delete(  # pragma: no cover
 
 def retention_state(conf: str) -> bool | None:  # pragma: no cover
     """Is CUPS configured to keep job files? None if the config is unreadable."""
-    read = subprocess.run(["cat", conf], capture_output=True, text=True, check=False)
+    read = subprocess.run(
+        ["cat", conf], capture_output=True, text=True, errors="replace", check=False,
+    )
     if read.returncode != 0:
         return None
     # cupsd honours the LAST matching directive. Returning on the first made a
@@ -1028,7 +1052,9 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     this runs under sudo, and a conf path containing shell metacharacters would
     otherwise execute as root.
     """
-    read = subprocess.run(["cat", conf], capture_output=True, text=True, check=False)
+    read = subprocess.run(
+        ["cat", conf], capture_output=True, text=True, errors="replace", check=False,
+    )
     if read.returncode != 0:
         return False, f"could not read {conf}"
 
@@ -1056,7 +1082,7 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     write = subprocess.run(
         ["tee", conf], input=body, capture_output=True, text=True, check=False
     )
-    if write.returncode != 0 and saved.returncode == 0:
+    if write.returncode != 0:
         return False, f"could not write {conf}; original preserved at {backup}"
     if write.returncode != 0:
         return False, f"could not write {conf}"
@@ -1097,6 +1123,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--purge", action="store_true", help="delete retained files")
     ap.add_argument("--fix", action="store_true", help="stop CUPS retaining documents")
     ap.add_argument(
+        "--include-unrecognised",
+        action="store_true",
+        help="also DELETE files that could not be identified (default: report only)",
+    )
+    ap.add_argument(
         "--include-control",
         action="store_true",
         help="also count/remove c<job> control files, which carry job titles",
@@ -1130,18 +1161,24 @@ def main(argv: list[str] | None = None) -> int:
         return max(fix_code, 2)
 
     if args.purge:
-        pre = purge_precheck(audit, jobs, roots_ok=spool_root is not None)
+        pre = purge_precheck(
+            audit, jobs, roots_ok=spool_root is not None,
+            include_unrecognised=args.include_unrecognised,
+        )
         if pre is not None:
             for line in pre.lines:
                 print(line)
             return max(fix_code, pre.code)
 
-        victims = victims_for(audit)
+        victims = victims_for(audit, args.include_unrecognised)
         scope = f"job(s) {', '.join(str(j) for j in sorted(jobs))}" if jobs else "all retained files"
         print(f"Deleting {len(victims)} file(s) [{scope}]...")
         deleted, failed = delete(args.spool, victims, allowed)
         after = classify(read_spool(args.spool), jobs, args.include_control) if not failed else None
-        post = purge_outcome(deleted, failed, after if (after and after.readable) else None, jobs)
+        post = purge_outcome(
+            deleted, failed, after if (after and after.readable) else None, jobs,
+            include_unrecognised=args.include_unrecognised,
+        )
         for line in post.lines:
             print(line)
         # max(), not the post code alone: a --fix that failed must not be

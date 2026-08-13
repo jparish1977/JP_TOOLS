@@ -78,16 +78,39 @@ def run(spool: pathlib.Path, *args: str) -> tuple[int, str]:
     return proc.returncode, proc.stdout + proc.stderr
 
 
-def assert_invariant(label: str, spool: pathlib.Path, *args: str) -> None:
+def assert_invariant(label: str, spool: pathlib.Path, *args: str, expect: int) -> None:
+    """Check the property in BOTH directions, and pin the exit code.
+
+    The first version returned early whenever the exit code was non-zero, so
+    only fixtures that happened to reach 0 asserted anything: 12 of 17 were
+    vacuous while the suite printed "holds across every fixture". A regression
+    that changed a fixture's exit code for an unrelated reason silently
+    disarmed its check -- the same "passed by not running" failure this file
+    exists to prevent, in the file that exists to prevent it.
+
+    So: `expect` pins the exit code, and the contrapositive is asserted too.
+    Every fixture now fails if the tool drifts, whichever way it drifts.
+    """
     code, out = run(spool, *args)
-    if code != 0:
-        return  # only exit 0 makes the promise
     left = oracle(spool)
-    if left:
+
+    if code != expect:
+        FAILURES.append(
+            f"{label}: exit {code}, expected {expect}\n    output: {out.strip()[:300]}"
+        )
+    if code == 0 and left:
         FAILURES.append(
             f"{label}: exited 0 with print data still present: {left}\n"
             f"    output: {out.strip()[:300]}"
         )
+    if left and code == 0:
+        return
+    if left and code != 0:
+        return  # correct: content present, non-zero exit
+    if not left and code == 0:
+        return  # correct: nothing left, success
+    # nothing left but non-zero: legitimate (unexamined areas, failed delete),
+    # and `expect` above already pins which fixtures may do that.
 
 
 def build(tmp: pathlib.Path, name: str) -> pathlib.Path:
@@ -105,7 +128,7 @@ def main() -> int:
         tmp = pathlib.Path(raw)
 
         # 1. Empty spool: nothing to find, exit 0 is honest.
-        assert_invariant("empty", build(tmp, "empty"))
+        assert_invariant("empty", build(tmp, "empty"), expect=0)
 
         # 2. A document and a copy of it under an unrecognised name. The copy
         #    carries no job id, so a scoped purge cannot target it -- and must
@@ -113,14 +136,14 @@ def main() -> int:
         s = build(tmp, "scoped")
         (s / "d00085-001").write_bytes(b"%PDF-1.7\n")
         (s / "d00085-001.bak").write_bytes(b"%PDF-1.7\n")
-        assert_invariant("scoped report", s, "85")
-        assert_invariant("scoped purge", s, "85", "--purge")
+        assert_invariant("scoped report", s, "85", expect=1)
+        assert_invariant("scoped purge", s, "85", "--purge", expect=1)
 
         # 3. Only the unattributable copy remains.
         s = build(tmp, "bak-only")
         (s / "d00085-001.bak").write_bytes(b"%PDF-1.7\n")
-        assert_invariant("bak only, scoped purge", s, "85", "--purge")
-        assert_invariant("bak only, report", s, "85")
+        assert_invariant("bak only, scoped purge", s, "85", "--purge", expect=1)
+        assert_invariant("bak only, report", s, "85", expect=1)
 
         # 3b. A SECOND, untargeted job. Every scoped fixture above pairs job 85
         #     with an unattributable leftover, which the job-is-None caveat
@@ -131,52 +154,72 @@ def main() -> int:
         s = build(tmp, "other-job")
         (s / "d00085-001").write_bytes(b"%PDF-1.7\n")
         (s / "d00077-001").write_bytes(b"%PDF-1.7\n")
-        assert_invariant("other job, scoped purge", s, "85", "--purge")
-        assert_invariant("other job, report", s, "85")
+        assert_invariant("other job, scoped purge", s, "85", "--purge", expect=1)
+        assert_invariant("other job, report", s, "85", expect=1)
 
         s = build(tmp, "other-job-only")
         (s / "d00077-001").write_bytes(b"%PDF-1.7\n")
-        assert_invariant("other job only, scoped purge", s, "85", "--purge")
+        assert_invariant("other job only, scoped purge", s, "85", "--purge", expect=1)
 
         # 4. Document inside TempDir.
         s = build(tmp, "intmp")
         (s / "tmp" / "filter.ps").write_bytes(b"%!PS-Adobe-3.0\n")
-        assert_invariant("tempdir report", s)
-        assert_invariant("tempdir purge", s, "--purge")
+        assert_invariant("tempdir report", s, expect=1)
+        assert_invariant("tempdir purge", s, "--purge", expect=0)
 
         # 5. Nested under a cache directory, where the location rule applies.
         s = build(tmp, "cache")
         (s / "tmp" / ".cache").mkdir()
         (s / "tmp" / ".cache" / "leak.ps").write_bytes(b"%!PS-Adobe-3.0\n")
-        assert_invariant("cache report", s)
-        assert_invariant("cache purge", s, "--purge")
+        assert_invariant("cache report", s, expect=1)
+        assert_invariant("cache purge", s, "--purge", expect=0)
 
-        # 6. Unreadable file: neither side can rule it out.
-        s = build(tmp, "unreadable")
-        p = s / "tmp" / "secret.ps"
-        p.write_bytes(b"%!PS\n")
-        os.chmod(p, 0o000)
-        assert_invariant("unreadable report", s)
-        os.chmod(p, 0o644)
+        # 6. Unreadable file: neither side can rule it out. Skipped as root,
+        #    where chmod 000 does not stop a read -- the fixture would silently
+        #    degrade into "a readable %!PS file" and test a different path.
+        #    This tool's documented invocation is `sudo spool-audit.py`, and CI
+        #    containers commonly run as root, so this is not hypothetical.
+        if os.geteuid() != 0:
+            s = build(tmp, "unreadable")
+            p = s / "tmp" / "secret.ps"
+            p.write_bytes(b"%!PS\n")
+            os.chmod(p, 0o000)
+            assert_invariant("unreadable report", s, expect=1)
+            os.chmod(p, 0o644)
+        else:
+            print("  note: running as root, unreadable-file fixture skipped")
+
+        # 6b. A file that cannot be identified must never be deleted by a
+        #     blanket --purge. Over-report is right for a report and wrong for
+        #     a delete set; one predicate served both, and --purge destroyed a
+        #     plain-text README while printing SCOPE CLEAN.
+        s = build(tmp, "unrecognised")
+        (s / "README-do-not-delete").write_bytes(b"do not delete me\n")
+        assert_invariant("unrecognised is not deleted", s, "--purge", expect=1)
+        if not (s / "README-do-not-delete").exists():
+            FAILURES.append("unrecognised: --purge deleted a file it could not identify")
 
         # 7. A symlink named like a document. Unlinking it destroys nothing.
         s = build(tmp, "symlink")
         (s / "vault").mkdir()
         (s / "vault" / "real.ps").write_bytes(b"%!PS\n")
         os.symlink("vault/real.ps", s / "d00085-001")
-        assert_invariant("symlink purge", s, "--purge")
+        assert_invariant("symlink purge", s, "--purge", expect=2)
 
         # 8. Full purge with no job ids: the one case that should reach 0.
         s = build(tmp, "full")
         (s / "d00085-001").write_bytes(b"%PDF-1.7\n")
         (s / "tmp" / "f.ps").write_bytes(b"%!PS\n")
-        assert_invariant("full purge", s, "--purge")
+        assert_invariant("full purge", s, "--purge", expect=0)
 
         # 9. Control files only: no document content anywhere.
         s = build(tmp, "control")
         (s / "c00085").write_bytes(b"job-name gpg-key\n")
-        assert_invariant("control only", s)
-        assert_invariant("control only purge", s, "--purge")
+        assert_invariant("control only", s, expect=0)
+        # Control files are opt-in by design, so the report calls this spool clean.
+        # The purge path must agree: making a caveat string force exit 1 had the
+        # two paths contradict each other on the same directory.
+        assert_invariant("control only purge", s, "--purge", expect=0)
 
     if FAILURES:
         print(f"INVARIANT VIOLATED ({len(FAILURES)})")
