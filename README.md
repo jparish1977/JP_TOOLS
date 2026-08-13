@@ -104,6 +104,15 @@ reports danger as safety: `sudo ls /var/spool/cups | grep -E 'd0*85' || echo
 CLEAN` prints CLEAN when sudo fails, making a check that never ran
 indistinguishable from a clean result.
 
+**Why the problem exists:** CUPS documents `PreserveJobFiles` as defaulting to
+`No`, so completed jobs should leave nothing behind. Measured in a clean Ubuntu
+24.04 container, stock config with no such directive, the document file was
+still present 60 seconds after the job finished. Writing `PreserveJobFiles No`
+explicitly stops it. An unset directive and an explicit `No` behave differently,
+which matches [apple/cups#6083](https://github.com/apple/cups/issues/6083)
+(open, no root cause, repo archived March 2026 -- reported there on macOS, and
+this reproduces it on Linux). That is what `--fix` addresses.
+
 It audits `tmp/` as well as the top level. CUPS `TempDir` defaults to
 `/var/spool/cups/tmp` and holds document content during filtering, so a
 top-level-only check reports clean while readable data sits one directory down.
