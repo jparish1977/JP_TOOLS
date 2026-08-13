@@ -817,13 +817,25 @@ def test_nothing_is_invisible() -> None:
         audit = classify(listing, frozenset(), include_control=True)
         report = "\n".join(render(audit, frozenset()))
 
+        def reported(rel: str) -> bool:
+            """Whole-entry match on the relative path, not a substring.
+
+            `"d00085-001" in report` is satisfied by the report line for
+            d00085-001.bak, so a regression that dropped the real document
+            while keeping its backup passed this check. Entries print as an
+            indented relative path, optionally followed by an annotation, and a
+            parent directory appears only as the prefix of its children.
+            """
+            for line in report.splitlines():
+                s = line.strip()
+                if s == rel or s.startswith(rel + " ") or s.startswith(rel + "/"):
+                    return True
+            return False
+
         present = sorted(
             str(q.relative_to(root)) for q in root.rglob("*")
         )
-        invisible = [
-            name for name in present
-            if pathlib.PurePath(name).name not in report
-        ]
+        invisible = [name for name in present if not reported(name)]
         check("every path appears in the report", invisible, [])
 
         # And the ones that matter are counted as content, not merely mentioned.
@@ -850,6 +862,48 @@ def test_walk_has_a_depth_limit() -> None:
 
         check("nothing collected past the limit", len(found), 0)
         check_true("and it says why", any("deeper than" in u for u in unexamined))
+
+
+def test_unreadable_tempdir_is_never_clean() -> None:
+    """The cardinal regression, tested without needing to be a particular user.
+
+    This is bug 3 above and the reason the tool exists: an unreadable TempDir
+    must never read as an empty one. It was covered only by the acceptance
+    suite, which makes the directory unreadable with chmod 000 -- and root
+    bypasses permission bits, so that check skips itself under exactly the sudo
+    invocation the tool documents. The regression was therefore uncovered in
+    the only run that matters.
+
+    Injecting the PermissionError tests the handler directly and is independent
+    of uid, so it holds as root and as a normal user alike. Mutating the
+    `except PermissionError` branch in read_spool to `pass` makes this fail.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "tmp").mkdir()
+        (root / "d00085-001").write_text("%!PS\n")
+
+        def deny(*_args: object, **_kwargs: object) -> None:
+            raise PermissionError(13, "Permission denied")
+
+        original = spool_audit._walk_temp
+        spool_audit._walk_temp = deny  # type: ignore[assignment]
+        try:
+            listing = spool_audit.read_spool(str(root))
+        finally:
+            spool_audit._walk_temp = original  # type: ignore[assignment]
+
+        audit = classify(listing, frozenset(), include_control=True)
+        report = "\n".join(render(audit, frozenset()))
+        check("an unreadable TempDir exits 2", audit.exit_code, 2)
+        check_true(
+            "and the TempDir is named as unexamined",
+            any("permission denied" in u.lower() for u in audit.unexamined),
+        )
+        check_true(
+            "and the report never calls it clean",
+            "spool is clean" not in report.lower(),
+        )
 
 
 def test_walk_against_a_real_filesystem() -> None:

@@ -205,11 +205,32 @@ def main() -> int:
             FAILURES.append("unrecognised: --purge spared tmp/genuine.ps, which carries print magic")
 
         # 7. A symlink named like a document. Unlinking it destroys nothing.
+        # The vault lives OUTSIDE the spool deliberately. As a subdirectory it
+        # produced the expected exit 2 on its own -- "vault/ (subdirectory, not
+        # examined)" -- so the fixture pinned nothing about symlinks: any drift
+        # in the symlink handling still left an unexamined area, still exited 2,
+        # and still passed. Now the 2 can only come from the symlink itself.
+        # Verified by mutation: disabling the top-level symlink check makes this
+        # fixture fail with "exit 1, expected 2", where before it passed.
+        #
+        # The exit code is the load-bearing assertion here, not the exists()
+        # check below. unlink() does not follow symlinks, so the target survives
+        # even when every guard is removed -- three of them, as it turns out:
+        # the symlink note, the not-regular note, and delete()'s containment,
+        # which refuses on the resolved path. The exists() check is kept for the
+        # change that would defeat all three, a purge that resolves before it
+        # deletes, and it is cheap insurance against exactly that.
+        vault = tmp / "symlink-vault"
+        vault.mkdir()
+        (vault / "real.ps").write_bytes(b"%!PS\n")
         s = build(tmp, "symlink")
-        (s / "vault").mkdir()
-        (s / "vault" / "real.ps").write_bytes(b"%!PS\n")
-        os.symlink("vault/real.ps", s / "d00085-001")
+        os.symlink(vault / "real.ps", s / "d00085-001")
         assert_invariant("symlink purge", s, "--purge", expect=2)
+        if not (vault / "real.ps").exists():
+            FAILURES.append(
+                "symlink: --purge destroyed the symlink's target, "
+                "the false assurance of destruction this file exists to catch"
+            )
 
         # 8. Full purge with no job ids: the one case that should reach 0.
         s = build(tmp, "full")
