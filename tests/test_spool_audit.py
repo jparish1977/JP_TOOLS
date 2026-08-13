@@ -632,7 +632,12 @@ def test_walk_survives_a_file_vanishing() -> None:
             pathlib.Path.stat = real_stat  # type: ignore[method-assign]
 
         check("the other four survive", len(found), 4)
-        check_true("the racing file is recorded, not dropped", len(unexamined) == 1)
+        check("the racing file is recorded", len(unexamined), 1)
+        # Assert the RIGHT note. The previous version checked only counts, so it
+        # passed while the race branch was unreachable: is_file() swallowed the
+        # error first and the file was reported as "not a regular file", which
+        # on a busy spool misdescribes every racing temp file as a device.
+        check_true("reported as a race, not as a device", "vanished" in unexamined[0])
 
 
 def test_walk_has_a_depth_limit() -> None:
