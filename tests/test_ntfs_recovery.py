@@ -72,9 +72,19 @@ def build_image(directory: Path) -> Path:
     empty.touch()
     small = directory / "small.bin"
     small.write_text("hello world")
+    # ntfscp is version-sensitive and fails on some ntfs-3g builds. check=True
+    # here made the skip-don't-fail fix half-applied: mkntfs was converted and
+    # this loop was not, so a runner where the tools exist but ntfscp fails
+    # turns CI red for a reason unrelated to any diff -- exactly what the
+    # mkntfs change was written to prevent.
     for source, name in ((empty, "/empty.bin"), (small, "/small.bin")):
-        subprocess.run(["ntfscp", "-f", str(image), str(source), name],
-                       check=True, capture_output=True)
+        copied = subprocess.run(["ntfscp", "-f", str(image), str(source), name],
+                                check=False, capture_output=True)
+        if copied.returncode != 0:
+            raise EnvironmentUnavailable(
+                f"ntfscp failed on {name}: "
+                f"{copied.stderr.decode('utf-8', 'replace').strip()[:200]}"
+            )
     return image
 
 

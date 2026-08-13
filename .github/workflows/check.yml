@@ -35,6 +35,20 @@ jobs:
             python check.py "$f" --pretty || rc=1
           done
           exit $rc
+      - name: Report which Python files are NOT checked
+        run: |
+          # The list above is manual and cannot become a glob today: 17 of the
+          # repo's 22 root scripts have pre-existing findings (127 in total),
+          # so `for f in *.py` would turn this build red for reasons unrelated
+          # to any diff. Silently excluding them is how spool-audit.py reached
+          # a PR with a green badge that said nothing about it, so the gap is
+          # printed instead of hidden. Not a failure; a standing reminder.
+          checked="check.py fix.py install-hooks.py init-ci.py spool-audit.py"
+          echo "Linted: $checked"
+          echo "NOT linted:"
+          for f in *.py; do
+            case " $checked " in *" $f "*) ;; *) echo "  $f" ;; esac
+          done
       - name: Run test suites
         run: |
           # Nothing ran tests/ at all before. A suite that CI never executes is
