@@ -119,6 +119,12 @@ readable data sits one directory down. Passing job ids scopes `--purge` to
 those jobs only, because on a shared printer deleting everything destroys other
 people's documents.
 
+`--purge` deletes what it can **identify** as print data. A file it cannot
+identify is reported and blocks a clean verdict, but is never deleted without
+`--include-unrecognised` -- over-reporting is the safe direction for a report
+and the destructive one for a delete set, and an earlier version used one rule
+for both and destroyed a plain-text README.
+
 It reads directly and has no privilege-escalation path, so run it under `sudo`
 for the real spool. That is deliberate: an internal sudo fallback was a second
 implementation of the same listing, the two disagreed repeatedly about depth

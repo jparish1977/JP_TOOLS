@@ -103,14 +103,9 @@ def assert_invariant(label: str, spool: pathlib.Path, *args: str, expect: int) -
             f"{label}: exited 0 with print data still present: {left}\n"
             f"    output: {out.strip()[:300]}"
         )
-    if left and code == 0:
-        return
-    if left and code != 0:
-        return  # correct: content present, non-zero exit
-    if not left and code == 0:
-        return  # correct: nothing left, success
-    # nothing left but non-zero: legitimate (unexamined areas, failed delete),
-    # and `expect` above already pins which fixtures may do that.
+    # No trailing branches: the two checks above are the whole assertion. The
+    # earlier version had four if/return no-ops here that read as coverage and
+    # were not -- in the file whose subject is checks that pass by not running.
 
 
 def build(tmp: pathlib.Path, name: str) -> pathlib.Path:
@@ -179,7 +174,7 @@ def main() -> int:
         #    degrade into "a readable %!PS file" and test a different path.
         #    This tool's documented invocation is `sudo spool-audit.py`, and CI
         #    containers commonly run as root, so this is not hypothetical.
-        if os.geteuid() != 0:
+        if getattr(os, "geteuid", lambda: 1)() != 0:
             s = build(tmp, "unreadable")
             p = s / "tmp" / "secret.ps"
             p.write_bytes(b"%!PS\n")
@@ -193,11 +188,21 @@ def main() -> int:
         #     blanket --purge. Over-report is right for a report and wrong for
         #     a delete set; one predicate served both, and --purge destroyed a
         #     plain-text README while printing SCOPE CLEAN.
+        #     Both locations, because the first version of this fixture only
+        #     planted a file at the TOP level -- and the fix had the same blind
+        #     spot, so tmp/ went on deleting blind while the test passed. That
+        #     is three fixtures in a row inheriting the bug's own blind spot.
         s = build(tmp, "unrecognised")
         (s / "README-do-not-delete").write_bytes(b"do not delete me\n")
+        (s / "tmp" / "NOTES-do-not-delete").write_bytes(b"nor me\n")
+        (s / "tmp" / "genuine.ps").write_bytes(b"%!PS-Adobe-3.0\n")
         assert_invariant("unrecognised is not deleted", s, "--purge", expect=1)
-        if not (s / "README-do-not-delete").exists():
-            FAILURES.append("unrecognised: --purge deleted a file it could not identify")
+        for keep in ("README-do-not-delete", "tmp/NOTES-do-not-delete"):
+            if not (s / keep).exists():
+                FAILURES.append(f"unrecognised: --purge deleted {keep}, which it could not identify")
+        # ...while a file that IS identifiable as print data must still go.
+        if (s / "tmp" / "genuine.ps").exists():
+            FAILURES.append("unrecognised: --purge spared tmp/genuine.ps, which carries print magic")
 
         # 7. A symlink named like a document. Unlinking it destroys nothing.
         s = build(tmp, "symlink")
