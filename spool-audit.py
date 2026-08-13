@@ -614,12 +614,26 @@ def leftover_caveats(audit: Audit, jobs: frozenset[int]) -> tuple[str, ...]:
             f"{audit.uncounted_control} control file(s) were not counted or removed; "
             "they carry the job title. Use --include-control."
         )
-    unattributable = [e for e in audit.others if e.job is None]
-    if jobs and unattributable:
-        out.append(
-            f"{len(unattributable)} file(s) carry no job id and cannot be purged by "
-            "job number. Re-run --purge without job ids to clear them."
-        )
+    # ANY content a scoped purge will not touch, not just the unattributable
+    # kind. Checking only `job is None` meant a document belonging to job 77
+    # produced no caveat, so `85 --purge` printed SCOPE CLEAN and exited 0 with
+    # a readable PDF on disk. The invariant fixtures had the same blind spot:
+    # every scoped case paired job 85 with an unattributable leftover, never
+    # with another job's document.
+    if jobs:
+        no_job = [e for e in audit.others if e.job is None]
+        other_job = [e for e in audit.others if e.job is not None]
+        if no_job:
+            out.append(
+                f"{len(no_job)} file(s) carry no job id and cannot be purged by job "
+                "number. Re-run --purge without job ids to clear them."
+            )
+        if other_job:
+            js = ", ".join(str(j) for j in sorted({e.job for e in other_job if e.job}))
+            out.append(
+                f"{len(other_job)} file(s) belong to other job(s) ({js}) and were "
+                "not touched. Re-run --purge without job ids to clear them."
+            )
     return tuple(out)
 
 
@@ -654,7 +668,15 @@ def purge_precheck(audit: Audit, jobs: frozenset[int], roots_ok: bool) -> Outcom
     code = 0
     caveats = leftover_caveats(audit, jobs)
     if caveats:
-        lines = ["Nothing to purge, and NOT clean:"] + [f"  {c}" for c in caveats]
+        # Previously this printed the single line "Nothing to purge." over a
+        # retained document and exited 0, while the report path on the same
+        # spool said "1 retained file(s) still on disk" and exited 1. The tool
+        # contradicted itself depending on the flag.
+        headline = (
+            f"Nothing to purge for the job(s) named, and NOT clean: "
+            f"{audit.total} file(s) still on disk."
+        )
+        lines = [headline] + [f"  {c}" for c in caveats]
         code = 1
     if audit.unexamined:
         lines += [f"{len(audit.unexamined)} area(s) could not be examined:"]
@@ -1092,8 +1114,6 @@ def main(argv: list[str] | None = None) -> int:
         fix_code = outcome.code
         if fix_code and not args.purge:
             return fix_code
-        if not fix_code and not args.purge:
-            return 0
 
     jobs = frozenset(args.jobs)
     audit = classify(read_spool(args.spool), jobs, args.include_control)
@@ -1130,6 +1150,9 @@ def main(argv: list[str] | None = None) -> int:
 
     for line in render(audit, jobs, retention_state(args.conf)):
         print(line)
+    # --fix on its own used to return 0 without ever reading the spool, so
+    # `--fix && echo SAFE` fired on a spool full of retained documents. The
+    # exit code means one thing throughout: nothing is left.
     return max(fix_code, audit.exit_code)
 
 
