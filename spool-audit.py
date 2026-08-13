@@ -79,6 +79,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -1137,21 +1138,30 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     this runs under sudo, and a conf path containing shell metacharacters would
     otherwise execute as root.
     """
+    # Bytes end to end. Reading with errors="replace" and writing the result
+    # back is a lossy round-trip of the machine's printer config: a Latin-1
+    # comment or printer name came back as U+FFFD, so `--fix` silently corrupted
+    # every non-UTF-8 byte in the file. Worse, the replacement character is
+    # unencodable in an ASCII locale, and UnicodeEncodeError is a ValueError,
+    # which `except OSError` does not catch -- cupsd.conf was left at 0 bytes
+    # with an uncaught traceback and exit 1, the code reserved for "content you
+    # care about is still there". Bytes cannot be mistranscoded and cannot raise
+    # on encode. This file is a config, not text we need to interpret.
     try:
-        lines = Path(conf).read_text(errors="replace").splitlines()
+        lines = Path(conf).read_bytes().splitlines()
     except OSError as exc:
         return False, f"could not read {conf}: {exc.__class__.__name__}"
 
     out, replaced = [], False
     for line in lines:
-        if re.match(r"^\s*PreserveJobFiles\b", line, re.IGNORECASE):
-            out.append("PreserveJobFiles No")
+        if re.match(rb"^\s*PreserveJobFiles\b", line, re.IGNORECASE):
+            out.append(b"PreserveJobFiles No")
             replaced = True
         else:
             out.append(line)
     if not replaced:
-        out.append("PreserveJobFiles No")
-    body = "\n".join(out) + "\n"
+        out.append(b"PreserveJobFiles No")
+    body = b"\n".join(out) + b"\n"
 
     # The write truncates before it writes, so an interrupted write leaves the
     # daemon's config empty and nothing to restore from. Copy it aside first.
@@ -1177,12 +1187,47 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     # this tool reserves for "content you care about is still there", so a
     # wrapper could not tell a crash from a finding. The script already runs as
     # root, so tee bought no privilege.
+    #
+    # Written to a temp file and renamed over the original, never truncated in
+    # place: cupsd.conf belongs to a running daemon, and any failure mid-write
+    # leaves it empty. os.replace is atomic within a directory, so the daemon
+    # sees either the old file or the new one and never a partial one. The
+    # backup above stays, because it covers the case this does not: a bad but
+    # complete rewrite.
     try:
-        Path(conf).write_text(body)
+        src = os.stat(conf)
     except OSError as exc:
+        return False, f"could not stat {conf} ({exc.__class__.__name__})"
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(Path(conf).parent), prefix=".spool-audit-", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(body)
+            fh.flush()
+            # The daemon is restarted immediately after this. Without fsync a
+            # crash between rename and restart can leave the rename durable and
+            # the contents not.
+            os.fsync(fh.fileno())
+        # mkstemp creates 0600 owned by the caller, and os.replace keeps the
+        # REPLACEMENT's mode and owner, not the original's. Renaming without
+        # this would quietly change cupsd.conf from its packaged root:lp 0640 --
+        # a permissions change nobody asked for, made by a tool whose whole
+        # purpose is not to damage what it touches.
+        os.chmod(tmp_name, stat.S_IMODE(src.st_mode))
+        try:
+            os.chown(tmp_name, src.st_uid, src.st_gid)
+        except OSError:
+            now = os.stat(tmp_name)
+            if (now.st_uid, now.st_gid) != (src.st_uid, src.st_gid):
+                raise
+        os.replace(tmp_name, conf)
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
         return False, (
             f"could not write {conf} ({exc.__class__.__name__}); "
-            f"original preserved at {backup}"
+            f"original untouched, backup at {backup}"
         )
 
     if not should_restart_cups(conf):
@@ -1203,14 +1248,14 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     # pass -- returning True on an empty read would report a fix that may not be
     # on disk at all.
     try:
-        verified = Path(conf).read_text(errors="replace")
+        verified = Path(conf).read_bytes()
     except OSError as exc:
         return False, (
             f"wrote and restarted, but could not re-read {conf} "
             f"({exc.__class__.__name__}) to confirm the setting"
         )
     for line in verified.splitlines():
-        if re.match(r"^\s*PreserveJobFiles\s+No\b", line, re.IGNORECASE):
+        if re.match(rb"^\s*PreserveJobFiles\s+No\b", line, re.IGNORECASE):
             return True, f"restarted via {how}"
     return False, "config did not contain PreserveJobFiles No after writing"
 
