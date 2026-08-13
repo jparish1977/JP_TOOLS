@@ -228,9 +228,29 @@ class Audit:
         """
         if not self.complete:
             return 2
-        if self.asked_for_jobs:
-            return 0 if self.targeted_are_gone else 1
+        # STRICT: 0 means no print data is left anywhere, not "the jobs you
+        # named are gone". Job identity is not content identity -- a copy of
+        # job 85's document named d00085-001.bak carries no job id, so a
+        # scoped run reported "those documents are GONE" and exited 0 over a
+        # readable copy. That fired `85 --purge && echo SAFE` in four separate
+        # review rounds, each time in a different branch, because the scoped
+        # exit code kept being re-derived and kept being wrong.
+        #
+        # The scoped question is still answered, in the report text. The exit
+        # code answers the only one a script can act on: is anything still
+        # here?
         return 0 if self.verdict is Verdict.CLEAN else 1
+
+
+def should_restart_cups(conf: str) -> bool:
+    """Should --fix restart the live daemon after writing `conf`?
+
+    Only when `conf` IS the daemon's config. `--fix --conf /tmp/x` restarted
+    the machine's real cups.service and reported success while
+    /etc/cups/cupsd.conf was untouched, then "verified" by re-reading the file
+    it had just written -- proof-shaped, and checking the wrong file.
+    """
+    return conf == DEFAULT_CONF
 
 
 def _safe_resolve(p: Path) -> Path | None:  # pragma: no cover
@@ -243,7 +263,12 @@ def _safe_resolve(p: Path) -> Path | None:  # pragma: no cover
     """
     try:
         return p.resolve()
-    except OSError:
+    except (OSError, RuntimeError):
+        # RuntimeError("Symlink loop from ...") on ELOOP in CPython <= 3.12,
+        # which CI pins and Ubuntu 24.04 ships. Catching only OSError let it
+        # escape as a traceback with exit 1 -- the code this tool reserves for
+        # "content you care about is still there", so a wrapper could not tell
+        # a crash from a finding.
         return None
 
 
@@ -370,7 +395,13 @@ def classify(
 ) -> Audit:
     """Partition a spool listing into targeted and other retained files."""
     if listing.verdict in (Verdict.DENIED, Verdict.MISSING, Verdict.NOT_A_DIRECTORY):
-        return Audit(listing.verdict, (), (), asked_for_jobs=bool(jobs))
+        # Carry unexamined through. Dropping it here is why the ELOOP/ESTALE
+        # class name never reached the report and the user was told to re-run
+        # with sudo, which would fail identically.
+        return Audit(
+            listing.verdict, (), (),
+            asked_for_jobs=bool(jobs), unexamined=listing.unexamined,
+        )
 
     entries = [e for e in (parse_entry(n, include_control) for n in listing.top) if e is not None]
     # Unrecognised top-level files go through exactly the same content check as
@@ -438,6 +469,16 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
     documents from before the fix were still on disk.
     """
     if audit.verdict is Verdict.DENIED:
+        # A non-permission error (ELOOP, ESTALE, EIO) must not be answered with
+        # "re-run with sudo", which would fail identically. read_spool passes
+        # the class name through unexamined when it knows it.
+        detail = [u for u in audit.unexamined if u.startswith("could not read the spool")]
+        if detail:
+            return [
+                f"COULD NOT READ THE SPOOL ({detail[0].split(': ', 1)[1]}).",
+                "Nothing is proven either way. This is NOT a clean result.",
+                "This is not a permissions problem; sudo will not help.",
+            ]
         return [
             "COULD NOT READ THE SPOOL (permission denied).",
             "Nothing is proven either way. This is NOT a clean result.",
@@ -492,9 +533,21 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         lines.append("  so they cannot be targeted by number. Purge without job ids.")
 
     if audit.artifacts:
-        lines.append("")
-        lines.append(f"CUPS RUNTIME FILES (not document content, never purged): {len(audit.artifacts)}")
-        lines += [f"  {e.name}" for e in audit.artifacts]
+        # Split by what they actually are. Filing a stray zero-length file
+        # under "CUPS RUNTIME FILES" trains the operator to skim the one
+        # section a real stray could hide in -- but dropping it from the report
+        # instead would make it invisible, which is worse.
+        runtime = [e for e in audit.artifacts if ARTIFACT.match(e.name.rsplit("/", 1)[-1])]
+        other = [e for e in audit.artifacts if e not in runtime]
+        if runtime:
+            lines.append("")
+            lines.append(f"CUPS RUNTIME FILES (not document content, never purged): {len(runtime)}")
+            lines += [f"  {e.name}" for e in runtime]
+        if other:
+            lines.append("")
+            lines.append(f"OTHER FILES, no print-data signature: {len(other)}")
+            lines += [f"  {e.name}" for e in other]
+            lines.append("  Empty, or a recognised driver cache. Listed so nothing is hidden.")
 
     if audit.unexamined:
         lines.append("")
@@ -565,7 +618,7 @@ def leftover_caveats(audit: Audit, jobs: frozenset[int]) -> tuple[str, ...]:
     if jobs and unattributable:
         out.append(
             f"{len(unattributable)} file(s) carry no job id and cannot be purged by "
-            "number. Re-run --purge without job ids to clear them."
+            "job number. Re-run --purge without job ids to clear them."
         )
     return tuple(out)
 
@@ -598,15 +651,17 @@ def purge_precheck(audit: Audit, jobs: frozenset[int], roots_ok: bool) -> Outcom
         return None
 
     lines = ["Nothing to purge."]
+    code = 0
     caveats = leftover_caveats(audit, jobs)
     if caveats:
-        lines = ["Nothing to purge, but:"] + [f"  {c}" for c in caveats]
+        lines = ["Nothing to purge, and NOT clean:"] + [f"  {c}" for c in caveats]
+        code = 1
     if audit.unexamined:
         lines += [f"{len(audit.unexamined)} area(s) could not be examined:"]
         lines += [f"  {u}" for u in audit.unexamined]
         lines += ["This is NOT a clean result."]
         return Outcome(tuple(lines), 2)
-    return Outcome(tuple(lines), 0)
+    return Outcome(tuple(lines), code)
 
 
 def purge_outcome(
@@ -635,8 +690,11 @@ def purge_outcome(
         return Outcome((*lines, "STILL PRESENT after a successful delete."), 1)
     caveats = leftover_caveats(after, jobs)
     if caveats:
-        lines += ["SCOPE CLEAN for the jobs named, but:"] + [f"  {c}" for c in caveats]
-        return Outcome(tuple(lines), 0)
+        # A caveat means something is still there. Printing it while returning
+        # 0 is the bug this cost four rounds: the message was added and the
+        # exit code was not, so `&& echo SAFE` kept firing.
+        lines += ["NOT FULLY CLEAN:"] + [f"  {c}" for c in caveats]
+        return Outcome(tuple(lines), 1)
     return Outcome((*lines, "SCOPE CLEAN."), 0)
 
 
@@ -746,7 +804,7 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
     except OSError as exc:
         # ELOOP, ESTALE, EIO. Calling all of them "permission denied, re-run
         # with sudo" sends the user to do something that will fail identically.
-        return Listing(Verdict.DENIED, (f"({exc.__class__.__name__})",))
+        return Listing(Verdict.DENIED, (), (), (f"could not read the spool: {exc.__class__.__name__}",))
 
     temp: tuple[TempFile, ...] = ()
     unexamined: list[str] = []
@@ -828,11 +886,16 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
                 suspect.append(n)
             continue
         if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+            try:
+                tgt = os.readlink(f) if stat.S_ISLNK(st.st_mode) else "?"
+            except OSError:
+                tgt = "?"
             note = temp_child_note(
                 ".", n,
                 is_symlink=stat.S_ISLNK(st.st_mode),
                 is_dir=stat.S_ISDIR(st.st_mode),
                 is_regular=False,
+                target=tgt,
             )
             unexamined.append((note or f"{n} (not examined)").replace("./", "", 1))
             continue
@@ -870,7 +933,7 @@ def delete(  # pragma: no cover
         # should not have offered such a path in the first place.
         try:
             resolved = target.resolve()
-        except OSError:
+        except (OSError, RuntimeError):
             failed += 1
             continue
         if not is_inside(resolved, roots):
@@ -976,6 +1039,12 @@ def disable_retention(conf: str) -> tuple[bool, str]:  # pragma: no cover
     if write.returncode != 0:
         return False, f"could not write {conf}"
 
+    if not should_restart_cups(conf):
+        # Do NOT restart the live daemon for a config it does not read.
+        # `--fix --conf /tmp/x` restarted the machine's real cups.service and
+        # reported success while /etc/cups/cupsd.conf was untouched, then
+        # "verified" by re-reading the file it had just written.
+        return True, f"wrote {conf} (not the system config, so cups was not restarted)"
     ok, how = _restart_cups()
     if not ok:
         return False, (
