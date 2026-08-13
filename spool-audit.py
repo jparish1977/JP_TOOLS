@@ -470,7 +470,13 @@ def _sudo_ls(path: str, files_only: bool = False) -> tuple[Verdict, tuple[str, .
     whenever the tool escalated through sudo rather than running as root.
     """
     argv = (
-        ["find", path, "-maxdepth", "1", "-type", "f", "-printf", "%f\n"]
+        # Recursive, relative paths, and the type letter so symlinks and
+        # non-regular files are classified rather than silently dropped. The
+        # earlier -maxdepth 1 -printf %f disagreed with the recursive direct
+        # walk and hid nested documents in neither temp nor unexamined, and
+        # basenames alone would collide across directories and make delete()
+        # build the wrong path.
+        ["find", path, "-mindepth", "1", "-maxdepth", "8", "-printf", "%y\t%l\t%P\n"]
         if files_only
         else ["ls", "-1", path]
     )
@@ -524,7 +530,14 @@ def _walk_temp(  # pragma: no cover
             is_regular=not link and f.is_file(), target=target,
         )
         if note is None:
-            found.append(TempFile(name=name, size=f.stat().st_size, head=_head(f)))
+            try:
+                found.append(TempFile(name=name, size=f.stat().st_size, head=_head(f)))
+            except OSError:
+                # A live spool deletes temp files continuously. Letting this
+                # escape discarded every file already collected and reported
+                # the whole TempDir unreadable -- losing the audit on exactly
+                # the busy machine worth auditing.
+                unexamined.append(f"{label}/{name} (vanished while reading)")
         else:
             unexamined.append(note)
 
@@ -550,10 +563,18 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
     unexamined: list[str] = []
     tdir = Path(temp_dir) if temp_dir else root / TEMP_SUBDIR
     label = TEMP_SUBDIR if tdir == root / TEMP_SUBDIR else str(tdir)
-    if tdir.exists():
+    # If TempDir is elsewhere, <spool>/tmp is stripped from the top-level
+    # listing but never walked, so documents left there vanished from the audit
+    # entirely and the tool reported clean. Record it rather than drop it.
+    if tdir != root / TEMP_SUBDIR and TEMP_SUBDIR in top:
+        unexamined.append(
+            f"{TEMP_SUBDIR}/ (present but TempDir points at {tdir}; not examined)"
+        )
+    if True:
         try:
-            # Probe readability here so PermissionError still routes to the
-            # sudo escalation below; _walk_temp records its own read failures.
+            # Path.exists() does NOT swallow EACCES, so probing it outside this
+            # try crashed the tool with a traceback on a real 0710 spool and
+            # made the sudo escalation below unreachable dead code.
             next(tdir.iterdir(), None)
             found: list[TempFile] = []
             _walk_temp(tdir, label, "", found, unexamined)
@@ -562,9 +583,25 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
             # Names only through this path. Size and header are unknown, which
             # is_harmless_temp() treats as "possibly document content" rather
             # than assuming the safe answer.
-            tverdict, names = _sudo_ls(str(tdir), files_only=True)
+            tverdict, rows = _sudo_ls(str(tdir), files_only=True)
             if tverdict is Verdict.CLEAN:
-                temp = tuple(TempFile(name=n, size=-1, head="") for n in names)
+                collected = []
+                for row in rows:
+                    kind, target, name = (row.split("\t", 2) + ["", ""])[:3]
+                    if kind == "d":
+                        continue
+                    note = temp_child_note(
+                        label, name,
+                        is_symlink=kind == "l",
+                        is_dir=False,
+                        is_regular=kind == "f",
+                        target=target or "?",
+                    )
+                    if note is None:
+                        collected.append(TempFile(name=name, size=-1, head=""))
+                    else:
+                        unexamined.append(note)
+                temp = tuple(collected)
             else:
                 # Do NOT fall through with an empty tuple. That turned an
                 # unreadable TempDir into an empty one and printed
@@ -602,10 +639,19 @@ def delete(spool: str, entries: tuple[Entry, ...]) -> tuple[int, int]:  # pragma
         except PermissionError:
             pass
         rc = subprocess.run(_priv(["rm", "-f", str(target)]), check=False).returncode
-        if rc == 0 and not target.exists():
-            deleted += 1
-        else:
+        if rc != 0:
             failed += 1
+            continue
+        # Reaching the sudo fallback means unlink() already hit EACCES, so the
+        # invoker cannot stat children either and target.exists() RAISES rather
+        # than returning False. Letting that escape aborted a purge mid-way
+        # with a traceback and no summary of what had been removed.
+        try:
+            gone = not target.exists()
+        except OSError:
+            gone = True  # rm reported success and we cannot see the file
+        deleted += 1 if gone else 0
+        failed += 0 if gone else 1
     return deleted, failed
 
 
@@ -710,9 +756,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     jobs = frozenset(args.jobs)
-    temp_dir = args.temp or configured_tempdir(
-        str(Path(args.conf).parent / "cups-files.conf")
-    )
+    # Only consult the system cups-files.conf when auditing the system spool.
+    # Otherwise `--spool /mnt/backup --purge` picked up an absolute TempDir from
+    # the live config, and Path("/mnt/backup") / "/var/spool/cups/tmp/x"
+    # resolves to the LIVE path -- reporting on, and deleting from, a directory
+    # the user did not name.
+    if args.temp:
+        temp_dir: str | None = args.temp
+    elif args.spool == DEFAULT_SPOOL:
+        temp_dir = configured_tempdir(str(Path(args.conf).parent / "cups-files.conf"))
+    else:
+        temp_dir = None
     audit = classify(read_spool(args.spool, temp_dir), jobs, args.include_control)
 
     if not audit.readable:
