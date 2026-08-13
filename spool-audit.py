@@ -90,6 +90,13 @@ CONTROL = re.compile(r"^c(\d+)$")
 # purged.
 ARTIFACT = re.compile(r"^cups-.*(lockfile|notifier|socket)$|^cups-dbus-")
 
+# Passed to `find -printf`, which interprets the escapes itself. The backslashes
+# MUST stay literal: writing "%y\t%l\t%P\0" in Python embeds a real NUL byte,
+# and argv strings are NUL-terminated, so subprocess rejects it outright with
+# ValueError: embedded null byte. That crashed every sudo TempDir listing, and
+# no amount of running the tool as root would have shown it.
+FIND_FORMAT = "%y\\t%l\\t%P\\0"
+
 # Print-job formats. Content beats location: a file whose first bytes say it is
 # a document is counted even if it sits somewhere caches normally live.
 DOCUMENT_MAGIC = ("%!PS", "%PDF", "\x1b%-12345X", "\x04%!", "@PJL", "\x1b*")
@@ -519,7 +526,7 @@ def _sudo_ls(path: str, files_only: bool = False) -> tuple[Verdict, tuple[str, .
         # walk and hid nested documents in neither temp nor unexamined, and
         # basenames alone would collide across directories and make delete()
         # build the wrong path.
-        ["find", path, "-mindepth", "1", "-maxdepth", "8", "-printf", "%y\t%l\t%P\0"]
+        ["find", path, "-mindepth", "1", "-maxdepth", "8", "-printf", FIND_FORMAT]
         if files_only
         else ["ls", "-1", path]
     )

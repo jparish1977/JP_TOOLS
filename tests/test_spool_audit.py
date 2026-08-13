@@ -100,6 +100,7 @@ TempFile = spool_audit.TempFile
 is_harmless_temp = spool_audit.is_harmless_temp
 temp_child_note = spool_audit.temp_child_note
 parse_find_rows = spool_audit.parse_find_rows
+FIND_FORMAT = spool_audit.FIND_FORMAT
 Verdict = spool_audit.Verdict
 Kind = spool_audit.Kind
 
@@ -303,6 +304,26 @@ def test_ppd_files_are_not_leaks() -> None:
     check("the document is the one kept", audit.others[0].name, "tmp/006816a8026a5")
     check("ppd is an artifact", len(audit.artifacts), 1)
     check_true("ppd not a purge victim", "tmp/0777f6a7dc4fa" not in [e.name for e in victims_for(audit)])
+
+
+def test_find_format_is_passable_to_subprocess() -> None:
+    """A real NUL in the format crashes before find ever runs.
+
+    "%y\\t%l\\t%P\\0" written with single backslashes in Python embeds an
+    actual NUL byte, and argv strings are NUL-terminated, so subprocess raises
+    ValueError: embedded null byte. That killed every sudo TempDir listing.
+    Running the tool as root never touches that path, so only this catches it.
+    """
+    check_true("no embedded NUL", "\0" not in FIND_FORMAT)
+    check_true("no embedded tab", "\t" not in FIND_FORMAT)
+    check_true("find sees the escapes", "\\0" in FIND_FORMAT and "\\t" in FIND_FORMAT)
+
+    # The real proof: subprocess must accept it as an argument.
+    import subprocess as _sp
+    try:
+        _sp.run(["true", FIND_FORMAT], capture_output=True, check=False)
+    except ValueError as exc:  # pragma: no cover
+        FAILURES.append(f"subprocess rejects FIND_FORMAT: {exc}")
 
 
 def test_find_output_survives_hostile_filenames() -> None:
