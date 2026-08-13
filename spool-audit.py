@@ -16,6 +16,26 @@ Usage:
 
 Reading the spool needs root, so this normally runs under sudo.
 
+WHY THE PROBLEM EXISTS AT ALL
+    CUPS documents PreserveJobFiles as defaulting to No, so document files
+    should never survive a completed job. They do. Measured in a clean Ubuntu
+    24.04 container on 2026-08-12, stock cupsd.conf with no PreserveJobFiles
+    directive present:
+
+        t+1s  d-files=1     t+30s  d-files=1
+        t+10s d-files=1     t+60s  d-files=1
+
+    The document sat there for the full minute. Writing "PreserveJobFiles No"
+    explicitly -- which --fix does -- stops it: a print afterwards left no
+    document file at all. So an unset directive and an explicit No behave
+    DIFFERENTLY, and the documented default cannot be relied on.
+
+    That matches apple/cups issue #6083, open with no root cause and the
+    repository archived in March 2026. The issue only reports macOS; this
+    reproduces it on Linux.
+
+    It is the reason --fix is not ceremony around a setting you could just set.
+
 WHY THIS EXISTS AS A TOOL
     The obvious one-liner is wrong in a way that reports danger as safety:
 
