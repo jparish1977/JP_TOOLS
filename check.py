@@ -15,12 +15,14 @@ Exit codes:
 
 import argparse
 import ast
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 
 # Inject known tool locations that may not be on PATH yet (e.g. before reboot)
@@ -707,6 +709,13 @@ def coverage_exemptions(path: Path) -> list[dict]:
     Reporting only violations is not enough on its own. On 2026-08-13 the check
     reported "0 unjustified" on a file whose inventory immediately showed two
     reasons that were three words long and justified nothing.
+
+    EVERY pragma line is scanned, not just function signatures. The first
+    version walked FunctionDef only, so a pragma on a class, on a bare
+    statement, or at module level was invisible to the gate AND to the
+    inventory, which then printed "No coverage exemptions" as though it had
+    looked. A checker that silently cannot see a construct is the same failure
+    it was written to catch.
     """
     try:
         src = path.read_text(encoding="utf-8", errors="replace")
@@ -715,36 +724,69 @@ def coverage_exemptions(path: Path) -> list[dict]:
         # Not this check's job to report unparseable files; ruff already does,
         # and reporting it twice makes one problem look like two.
         return []
-    lines = src.splitlines()
-    found: list[dict] = []
+    # Only a trailing comment on a LINE OF CODE is a directive. A line scan
+    # flagged this very function, because the comment block above documents the
+    # pragma and prose about a directive is not a directive. Tokenising also
+    # excludes docstrings for free, which matters in a repo that explains this
+    # marker in several files.
+    code_rows: set[int] = set()
+    comments: list[tuple[int, str]] = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            if tok.type == tokenize.COMMENT:
+                comments.append((tok.start[0], tok.string))
+            elif tok.type not in (
+                tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
+                tokenize.DEDENT, tokenize.ENDMARKER, tokenize.ENCODING,
+            ):
+                for row in range(tok.start[0], tok.end[0] + 1):
+                    code_rows.add(row)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return []
+
+    # Every construct a pragma could sit inside, so the innermost one can be
+    # named. Sorted by span so the tightest enclosing owner wins.
+    owners: list[tuple[int, int, str, int]] = []
     for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            label = node.name
+        elif isinstance(node, _BRANCHY):
+            label = f"<{type(node).__name__.lower()} line {node.lineno}>"
+        else:
             continue
-        if not node.body:
+        end = node.end_lineno or node.lineno
+        owners.append((
+            node.lineno, end, label,
+            sum(isinstance(n, _BRANCHY) for n in ast.walk(node)),
+        ))
+
+    found: list[dict] = []
+    seen: set = set()
+    for lineno, text in comments:
+        if lineno not in code_rows:
             continue
-        # The pragma may sit anywhere in the signature, which can span lines:
-        # `def f(  # pragma: no cover` and `def f(x) -> y:  # pragma: no cover`
-        # are both in use.
-        signature = lines[node.lineno - 1 : node.body[0].lineno - 1] or [
-            lines[node.lineno - 1]
-        ]
-        match = None
-        for text in signature:
-            match = _NO_COVER.search(text)
-            if match:
-                break
+        match = _NO_COVER.search(text)
         if not match:
             continue
         rest = match.group("rest")
-        reason = ""
-        if _HAS_REASON.search(rest):
-            reason = rest.split("reason:", 1)[1].strip()
+        reason = rest.split("reason:", 1)[1].strip() if _HAS_REASON.search(rest) else ""
+        holding = [o for o in owners if o[0] <= lineno <= o[1]]
+        if holding:
+            begin, finish, label, branches = min(holding, key=lambda o: o[1] - o[0])
+        else:
+            begin, finish, label, branches = lineno, lineno, "<module level>", 0
+        # One entry per owner. Two pragmas inside the same function are one
+        # exemption, and counting the span twice would overstate the share of
+        # the file that is exempt.
+        if (label, begin) in seen:
+            continue
+        seen.add((label, begin))
         found.append({
             "file":     str(path),
-            "line":     node.lineno,
-            "function": node.name,
-            "lines":    (node.end_lineno - node.lineno) if node.end_lineno else 0,
-            "branches": sum(isinstance(n, _BRANCHY) for n in ast.walk(node)),
+            "line":     begin,
+            "function": label,
+            "lines":    finish - begin,
+            "branches": branches,
             "reason":   reason,
         })
     return found
@@ -773,9 +815,33 @@ def _branchy_no_cover(path: Path) -> list[dict]:
     ]
 
 
+# Directories that are not this project's source. docs/coverage.md tells the
+# reader to run `python3 -m venv .venv` in the repo root, so following the
+# instructions in this repo put third-party code in the walk: the exemption
+# share became a number about site-packages. pyvenv.cfg catches venvs under any
+# name, which is the case a hardcoded list misses.
+_SKIP_DIRS = {".git", "__pycache__", "node_modules", "vendor", ".mypy_cache",
+              ".ruff_cache", ".tox", "site-packages"}
+
+
+def is_project_file(p: Path, root: Path) -> bool:
+    """Is this a file of the project rooted at `root`, not a dependency?"""
+    rel = p.relative_to(root) if p.is_relative_to(root) else p
+    for part in rel.parts[:-1]:
+        if part in _SKIP_DIRS:
+            return False
+    probe = p.parent
+    while probe != root and probe.parent != probe:
+        if (probe / "pyvenv.cfg").exists():
+            return False
+        probe = probe.parent
+    return not (root / "pyvenv.cfg").exists() if probe == root else True
+
+
 def run_no_cover(target: str) -> dict:
     p = Path(target)
-    files = sorted(p.rglob("*.py")) if p.is_dir() else [p]
+    files = ([f for f in sorted(p.rglob("*.py")) if is_project_file(f, p)]
+             if p.is_dir() else [p])
     issues: list[dict] = []
     for f in files:
         issues.extend(_branchy_no_cover(f))

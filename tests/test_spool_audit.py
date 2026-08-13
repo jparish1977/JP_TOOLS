@@ -60,6 +60,8 @@ import importlib.util
 import io
 import os
 import pathlib
+import signal
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -434,6 +436,46 @@ def test_runtime_names_are_only_honoured_inside_tempdir() -> None:
                and not is_harmless_temp(cache, in_tempdir=False))
 
 
+def test_a_cups_prefixed_name_does_not_excuse_readable_content() -> None:
+    """The ARTIFACT pattern used to carry `|^cups-dbus-`, which matched any
+    name with that prefix and dismissed it unread. tmp/cups-dbus-secret holding
+    a password printed "VERDICT: spool is clean" with exit 0, while identical
+    content named notes.txt exited 1. Dismissal on a name alone is the one
+    thing the docstring says this tool must never do.
+
+    The alternative was also unnecessary: the artifact actually measured on the
+    real machine is cups-dbus-notifier-lockfile, which matches on `lockfile`.
+    """
+    real = TempFile(name="cups-dbus-notifier-lockfile", size=0, head="")
+    check_true("the measured real artifact is still recognised",
+               is_harmless_temp(real, in_tempdir=True))
+    for name in ("cups-lpd-socket", "cups-something-notifier"):
+        check_true(f"and so is {name}",
+                   is_harmless_temp(TempFile(name=name, size=0, head=""), in_tempdir=True))
+
+    secret = TempFile(name="cups-dbus-secret", size=23, head="root password: hunter2")
+    check_true("but a cups-dbus- name holding readable content is NOT excused",
+               not is_harmless_temp(secret, in_tempdir=True))
+
+
+def test_the_listing_shows_the_files_purge_will_not_remove() -> None:
+    """The listing is capped at 20 and used to lead with ordinary job files, so
+    a spool of 25 documents plus one stray and one TempDir leak named NEITHER
+    of the last two anywhere: the only two files --purge would not clear were
+    the two the operator never saw. That is "not worse than ls" failing at
+    exactly the point it exists for."""
+    docs = tuple(f"d{i:05d}-001" for i in range(1, 26))
+    stray = TempFile(name="passwords.txt", size=7, head="secret")
+    leak = TempFile(name="leak.ps", size=5, head="%!PS")
+    audit = classify(Listing(Verdict.CLEAN, docs, (leak,), (), TEMP_SUBDIR, (stray,)))
+    text = "\n".join(render(audit, frozenset()))
+
+    check_true("the unidentified stray is named", "passwords.txt" in text)
+    check_true("the TempDir leak is named", "tmp/leak.ps" in text)
+    check_true("and the truncation says what was left out",
+               "all ordinary job files" in text)
+
+
 def test_report_reads_location_from_the_path() -> None:
     """Kind means EVIDENCE since the split; location comes from the path.
 
@@ -445,11 +487,22 @@ def test_report_reads_location_from_the_path() -> None:
     audit = classify(Listing(Verdict.CLEAN, (), (tmp_notes,), (), TEMP_SUBDIR, (top_copy,)))
     text = "\n".join(render(audit, frozenset()))
 
-    top_line = [ln for ln in text.splitlines() if "top-level files" in ln]
-    tmp_line = [ln for ln in text.splitlines() if "CUPS TempDir" in ln]
-    check_true("one of each", len(top_line) == 1 and len(tmp_line) == 1)
-    check_true("the top-level count is 1", "1 of these are top-level" in text)
-    check_true("the TempDir count is 1", "1 of these are in the CUPS TempDir" in text)
+    # The fixture is deliberately crossed: the file carrying print magic is at
+    # the TOP LEVEL, and the file in TempDir is the unidentifiable one. So a
+    # report that reads evidence off the location, or location off the Kind,
+    # gets both blocks wrong and cannot pass by accident.
+    identified = [ln for ln in text.splitlines() if "print-data signature" in ln]
+    unidentified = [ln for ln in text.splitlines() if "could not be identified" in ln]
+    check("one block for identified content", len(identified), 1)
+    check("one block for unidentified content", len(unidentified), 1)
+    check_true("the top-level .bak is stated as identified print data, not a maybe",
+               "1 of these carry a print-data signature" in text)
+    check_true("and is NOT placed in the TempDir it does not live in",
+               "of them are in the CUPS TempDir, mid-filter." not in text)
+    check_true("the tmp/ notes file is the unidentified one",
+               "1 of these could not be identified at all," in text)
+    check_true("and its location comes from the path",
+               "1 of them are in the CUPS TempDir." in text)
 
 
 def test_safe_name_defuses_terminal_escapes() -> None:
@@ -1343,6 +1396,51 @@ def test_write_atomic_preserves_mode_and_never_half_writes() -> None:
         check("the mode is preserved", oct(conf.stat().st_mode & 0o777), "0o640")
         check("no temp file is left behind",
               [p.name for p in root.iterdir() if p.name.startswith(".spool-audit-")], [])
+
+        # A non-regular target must be refused outright. os.replace happily
+        # unlinks a FIFO, a socket or a device node and leaves a regular file
+        # there: verified 2026-08-13, a FIFO became a 20-byte regular file.
+        # `--conf /dev/null` is the invocation this repo's own suites use
+        # everywhere, so `sudo spool-audit.py --fix --conf /dev/null` would
+        # have reported success while destroying the device node.
+        fifo = root / "afifo"
+        os.mkfifo(fifo)
+        try:
+            spool_audit._write_atomic(str(fifo), b"x\n")
+            check("a FIFO must be refused, not replaced", "no raise", "OSError")
+        except OSError:
+            pass
+        check_true("and it is still a FIFO", stat.S_ISFIFO(os.stat(fifo).st_mode))
+
+        # Reading one must not hang either. read_bytes() on a FIFO blocks
+        # forever waiting for a writer, and a hang in a security tool reads as
+        # "still checking" rather than as a failure.
+        # Under an alarm, because the failure mode here is a HANG, not a wrong
+        # answer. Without this, reintroducing the bug makes this suite block
+        # forever instead of failing -- verified by mutation, where it wedged
+        # the whole run. A test for "must not block" that can itself block is
+        # the same "a check that did not run reads as a pass" shape.
+        def _blocked(_sig: int, _frm: object) -> None:
+            raise TimeoutError("read blocked")
+
+        previous = signal.signal(signal.SIGALRM, _blocked)
+        signal.alarm(5)
+        try:
+            spool_audit._read_conf(str(fifo))
+            check("reading a FIFO must be refused, not blocked", "returned", "OSError")
+        except TimeoutError:
+            check("reading a FIFO must be refused, not blocked",
+                  "BLOCKED for 5s", "OSError")
+        except OSError:
+            pass
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous)
+        # A character device still reads as an empty config, deliberately:
+        # --conf /dev/null is used throughout this repo's suites and returns
+        # EOF at once. Reading one is a very different act from replacing one.
+        check("a character device still reads as empty",
+              spool_audit._read_conf("/dev/null"), b"")
 
         def bad_chown(_p: str, _u: int, _g: int) -> None:
             raise PermissionError(1, "Operation not permitted")

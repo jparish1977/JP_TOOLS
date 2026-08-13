@@ -73,6 +73,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import errno
 import os
 import re
 import shutil
@@ -98,7 +99,13 @@ CONTROL = re.compile(r"^c(\d+)$")
 # leaked content inflates every total, and deleting it removes a lock from
 # under a running cupsd. Named artifacts are reported separately and are never
 # purged.
-ARTIFACT = re.compile(r"^cups-.*(lockfile|notifier|socket)$|^cups-dbus-")
+# The `|^cups-dbus-` alternative used to be here and dismissed ANY name with
+# that prefix on the name alone: tmp/cups-dbus-secret holding a password
+# printed "VERDICT: spool is clean" with exit 0, while byte-identical content
+# named notes.txt exited 1. That is the one thing the docstring says this tool
+# must never do, and it was redundant: the measured real artifact,
+# cups-dbus-notifier-lockfile, already matches the lockfile alternative.
+ARTIFACT = re.compile(r"^cups-.*(lockfile|notifier|socket)$")
 
 
 
@@ -575,29 +582,57 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
     # a tmp/ file was described as top-level and a top-level copy as TempDir
     # scratch, sending the operator to the wrong directory.
     prefix = f"{TEMP_SUBDIR}/"
-    unattributed = [e for e in audit.others if e.kind in (Kind.TEMP, Kind.UNRECOGNISED)]
-    temp = [e for e in unattributed if e.name.startswith(prefix)]
-    unknown = [e for e in unattributed if not e.name.startswith(prefix)]
+    # Split by EVIDENCE, because that is what Kind means. Merging TEMP with
+    # UNRECOGNISED described a file whose first bytes say %!PS as "unrecognised,
+    # may be document content", which understates a CONFIRMED leak as a maybe,
+    # and undoes the split that was introduced to make Kind mean evidence.
+    identified = [e for e in audit.others if e.kind is Kind.TEMP]
+    unidentified = [e for e in audit.others if e.kind is Kind.UNRECOGNISED]
     rest = [e for e in audit.others if e.kind not in (Kind.TEMP, Kind.UNRECOGNISED)]
 
     lines.append(f"OTHER RETAINED FILES: {len(audit.others)}")
-    shown = (rest + unknown + temp)[:20]
-    lines += [f"  {safe_name(e.name)}" for e in shown]
-    if len(audit.others) > 20:
-        lines.append(f"  ... and {len(audit.others) - 20} more")
-    if unknown:
+    # Stubborn first. The listing is capped at 20 and used to lead with the
+    # ordinary job files, so a spool with 25 documents plus one stray named
+    # passwords.txt and one TempDir leak printed neither of the last two
+    # ANYWHERE: the only two files --purge would not remove were the two the
+    # operator never saw. That is the "not worse than ls" promise failing at
+    # precisely the point it exists for.
+    ordered = unidentified + identified + rest
+    lines += [f"  {safe_name(e.name)}" for e in ordered[:20]]
+    hidden = ordered[20:]
+    if hidden:
+        # Say what was hidden, not just how much. With the order above the
+        # remainder is normally all ordinary job files, but say so only when
+        # it is true.
+        stubborn = sum(1 for e in hidden
+                       if e.kind in (Kind.TEMP, Kind.UNRECOGNISED))
+        if stubborn:
+            lines.append(f"  ... and {len(hidden)} more, {stubborn} of which "
+                         "--purge will NOT clear on its own")
+        else:
+            lines.append(f"  ... and {len(hidden)} more, all ordinary job files "
+                         "that --purge clears")
+    if identified:
+        in_temp = sum(1 for e in identified if e.name.startswith(prefix))
         lines.append("")
         lines.append(
-            f"  {len(unknown)} of these are top-level files matching no known"
+            f"  {len(identified)} of these carry a print-data signature"
         )
-        lines.append("  spool pattern. Not identified as harmless, so not ruled out.")
-    if temp:
+        lines.append("  (PostScript, PDF or PJL), so they ARE document content by")
+        lines.append("  evidence, not a maybe. They carry no job id, so they cannot be")
+        lines.append("  targeted by number. Purge without job ids.")
+        if in_temp:
+            lines.append(f"  {in_temp} of them are in the CUPS TempDir, mid-filter.")
+    if unidentified:
+        in_temp = sum(1 for e in unidentified if e.name.startswith(prefix))
         lines.append("")
         lines.append(
-            f"  {len(temp)} of these are in the CUPS TempDir, unrecognised."
+            f"  {len(unidentified)} of these could not be identified at all,"
         )
-        lines.append("  They may be document content mid-filter. They carry no job id,")
-        lines.append("  so they cannot be targeted by number. Purge without job ids.")
+        lines.append("  so they are not ruled out. Deleting them needs")
+        lines.append("  --include-unrecognised, and only without job ids.")
+        if in_temp:
+            lines.append(f"  {in_temp} of them are in the CUPS TempDir.")
 
     if audit.artifacts:
         # Split by what they actually are. Filing a stray zero-length file
@@ -1154,7 +1189,13 @@ def delete(
             failed += 1
             continue
         if not is_inside(resolved, roots):
-            print(f"  REFUSED (outside the audited directory): {e.name} -> {resolved}")
+            # safe_name here too. Every other name in the report is escaped so a
+            # filename cannot forge a report line, and this one was not: a live
+            # spool races, so a listed file can become a symlink out of the
+            # spool between the listing and the unlink, and its name reaches
+            # this line verbatim on the purge path.
+            print(f"  REFUSED (outside the audited directory): "
+                  f"{safe_name(e.name)} -> {safe_name(str(resolved))}")
             failed += 1
             continue
         try:
@@ -1216,7 +1257,7 @@ def retention_state(conf: str) -> bool | None:
     that is wanted is a directive match.
     """
     try:
-        body = Path(conf).read_bytes()
+        body = _read_conf(conf)
     except OSError:
         return None
     return parse_retention(body)
@@ -1250,7 +1291,22 @@ def rewrite_conf(body: bytes) -> bytes:
     return b"\n".join(out) + b"\n"
 
 
-def _read_conf(path: str) -> bytes:  # pragma: no cover
+def _read_conf(path: str) -> bytes:
+    """Read a config file, refusing the types that would hang.
+
+    Path.read_bytes() on a FIFO BLOCKS FOREVER waiting for a writer, and a hang
+    in a security tool reads as "still checking" rather than as a failure.
+    --conf takes an arbitrary path, so the type is checked before opening.
+
+    Character devices are deliberately still allowed: `--conf /dev/null` is a
+    legitimate "empty config" used throughout this repo's own suites, and it
+    reads as EOF immediately. That is why this refuses less than _write_atomic
+    does, which requires a regular file because REPLACING /dev/null is a very
+    different act from reading it.
+    """
+    st = os.stat(path)
+    if stat.S_ISFIFO(st.st_mode) or stat.S_ISSOCK(st.st_mode):
+        raise OSError(errno.EINVAL, "would block on a fifo or socket", path)
     return Path(path).read_bytes()
 
 
@@ -1290,6 +1346,15 @@ def _write_atomic(
     the tolerant path is the only one they can reach for real.
     """
     src = stat_fn(path)
+    # Refuse anything that is not a regular file. os.replace happily unlinks a
+    # FIFO, a socket or a device node and puts a regular file there: verified
+    # 2026-08-13, a FIFO became a 20-byte regular file. `--conf /dev/null` is
+    # the invocation this branch's own suites use everywhere, so
+    # `sudo spool-audit.py --fix --conf /dev/null` would have reported success
+    # while destroying the device node. A tool whose purpose is not to damage
+    # what it touches does not get to replace things it was not pointed at.
+    if not stat.S_ISREG(src.st_mode):
+        raise OSError(errno.EINVAL, "not a regular file", path)
     fd, tmp_name = tempfile.mkstemp(
         dir=str(Path(path).parent), prefix=".spool-audit-", suffix=".tmp"
     )

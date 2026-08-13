@@ -100,6 +100,54 @@ def test_an_unexempt_function_is_never_flagged() -> None:
     ), [])
 
 
+def test_a_pragma_outside_a_function_is_still_seen() -> None:
+    """The first version walked FunctionDef only, so a pragma on a class, on a
+    bare statement, or at module level was invisible to the gate AND to the
+    inventory, which then printed "No coverage exemptions" as though it had
+    looked. A checker that silently cannot see a construct commits the failure
+    it was written to catch."""
+    check("a class", rules_for(
+        "class C:  # pragma: no cover\n    def m(self, p):\n"
+        "        if p:\n            return 1\n        return 2\n"
+    ), ["no-cover-branchy"])
+    check("a bare if inside a function", rules_for(
+        "def f(p):\n    if p:  # pragma: no cover\n        return 1\n    return 2\n"
+    ), ["no-cover-branchy"])
+    check("a module-level branch", rules_for(
+        "import sys\nif sys.platform == 'win32':  # pragma: no cover\n    X = 1\n"
+    ), ["no-cover-branchy"])
+
+
+def test_prose_about_a_pragma_is_not_a_pragma() -> None:
+    """This repo documents the marker in several files, including inside the
+    function that implements the check. A line scan flagged that function using
+    its own rule, which is a false positive that would train people to ignore
+    it."""
+    check("a standalone comment line is documentation, not a directive", rules_for(
+        "# Explaining the rule:\n"
+        "#     def f(): ...  # pragma: no cover\n"
+        "def f(p):\n    if p:\n        return 1\n    return 2\n"
+    ), [])
+    # INSIDE a branchy function, which is where check.py's own explanatory
+    # comment sits. The first version of this test put the prose at module
+    # level, where it belongs to no branchy owner, so removing the
+    # comment-versus-code guard changed nothing and the mutation survived.
+    check("prose inside a branchy function is still not a directive", rules_for(
+        "def f(p):\n"
+        "    # The rule: a wrapper may carry # pragma: no cover\n"
+        "    if p:\n        return 1\n    return 2\n"
+    ), [])
+    check("and neither is a docstring mentioning it", rules_for(
+        'def f(p):\n    """Uses # pragma: no cover on IO leaves."""\n'
+        "    if p:\n        return 1\n    return 2\n"
+    ), [])
+    check("but a real trailing pragma on the same code is still caught", rules_for(
+        "# Explaining the rule:\n"
+        "#     def f(): ...  # pragma: no cover\n"
+        "def f(p):  # pragma: no cover\n    if p:\n        return 1\n    return 2\n"
+    ), ["no-cover-branchy"])
+
+
 def test_unparseable_source_is_left_to_ruff() -> None:
     """Reporting a syntax error here too would make one problem look like two,
     and ruff already reports it with a better message."""
