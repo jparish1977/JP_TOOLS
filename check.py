@@ -681,7 +681,7 @@ def run_cppcheck(target: str) -> dict:
 #
 # Worse, nothing in this repo measures coverage at all, so these pragmas never
 # suppressed a measurement. They only ever told a reader not to look. See
-# docs/coverage-not-wired.md.
+# docs/coverage.md.
 #
 # The rule is not "no exemptions". It is that an exemption must SAY WHY, so the
 # claim is visible and can be disagreed with:
