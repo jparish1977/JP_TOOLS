@@ -77,6 +77,8 @@ render = spool_audit.render
 victims_for = spool_audit.victims_for
 Audit = spool_audit.Audit
 Listing = spool_audit.Listing
+TempFile = spool_audit.TempFile
+is_harmless_temp = spool_audit.is_harmless_temp
 Verdict = spool_audit.Verdict
 Kind = spool_audit.Kind
 
@@ -94,8 +96,12 @@ def check_true(label: str, value: bool) -> None:
 
 
 def spool(top: list[str], temp: list[str] | None = None) -> Any:
-    """Build a readable Listing fixture."""
-    return Listing(Verdict.CLEAN, tuple(top), tuple(temp or []))
+    """Build a readable Listing fixture. Temp files default to unrecognised."""
+    return Listing(
+        Verdict.CLEAN,
+        tuple(top),
+        tuple(TempFile(name=n, size=100, head="%!PS") for n in (temp or [])),
+    )
 
 
 # --- filename classification ----------------------------------------------
@@ -263,9 +269,38 @@ def test_long_listing_is_truncated_but_says_so() -> None:
     check_true("admits truncation", "and 10 more" in text)
 
 
+def test_ppd_files_are_not_leaks() -> None:
+    """Measured on joe-Inspiron-17-7778: a CUPS restart with NOTHING printed
+    left two 10KB files in tmp/ that `file` identified as PPDs. They are the
+    driver cache cupsd regenerates, not printed documents, and reporting them
+    as leaked content told Joe his own driver cache was a secret."""
+    ppd = TempFile(name="0777f6a7dc4fa", size=10917, head="*PPD-Adobe: \"4.3\"")
+    doc = TempFile(name="006816a8026a5", size=4096, head="%!PS-Adobe-3.0")
+    audit = classify(Listing(Verdict.CLEAN, (), (ppd, doc)))
+
+    check("only the document counts", audit.total, 1)
+    check("the document is the one kept", audit.others[0].name, "tmp/006816a8026a5")
+    check("ppd is an artifact", len(audit.artifacts), 1)
+    check_true("ppd not a purge victim", "tmp/0777f6a7dc4fa" not in [e.name for e in victims_for(audit)])
+
+
+def test_unknown_header_is_treated_as_content() -> None:
+    """Over-report, never dismiss. The sudo listing path cannot read headers,
+    so it yields size -1 and an empty head; that must NOT read as harmless."""
+    unknown = TempFile(name="0777f6a7dc4fa", size=-1, head="")
+    audit = classify(Listing(Verdict.CLEAN, (), (unknown,)))
+
+    check_true("not harmless", not is_harmless_temp(unknown))
+    check("counted as possible content", audit.total, 1)
+    check("no artifacts", len(audit.artifacts), 0)
+
+
 def test_cups_runtime_files_are_not_leaks() -> None:
     """Found on joe-Inspiron-17-7778, not in any fixture I invented."""
-    audit = classify(spool(top=[], temp=["cups-dbus-notifier-lockfile", "006816a8026a5"]))
+    audit = classify(Listing(Verdict.CLEAN, (), (
+        TempFile(name="cups-dbus-notifier-lockfile", size=0, head=""),
+        TempFile(name="006816a8026a5", size=4096, head="%!PS-Adobe-3.0"),
+    )))
 
     check("only the real temp file counts", audit.total, 1)
     check("one artifact", len(audit.artifacts), 1)
@@ -293,12 +328,11 @@ def test_retention_is_read_not_inferred() -> None:
 
     off = "\n".join(render(audit, frozenset(), retention=False))
     check_true("says retention off", "RETENTION: OFF" in off)
-    check_true("points the right way", "listed above" in off)
 
-    # With nothing retained there is no "above" to point at, and saying so
-    # anyway is the kind of noise that makes a report read as boilerplate.
-    empty_off = "\n".join(render(classify(spool([])), frozenset(), retention=False))
-    check_true("no dangling reference when clean", "listed above" not in empty_off)
+    # No timing claim. --fix restarts CUPS, and the restart itself regenerates
+    # driver caches, so files present afterwards may POSTdate the fix. Measured
+    # on the Inspiron: 0 files before --fix, 2 PPDs after, nothing printed.
+    check_true("makes no claim about when files appeared", "predate" not in off)
     check_true("does not claim host retains", "CUPS is keeping documents" not in off)
     check_true("still reports the leftovers", "retained file(s) still on disk" in off)
 

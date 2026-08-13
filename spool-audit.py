@@ -28,9 +28,12 @@ WHY THIS EXISTS AS A TOOL
 
 WHAT COUNTS AS A LEAK
     d<job>-<n>   top-level document files, the printed content
-    tmp/*        CUPS TempDir, default /var/spool/cups/tmp, holds document
-                 content during filtering. Auditing only the top level reports
-                 CLEAN while readable document data sits one directory down.
+    tmp/*        CUPS TempDir, default /var/spool/cups/tmp. MAY hold document
+                 content during filtering, but also holds PPD driver caches and
+                 lockfiles that are not content at all. Recognised-harmless
+                 files are reported separately; anything unrecognised is
+                 treated as possible content, because over-reporting is the
+                 safe direction here.
     c<job>       control files. Not document content, but they carry the job
                  title and submitting user, so a job named
                  "gpg-private-key.txt" is disclosure by itself. Counted only
@@ -94,12 +97,26 @@ class Entry:
 
 
 @dataclass(frozen=True)
+class TempFile:
+    """A file in CUPS TempDir, with just enough to classify it.
+
+    `head` is the first few bytes, decoded lossily, used only to recognise
+    known-harmless formats. It is never printed. Empty string means the header
+    could not be read, which is treated as "unknown", not as "harmless".
+    """
+
+    name: str
+    size: int
+    head: str = ""
+
+
+@dataclass(frozen=True)
 class Listing:
     """Raw spool contents, or why they could not be read."""
 
     verdict: Verdict
     top: tuple[str, ...] = ()
-    temp: tuple[str, ...] = ()
+    temp: tuple[TempFile, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -145,6 +162,31 @@ class Audit:
         return 0 if self.verdict is Verdict.CLEAN else 1
 
 
+def is_harmless_temp(f: TempFile) -> bool:
+    """Is this TempDir file known NOT to be document content?
+
+    TempDir is not one kind of thing. Measured on joe-Inspiron-17-7778,
+    2026-08-12, after a plain CUPS restart with nothing printed:
+
+        0777f6a7dc4fa  10917 bytes  PPD file, version "4.3"
+        0777f6a8bdd78  10068 bytes  PPD file, version "4.3"
+        cups-dbus-notifier-lockfile  0 bytes  empty
+
+    Those are the driver cache cupsd regenerates on startup, not printed
+    documents. Treating everything here as leaked content reported a user's own
+    driver cache back to them as a secret, and --purge would have deleted it.
+
+    Only recognised-harmless things return True. An unreadable header is
+    "unknown", which stays classified as possible document content: the safe
+    direction is to over-report, not to dismiss.
+    """
+    if ARTIFACT.match(f.name):
+        return True
+    if f.size == 0:
+        return True
+    return f.head.startswith("*PPD-Adobe")
+
+
 def parse_entry(name: str, include_control: bool) -> Entry | None:
     """Classify a top-level spool filename."""
     m = DOCUMENT.match(name)
@@ -168,15 +210,16 @@ def classify(
     entries = [e for e in (parse_entry(n, include_control) for n in listing.top) if e is not None]
     # Temp files carry document content but no recoverable job id, so they can
     # never be "targeted" by job number. They still count as retained data.
+    temps = sorted(listing.temp, key=lambda f: f.name)
     entries += [
-        Entry(name=f"{TEMP_SUBDIR}/{n}", kind=Kind.TEMP, job=None)
-        for n in listing.temp
-        if not ARTIFACT.match(n)
+        Entry(name=f"{TEMP_SUBDIR}/{f.name}", kind=Kind.TEMP, job=None)
+        for f in temps
+        if not is_harmless_temp(f)
     ]
     artifacts = tuple(
-        Entry(name=f"{TEMP_SUBDIR}/{n}", kind=Kind.ARTIFACT, job=None)
-        for n in sorted(listing.temp)
-        if ARTIFACT.match(n)
+        Entry(name=f"{TEMP_SUBDIR}/{f.name}", kind=Kind.ARTIFACT, job=None)
+        for f in temps
+        if is_harmless_temp(f)
     )
 
     targeted = tuple(sorted((e for e in entries if e.job in jobs), key=lambda e: e.name))
@@ -240,10 +283,10 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
     if temp:
         lines.append("")
         lines.append(
-            f"  {len(temp)} of these are in {TEMP_SUBDIR}/ (CUPS TempDir). They hold"
+            f"  {len(temp)} of these are in {TEMP_SUBDIR}/ (CUPS TempDir), unrecognised."
         )
-        lines.append("  document content but carry no job id, so they cannot be")
-        lines.append("  targeted by job number. Purge without job ids to remove them.")
+        lines.append("  They may be document content mid-filter. They carry no job id,")
+        lines.append("  so they cannot be targeted by number. Purge without job ids.")
 
     if audit.artifacts:
         lines.append("")
@@ -254,8 +297,7 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
     if retention is True:
         lines.append("RETENTION: ON. CUPS is keeping documents. --fix stops that.")
     elif retention is False:
-        note = " Files listed above predate the fix." if audit.total else ""
-        lines.append(f"RETENTION: OFF (PreserveJobFiles No).{note}")
+        lines.append("RETENTION: OFF (PreserveJobFiles No).")
     else:
         lines.append("RETENTION: unknown (could not read cupsd.conf).")
 
@@ -283,6 +325,16 @@ def _priv(argv: list[str]) -> list[str]:  # pragma: no cover
     if os.geteuid() != 0 and shutil.which("sudo"):
         return ["sudo", "-n", *argv]
     return argv
+
+
+def _head(path: Path, n: int = 32) -> str:  # pragma: no cover
+    """First bytes of a file, decoded lossily. Used only to recognise known
+    harmless formats such as PPDs. Never printed, never logged."""
+    try:
+        with path.open("rb") as fh:
+            return fh.read(n).decode("utf-8", "replace")
+    except OSError:
+        return ""
 
 
 def _sudo_ls(path: str, files_only: bool = False) -> tuple[Verdict, tuple[str, ...]]:  # pragma: no cover
@@ -324,15 +376,23 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
     except OSError:
         return Listing(Verdict.DENIED)
 
-    temp: tuple[str, ...] = ()
+    temp: tuple[TempFile, ...] = ()
     if TEMP_SUBDIR in top:
         tdir = root / TEMP_SUBDIR
         try:
-            temp = tuple(sorted(p.name for p in tdir.iterdir() if p.is_file()))
+            temp = tuple(
+                TempFile(name=f.name, size=f.stat().st_size, head=_head(f))
+                for f in sorted(tdir.iterdir())
+                if f.is_file()
+            )
         except PermissionError:
-            tverdict, temp = _sudo_ls(str(tdir), files_only=True)
-            if tverdict is not Verdict.CLEAN:
-                temp = ()
+            # Names only through this path. Size and header are unknown, which
+            # is_harmless_temp() treats as "possibly document content" rather
+            # than assuming the safe answer.
+            tverdict, names = _sudo_ls(str(tdir), files_only=True)
+            temp = () if tverdict is not Verdict.CLEAN else tuple(
+                TempFile(name=n, size=-1, head="") for n in names
+            )
         except OSError:
             temp = ()
 
