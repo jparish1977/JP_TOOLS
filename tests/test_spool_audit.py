@@ -94,6 +94,8 @@ classify = spool_audit.classify
 parse_entry = spool_audit.parse_entry
 render = spool_audit.render
 victims_for = spool_audit.victims_for
+should_restart_cups = spool_audit.should_restart_cups
+_safe_resolve = spool_audit._safe_resolve
 Outcome = spool_audit.Outcome
 leftover_caveats = spool_audit.leftover_caveats
 fix_outcome = spool_audit.fix_outcome
@@ -217,9 +219,22 @@ def test_targeted_still_present() -> None:
 # --- bug 6: exit codes -----------------------------------------------------
 
 def test_exit_codes() -> None:
-    """`spool-audit.py 85 && echo SAFE` must fire when 85 is gone."""
-    gone = classify(spool(["d00077-001"]), frozenset({85}))
-    check("asked about 85, it is gone -> 0", gone.exit_code, 0)
+    """0 means NOTHING is left, not "the jobs you named are gone".
+
+    The scoped meaning was the bug. Job identity is not content identity: a
+    copy of job 85's document named d00085-001.bak carries no job id, so a
+    scoped run said "those documents are GONE" and exited 0 over a readable
+    copy. `85 --purge && echo SAFE` fired in four separate review rounds, in a
+    different branch each time, because the scoped code kept being re-derived.
+    The scoped answer still appears in the report text.
+    """
+    others_remain = classify(spool(["d00077-001"]), frozenset({85}))
+    check("85 gone but the spool is not empty -> 1", others_remain.exit_code, 1)
+    check_true("and the report still answers the question",
+               "GONE" in "\n".join(render(others_remain, frozenset({85}))))
+
+    truly_clean = classify(spool([]), frozenset({85}))
+    check("nothing anywhere -> 0", truly_clean.exit_code, 0)
 
     present = classify(spool(["d00085-001"]), frozenset({85}))
     check("asked about 85, still there -> 1", present.exit_code, 1)
@@ -346,6 +361,29 @@ def test_scoped_purge_admits_what_it_cannot_touch() -> None:
     leftovers = [e for e in after.others if e.job is None]
     check_true("the leftover is unattributable", len(leftovers) == 1)
     check_true("and it is counted as content", after.total == 1)
+
+
+def test_fix_only_restarts_the_daemon_it_configured() -> None:
+    """`--fix --conf /tmp/x` restarted the machine's real cups.service and
+    reported success while /etc/cups/cupsd.conf was untouched."""
+    check_true("the system config restarts cups",
+               should_restart_cups(spool_audit.DEFAULT_CONF))
+    check_true("any other path does not", not should_restart_cups("/tmp/cupsd.conf"))
+    check_true("nor a relative one", not should_restart_cups("./fake.conf"))
+
+
+def test_safe_resolve_survives_a_symlink_loop() -> None:
+    """Path.resolve() raises RuntimeError, not OSError, on ELOOP in CPython
+    <= 3.12 -- which CI pins. Catching only OSError let it escape as a
+    traceback with exit 1, the code reserved for "content is still there"."""
+    with tempfile.TemporaryDirectory() as tmp:
+        loop = pathlib.Path(tmp) / "loop"
+        os.symlink(loop, loop)
+        check("a loop resolves to None, it does not raise", _safe_resolve(loop), None)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        real = pathlib.Path(tmp)
+        check_true("a real path still resolves", _safe_resolve(real) is not None)
 
 
 def test_containment_invariant() -> None:
