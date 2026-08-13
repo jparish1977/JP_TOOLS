@@ -651,14 +651,17 @@ def read_spool(spool: str) -> Listing:  # pragma: no cover
 
     temp: tuple[TempFile, ...] = ()
     unexamined: list[str] = []
-    tdir: Path | None = root / TEMP_SUBDIR
+    default_tmp = root / TEMP_SUBDIR
+    tdir: Path | None = default_tmp
     # A TempDir that is ITSELF a symlink is never followed: `<spool>/tmp ->
     # /anywhere` made --purge delete outside the audited spool and print
-    # SCOPE CLEAN.
+    # SCOPE CLEAN. Read through `default_tmp`, which is never None, so the
+    # optional-ness of `tdir` cannot leak into os.readlink.
     try:
-        if tdir.is_symlink():
+        if default_tmp.is_symlink():
             unexamined.append(
-                f"{TEMP_SUBDIR} -> {os.readlink(tdir)} (TempDir is a symlink, NOT followed)"
+                f"{TEMP_SUBDIR} -> {os.readlink(default_tmp)} "
+                "(TempDir is a symlink, NOT followed)"
             )
             tdir = None
     except OSError:

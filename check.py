@@ -87,6 +87,31 @@ def run_ruff(target: str) -> dict:
     return {"tool": "ruff", "status": _status(issues), "issues": issues}
 
 
+# Tools honour FORCE_COLOR/CLICOLOR_FORCE even when their output is captured,
+# and ANSI escapes then break every line-oriented parser here. Measured
+# 2026-08-12: with FORCE_COLOR=3 in the environment, mypy emitted
+# "\x1b[1m\x1b[31merror:" and check.py reported 0 issues on a file mypy was
+# failing with 2 -- the same "reported a pass on a failing file" bug this
+# module's mypy parser comment already documents, arriving by a different
+# route. CI has no FORCE_COLOR, so the build went red while the local gate
+# stayed green.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\([A-Z]")
+
+
+def _plain_env() -> dict:
+    """Environment with colour forcing removed."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("FORCE_COLOR", "CLICOLOR_FORCE", "MYPY_FORCE_COLOR")}
+    env["NO_COLOR"] = "1"
+    env["TERM"] = "dumb"
+    return env
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escapes. Belt and braces alongside _plain_env()."""
+    return _ANSI.sub("", text)
+
+
 # mypy prints "file:line: severity: message [code]", optionally with a column,
 # and on Windows the path carries a drive letter. The previous parser split on
 # ":" with maxsplit=3, which put the severity in one field and then searched a
@@ -105,10 +130,10 @@ def run_mypy(target: str) -> dict:
     result = subprocess.run(
         ["mypy", "--show-error-codes", "--no-error-summary",
          "--ignore-missing-imports", target],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, env=_plain_env(),
     )
     issues = []
-    for line in result.stdout.splitlines():
+    for line in strip_ansi(result.stdout).splitlines():
         m = _MYPY_LINE.match(line)
         if not m:
             continue
