@@ -229,6 +229,33 @@ class Audit:
         return 0 if self.verdict is Verdict.CLEAN else 1
 
 
+def is_inside(candidate: Path, roots: tuple[Path, ...]) -> bool:
+    """Is `candidate` at or below one of `roots`? Pure path arithmetic.
+
+    THE invariant this tool was missing. Five findings across three review
+    rounds were all one absent containment rule, re-decided ad hoc at each
+    site and therefore right at some and wrong at others:
+
+      - an absolute --temp replaced the spool in a pathlib join, so --purge
+        deleted from the live spool when told to audit a backup copy
+      - a relative --temp built a path that did not exist, and the resulting
+        FileNotFoundError counted as a successful delete
+      - `--spool /var/spool/cups/` with a trailing slash compared unequal and
+        skipped the configured TempDir
+      - symlinks among TempDir's children were followed and reported destroyed
+        while their targets survived
+      - TempDir ITSELF being a symlink was never checked, so --purge deleted a
+        file outside the named spool and printed SCOPE CLEAN
+
+    Each fix taught one site the rule and left its twins wrong. Deciding it
+    once, here, is what makes the class unable to recur.
+
+    Both arguments must already be resolved: resolution touches the filesystem,
+    this does not.
+    """
+    return any(candidate == r or candidate.is_relative_to(r) for r in roots)
+
+
 def parse_find_rows(output: str) -> list[tuple[str, str, str]]:
     """Parse NUL-separated `find -printf "%y\t%l\t%P\0"` output.
 
@@ -657,18 +684,46 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
     # absolute-operand rule.
     default_tmp = root / TEMP_SUBDIR
     tdir = Path(temp_dir).resolve() if temp_dir else default_tmp
+    # A TempDir that is ITSELF a symlink was never checked -- only its children
+    # were -- so `<spool>/tmp -> /anywhere` made --purge delete outside the
+    # named spool and print SCOPE CLEAN. If the user named it with --temp they
+    # chose it; the implicit default must not silently leave the spool.
+    if temp_dir is None:
+        try:
+            if default_tmp.is_symlink():
+                unexamined.append(
+                    f"{TEMP_SUBDIR} -> {os.readlink(default_tmp)} "
+                    "(TempDir is a symlink, NOT followed; pass --temp to audit it)"
+                )
+                tdir = None  # type: ignore[assignment]
+        except OSError:
+            pass
     # Compare against BOTH forms. Comparing a resolved --temp against an
     # unresolved default never matched, so the ordinary case started labelling
     # entries with the whole spool path instead of "tmp".
-    label = TEMP_SUBDIR if tdir in (default_tmp, default_tmp.resolve()) else str(tdir)
+    label = (
+        TEMP_SUBDIR
+        if tdir is not None and tdir in (default_tmp, default_tmp.resolve())
+        else str(tdir)
+    )
     # If TempDir is elsewhere, <spool>/tmp is stripped from the top-level
     # listing but never walked, so documents left there vanished from the audit
     # entirely and the tool reported clean. Record it rather than drop it.
-    if tdir != root / TEMP_SUBDIR and TEMP_SUBDIR in top:
+    # Same two-form comparison as the label above. Comparing only the
+    # unresolved form meant a TempDir that IS <spool>/tmp was walked AND
+    # reported unexamined at the same time, so a relative --spool could never
+    # exit 0.
+    if (
+        tdir is not None
+        and tdir not in (default_tmp, default_tmp.resolve())
+        and TEMP_SUBDIR in top
+    ):
         unexamined.append(
             f"{TEMP_SUBDIR}/ (present but TempDir points at {tdir}; not examined)"
         )
     try:
+        if tdir is None:
+            raise FileNotFoundError  # symlinked TempDir, already recorded above
         # Path.exists() does NOT swallow EACCES, so probing it outside this try
         # crashed the tool with a traceback on a real 0710 spool and made the
         # sudo escalation below unreachable dead code.
@@ -733,8 +788,10 @@ def read_spool(spool: str, temp_dir: str | None = None) -> Listing:  # pragma: n
     )
 
 
-def delete(spool: str, entries: tuple[Entry, ...]) -> tuple[int, int]:  # pragma: no cover
-    """Remove files. Returns (deleted, failed).
+def delete(  # pragma: no cover
+    spool: str, entries: tuple[Entry, ...], roots: tuple[Path, ...]
+) -> tuple[int, int]:
+    """Remove files, refusing anything outside `roots`. Returns (deleted, failed).
 
     A failed delete must be reported as a failed delete. Reporting it as
     "the files are still there" sends the user hunting a process that is
@@ -743,6 +800,19 @@ def delete(spool: str, entries: tuple[Entry, ...]) -> tuple[int, int]:  # pragma
     deleted = failed = 0
     for e in entries:
         target = Path(spool) / e.name
+        # Resolve before checking: a symlinked TempDir, or an absolute name
+        # replacing the join, both land outside the roots only after
+        # resolution. Refusing here is the last line of defence -- the walk
+        # should not have offered such a path in the first place.
+        try:
+            resolved = target.resolve()
+        except OSError:
+            failed += 1
+            continue
+        if not is_inside(resolved, roots):
+            print(f"  REFUSED (outside the audited directory): {e.name} -> {resolved}")
+            failed += 1
+            continue
         try:
             target.unlink()
             deleted += 1
@@ -895,6 +965,14 @@ def main(argv: list[str] | None = None) -> int:
         temp_dir = None
     audit = classify(read_spool(args.spool, temp_dir), jobs, args.include_control)
 
+    # The audited region: the spool, plus an explicitly named --temp. Anything
+    # resolving outside these is refused by delete(). A TempDir reached only
+    # through a symlink is deliberately NOT a root.
+    roots = [Path(args.spool).resolve()]
+    if temp_dir:
+        roots.append(Path(temp_dir).resolve())
+    allowed = tuple(roots)
+
     if not audit.readable:
         for line in render(audit, jobs):
             print(line)
@@ -913,7 +991,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         scope = f"job(s) {', '.join(str(j) for j in sorted(jobs))}" if jobs else "all retained files"
         print(f"Deleting {len(victims)} file(s) [{scope}]...")
-        deleted, failed = delete(args.spool, victims)
+        deleted, failed = delete(args.spool, victims, allowed)
         if failed:
             print(f"DELETE FAILED for {failed} file(s); {deleted} removed.")
             # Do not name a cause. Permissions is the common one, but a

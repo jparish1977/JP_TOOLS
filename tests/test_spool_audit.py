@@ -100,6 +100,7 @@ TempFile = spool_audit.TempFile
 is_harmless_temp = spool_audit.is_harmless_temp
 temp_child_note = spool_audit.temp_child_note
 parse_find_rows = spool_audit.parse_find_rows
+is_inside = spool_audit.is_inside
 FIND_FORMAT = spool_audit.FIND_FORMAT
 Verdict = spool_audit.Verdict
 Kind = spool_audit.Kind
@@ -348,6 +349,37 @@ def test_find_output_survives_hostile_filenames() -> None:
     check("name preserved", name, "sneaky")
 
     check("empty output is no rows", parse_find_rows(""), [])
+
+
+def test_containment_invariant() -> None:
+    """The rule that collapses five findings from three review rounds.
+
+    Nothing decided, in one place, whether a path was inside the directory
+    being audited. It was re-decided ad hoc at each site and was therefore
+    right at some and wrong at others: an absolute --temp escaped a pathlib
+    join and --purge deleted from the live spool; a relative --temp built a
+    path that did not exist and its FileNotFoundError counted as a delete; a
+    trailing slash skipped the configured TempDir; a symlinked TempDir let
+    --purge delete a file outside the named spool and print SCOPE CLEAN.
+    """
+    spool = pathlib.Path("/var/spool/cups")
+    roots = (spool,)
+
+    check_true("a file in the spool", is_inside(spool / "d00085-001", roots))
+    check_true("nested under it", is_inside(spool / "tmp" / ".cache" / "x", roots))
+    check_true("the root itself", is_inside(spool, roots))
+
+    check_true("a sibling is out", not is_inside(pathlib.Path("/var/spool/cupsX/f"), roots))
+    check_true("the parent is out", not is_inside(pathlib.Path("/var/spool"), roots))
+    check_true("elsewhere is out", not is_inside(pathlib.Path("/etc/passwd"), roots))
+    check_true("a prefix match is not containment",
+               not is_inside(pathlib.Path("/var/spool/cups-backup/f"), roots))
+
+    # An explicitly named --temp is a second root; a TempDir reached only
+    # through a symlink deliberately is not.
+    two = (spool, pathlib.Path("/var/tmp/cups"))
+    check_true("named temp is allowed", is_inside(pathlib.Path("/var/tmp/cups/f"), two))
+    check_true("still nothing else", not is_inside(pathlib.Path("/var/tmp/other/f"), two))
 
 
 def test_symlinks_are_never_followed() -> None:
