@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tokenize
 from pathlib import Path
+from typing import Any
 
 # Inject known tool locations that may not be on PATH yet (e.g. before reboot)
 _EXTRA_PATHS = [
@@ -56,7 +57,7 @@ def _ruff_config_args(target: str) -> list[str]:
     return ["--config", str(shared)] if shared.exists() else []
 
 
-def run_ruff(target: str) -> dict:
+def run_ruff(target: str) -> dict[str, Any]:
     if not shutil.which("ruff"):
         return _tool_missing("ruff")
     result = subprocess.run(
@@ -127,12 +128,27 @@ _MYPY_LINE = re.compile(
 )
 
 
-def run_mypy(target: str) -> dict:
+def _mypy_config_args(target: str) -> list[str]:
+    """Point mypy at the JP_TOOLS defaults, unless the project has its own.
+
+    Nothing passed this before, so configs/mypy.ini was dead file and the gate
+    ran on mypy's defaults while README described the file and METHODOLOGY
+    described something stricter than either. Project-local config wins, same
+    precedence as _ruff_config_args.
+    """
+    if _find_project_config(target, ["mypy.ini", ".mypy.ini", "setup.cfg",
+                                     "pyproject.toml"]):
+        return []
+    shared = Path(__file__).parent / "configs" / "mypy.ini"
+    return ["--config-file", str(shared)] if shared.exists() else []
+
+
+def run_mypy(target: str) -> dict[str, Any]:
     if not shutil.which("mypy"):
         return _tool_missing("mypy")
     result = subprocess.run(
         ["mypy", "--show-error-codes", "--no-error-summary",
-         "--ignore-missing-imports", target],
+         "--ignore-missing-imports", *_mypy_config_args(target), target],
         capture_output=True, text=True, check=False, env=_plain_env(),
     )
     issues = []
@@ -162,7 +178,7 @@ def run_mypy(target: str) -> dict:
     return {"tool": "mypy", "status": _status(issues, result.returncode), "issues": issues}
 
 
-def _count_eslint_suppressions(target: str) -> list[dict]:
+def _count_eslint_suppressions(target: str) -> list[dict[str, Any]]:
     """Scan source files for eslint-disable comments — these are acknowledged but not invisible."""
     import re
     suppressions = []
@@ -197,7 +213,7 @@ def _count_eslint_suppressions(target: str) -> list[dict]:
     return suppressions
 
 
-def run_eslint(target: str) -> dict:
+def run_eslint(target: str) -> dict[str, Any]:
     tools_dir = Path(__file__).parent
     runner    = tools_dir / "jp_eslint.mjs"
     node      = shutil.which("node") or shutil.which("node.exe")
@@ -230,7 +246,7 @@ def run_eslint(target: str) -> dict:
     return {"tool": "eslint", "status": _status(issues), "issues": issues}
 
 
-def run_stylelint(target: str) -> dict:
+def run_stylelint(target: str) -> dict[str, Any]:
     tools_dir = Path(__file__).parent
     runner    = tools_dir / "jp_stylelint.mjs"
     node      = shutil.which("node") or shutil.which("node.exe")
@@ -286,7 +302,7 @@ def _find_project_config(target: str, filenames: list[str]) -> Path | None:
     return None
 
 
-def run_phpstan(target: str) -> dict:
+def run_phpstan(target: str) -> dict[str, Any]:
     php  = _php_cmd()
     bin_ = _php_bin("phpstan")
     if not php:
@@ -303,10 +319,14 @@ def run_phpstan(target: str) -> dict:
     issues = []
     try:
         data = json.loads(result.stdout)
-        for fe in data.get("files", {}).values():
+        # .items(), not .values(): phpstan keys this dict BY FILENAME and its
+        # message objects carry no "file" field, so iterating values discarded
+        # the only copy of the path and every finding fell back to `target`.
+        # A whole run then reported "<repo dir>:214" and named nothing.
+        for path, fe in data.get("files", {}).items():
             for msg in fe.get("messages", []):
                 issues.append({
-                    "file":     msg.get("file", target),
+                    "file":     msg.get("file", path),
                     "line":     msg.get("line", 0),
                     "col":      0,
                     "severity": "error",
@@ -321,7 +341,7 @@ def run_phpstan(target: str) -> dict:
     return {"tool": "phpstan", "status": _status(issues), "issues": issues}
 
 
-def run_phpcs(target: str) -> dict:
+def run_phpcs(target: str) -> dict[str, Any]:
     php  = _php_cmd()
     bin_ = _php_bin("phpcs")
     if not php:
@@ -356,7 +376,7 @@ def run_phpcs(target: str) -> dict:
     return {"tool": "phpcs", "status": _status(issues), "issues": issues}
 
 
-def run_rector(target: str) -> dict:
+def run_rector(target: str) -> dict[str, Any]:
     """Rector in dry-run mode — reports what would change without writing."""
     php  = _php_cmd()
     bin_ = _php_bin("rector")
@@ -392,7 +412,7 @@ def run_rector(target: str) -> dict:
     return {"tool": "rector", "status": _status(issues), "issues": issues}
 
 
-def run_prettier(target: str) -> dict:
+def run_prettier(target: str) -> dict[str, Any]:
     cmd = shutil.which("prettier") or shutil.which("prettier.cmd")
     if not cmd:
         return _tool_missing("prettier")
@@ -416,7 +436,7 @@ def run_prettier(target: str) -> dict:
 
 # ── security audit runners ────────────────────────────────────────────────────
 
-def run_pip_audit(target: str) -> dict:
+def run_pip_audit(target: str) -> dict[str, Any]:
     cmd = shutil.which("pip-audit") or shutil.which("pip-audit.exe")
     if not cmd:
         return _tool_missing("pip-audit (pip install pip-audit)")
@@ -454,7 +474,7 @@ def run_pip_audit(target: str) -> dict:
     return {"tool": "pip-audit", "status": _status(issues), "issues": issues}
 
 
-def run_npm_audit(target: str) -> dict:
+def run_npm_audit(target: str) -> dict[str, Any]:
     cmd = shutil.which("npm") or shutil.which("npm.cmd")
     if not cmd:
         return _tool_missing("npm")
@@ -484,7 +504,7 @@ def run_npm_audit(target: str) -> dict:
     return {"tool": "npm-audit", "status": _status(issues), "issues": issues}
 
 
-def run_composer_audit(target: str) -> dict:
+def run_composer_audit(target: str) -> dict[str, Any]:
     php = _php_cmd()
     composer = shutil.which("composer") or shutil.which("composer.bat")
     if not php and not composer:
@@ -528,13 +548,13 @@ def run_composer_audit(target: str) -> dict:
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _status(issues: list, returncode: int | None = None) -> str:
+def _status(issues: list[dict[str, Any]], returncode: int | None = None) -> str:
     if returncode is not None and returncode not in (0, 1):
         return "error"
     return "fail" if issues else "pass"
 
 
-def _tool_missing(name: str) -> dict:
+def _tool_missing(name: str) -> dict[str, Any]:
     return {
         "tool":   name,
         "status": "unavailable",
@@ -623,7 +643,7 @@ _CPPCHECK_SUPPRESS = [
 ]
 
 
-def run_cppcheck(target: str) -> dict:
+def run_cppcheck(target: str) -> dict[str, Any]:
     """Static analysis for C/C++ and Arduino sketches.
 
     This is the linter slot, not the strongest check available. For firmware the
@@ -886,7 +906,7 @@ _DIR_CAPABLE = {"ruff", "mypy", "no-cover", "phpstan", "phpcs", "rector",
 # per file, and passing a directory would apply sketch rules to every .cpp.
 
 
-def _run_tools(tool_names: list[str], target: str) -> list[dict]:
+def _run_tools(tool_names: list[str], target: str) -> list[dict[str, Any]]:
     checks = []
     for name in tool_names:
         runner = TOOL_RUNNERS.get(name)
@@ -898,7 +918,7 @@ def _run_tools(tool_names: list[str], target: str) -> list[dict]:
     return checks
 
 
-def _summarize(checks: list[dict]) -> dict:
+def _summarize(checks: list[dict[str, Any]]) -> dict[str, Any]:
     all_issues = [i for c in checks for i in c.get("issues", [])]
     errors   = sum(1 for i in all_issues if i["severity"] == "error")
     warnings = sum(1 for i in all_issues if i["severity"] == "warning")
@@ -916,7 +936,7 @@ def _summarize(checks: list[dict]) -> dict:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run code quality tools and output structured JSON.",
     )
@@ -930,6 +950,11 @@ def main():
                         help="Pretty-print JSON output")
     parser.add_argument("--audit", action="store_true",
                         help="Also run security audit tools (pip-audit, npm audit, composer audit)")
+    parser.add_argument("--skip-unsupported", action="store_true",
+                        help="Exit 0 on a file whose language cannot be detected, "
+                             "instead of 2. For callers handed an arbitrary file "
+                             "list (the pre-commit hook), where a README is not "
+                             "a failure.")
     args = parser.parse_args()
 
     target = str(Path(args.target).resolve())
@@ -947,20 +972,28 @@ def main():
         elif lang in DEFAULT_TOOLS:
             tool_names = list(DEFAULT_TOOLS[lang])
         else:
+            if args.skip_unsupported:
+                print(json.dumps({"target": target, "skipped":
+                                  "no language detected"}))
+                sys.exit(0)
             print(json.dumps({"error": f"Cannot detect language for: {target}"}))
             sys.exit(2)
         if args.audit:
             tool_names.extend(AUDIT_TOOLS.get(lang, []))
 
         checks = _run_tools(tool_names, target)
+        # Held in its own name rather than read back out of `output`: the dict
+        # is heterogeneous, so indexing it twice asks the type checker to
+        # believe a str and a list are also subscriptable by "errors".
+        summary = _summarize(checks)
         output = {
             "target":   target,
             "language": lang,
             "checks":   checks,
-            "summary":  _summarize(checks),
+            "summary":  summary,
         }
         print(json.dumps(output, indent=2 if args.pretty else None))
-        sys.exit(1 if output["summary"]["errors"] > 0 else 0)
+        sys.exit(1 if summary["errors"] > 0 else 0)
 
     # ── Directory: scan, group by language, run appropriate tools ─────────
     groups, skipped = _collect_files(target)
@@ -1008,6 +1041,7 @@ def main():
             "tools":      [c["tool"] for c in lang_checks],
         })
 
+    summary = _summarize(all_checks)
     output = {
         "target":     target,
         "mode":       "multi-language",
@@ -1017,11 +1051,11 @@ def main():
         "skipped":    [{"extension": e, "file_count": n}
                        for e, n in sorted(skipped.items(), key=lambda kv: -kv[1])],
         "checks":     all_checks,
-        "summary":    _summarize(all_checks),
+        "summary":    summary,
     }
 
     print(json.dumps(output, indent=2 if args.pretty else None))
-    sys.exit(1 if output["summary"]["errors"] > 0 else 0)
+    sys.exit(1 if summary["errors"] > 0 else 0)
 
 
 if __name__ == "__main__":

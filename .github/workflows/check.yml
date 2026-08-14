@@ -50,6 +50,12 @@ jobs:
           for f in *.py; do
             case " $checked " in *" $f "*) ;; *) echo "  $f" ;; esac
           done
+      # The PHP tools live in vendor/, so without this every phpstan assertion
+      # in tests/ skips, and a skip is indistinguishable from a pass in the log.
+      # test_check_phpstan.py pins a bug that reported the repo directory as
+      # the filename for every finding; it is worth nothing if it never runs.
+      - name: Install PHP tools
+        run: composer install --no-interaction --no-progress
       - name: Run test suites
         if: always()
         run: |

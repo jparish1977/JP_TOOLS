@@ -17,7 +17,7 @@ TEMPLATES_DIR = JP_TOOLS_ROOT / "templates"
 METHODOLOGY_DOC = JP_TOOLS_ROOT / "METHODOLOGY.md"
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Install JP_TOOLS CI workflow into a repo")
     parser.add_argument("path", nargs="?", default=".",
                         help="Path to git repository (default: cwd)")
