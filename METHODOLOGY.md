@@ -315,7 +315,7 @@ of them because they treated adoption as an event rather than a rate.
    cross-imports settles whether piecemeal is cheap or a fantasy. In
    batocera-watch, 31 scripts held **three** internal edges between them, which
    made extraction close to free; both plans drawn before that measurement had
-   assumed it would be expensive and were shaped around avoiding a cost that
+   assumed it would be expensive and were built around avoiding a cost that
    did not exist. Measure the coupling first. It is the input that decides the
    entire strategy, and it takes one command.
 

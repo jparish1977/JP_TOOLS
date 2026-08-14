@@ -85,8 +85,13 @@ def commit_file(repo: Path, name: str, body: str) -> subprocess.CompletedProcess
     return git(repo, "commit", "-m", f"add {name}")
 
 
-def build_repo(tmp: Path) -> Path:
-    """A repo carrying pre-existing debt, with the hook installed over it."""
+def build_repo(tmp: Path) -> tuple[Path, str]:
+    """A repo carrying pre-existing debt, with the hook installed over it.
+
+    Returns the repo and the installer's stdout, because what the installer
+    SAYS it set up is a separate claim from what it wrote, and the two drifted
+    apart once already.
+    """
     repo = tmp / "repo"
     repo.mkdir()
     git(repo, "init", "-q")
@@ -103,7 +108,7 @@ def build_repo(tmp: Path) -> Path:
     )
     if install.returncode != 0:
         raise RuntimeError(f"install-hooks.py failed: {install.stderr}")
-    return repo
+    return repo, install.stdout
 
 
 def main() -> int:
@@ -124,11 +129,17 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        repo = build_repo(tmp)
+        repo, install_out = build_repo(tmp)
 
         hook = repo / ".git" / "hooks" / "pre-commit"
         check("hook installed", hook.is_file())
         check("hook is executable", os.access(hook, os.X_OK))
+        # The installer announced "python check.py ." for one commit after the
+        # hook stopped doing that. Same defect as the original: a description
+        # that outlived the behaviour it described.
+        check("installer describes what it installed",
+              "staged" in install_out and "check.py ." not in install_out,
+              install_out)
 
         print("\nAgainst a repo that already fails:")
 
