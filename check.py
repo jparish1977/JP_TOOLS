@@ -723,6 +723,11 @@ def main():
                         help="Pretty-print JSON output")
     parser.add_argument("--audit", action="store_true",
                         help="Also run security audit tools (pip-audit, npm audit, composer audit)")
+    parser.add_argument("--skip-unsupported", action="store_true",
+                        help="Exit 0 on a file whose language cannot be detected, "
+                             "instead of 2. For callers handed an arbitrary file "
+                             "list (the pre-commit hook), where a README is not "
+                             "a failure.")
     args = parser.parse_args()
 
     target = str(Path(args.target).resolve())
@@ -740,6 +745,10 @@ def main():
         elif lang in DEFAULT_TOOLS:
             tool_names = list(DEFAULT_TOOLS[lang])
         else:
+            if args.skip_unsupported:
+                print(json.dumps({"target": target, "skipped":
+                                  "no language detected"}))
+                sys.exit(0)
             print(json.dumps({"error": f"Cannot detect language for: {target}"}))
             sys.exit(2)
         if args.audit:
