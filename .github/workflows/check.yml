@@ -31,6 +31,19 @@ jobs:
             python check.py "$f" --pretty || rc=1
           done
           exit $rc
+      - name: Run test suites
+        run: |
+          # Nothing ran tests/ at all before this step existed, so a suite
+          # could be committed, pass locally, and never execute again. A glob
+          # rather than a list: a test nobody remembered to register is the
+          # same as no test, and the registration is what gets forgotten.
+          rc=0
+          for t in tests/test_*.py; do
+            [ -e "$t" ] || continue
+            echo "--- $t ---"
+            python "$t" || rc=1
+          done
+          exit $rc
 
   js:
     name: JS (eslint)
