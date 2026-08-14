@@ -27,7 +27,8 @@ HOOK_TEMPLATE = r"""#!/bin/sh
 # repo that is already clean, so on anything inherited it leaves two choices:
 # a cleanup nobody scheduled, or --no-verify as a daily habit. Per-file means
 # the bar applies to code you were already editing, and the backlog falls as a
-# side effect of the work. See METHODOLOGY.md section 9.
+# side effect of the work. See METHODOLOGY.md, "Adopting this in a codebase
+# you inherited", named rather than numbered because it renumbers on merge.
 #
 # Two limits, stated because neither is visible when it bites:
 #   - It checks the file in the WORKING TREE, not the staged blob. With a
