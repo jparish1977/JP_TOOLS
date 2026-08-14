@@ -120,7 +120,7 @@ def install(repo_path: Path):
     # Make executable (matters on Linux/Mac, no-op on Windows)
     hook_file.chmod(0o755)
     print(f"Installed JP_TOOLS pre-commit hook at {hook_file}")
-    print(f"Checks will run: python {CHECK_PY} .")
+    print(f"Checks will run: {CHECK_PY} against each staged file")
     print()
     print("This project now follows JP_TOOLS methodology.")
     print(f"Read it: {METHODOLOGY_DOC}")
