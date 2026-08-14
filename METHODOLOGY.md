@@ -266,7 +266,160 @@ Checklist for greenfield work that should inherit this discipline:
 
 ---
 
-## 8. Anti-patterns
+## 8. Adopting this in a codebase you inherited
+
+§7 is for a repo that starts clean. This section is for the case that covers
+most working days: a codebase that is already valuable, already load-bearing,
+has never met the bar, and cannot be stopped while it learns.
+
+Written from batocera-watch: 14,000 lines across 31 Python scripts and 11 PHP
+files, four separate products sharing one directory, one test, and a 604-line
+`CLAUDE.md` of accumulated traps. `python3 check.py .` reported **924 errors**.
+Every rule in §7 assumes a gate that can be switched on in a single move, and
+two separate plans for that repo were wrong before this section existed, both
+of them because they treated adoption as an event rather than a rate.
+
+1. **Make the gate incremental before you make it mandatory.** A whole-repo
+   gate on a repo with 924 pre-existing errors has two possible outcomes: a
+   cleanup nobody scheduled, or `--no-verify` as a daily habit, which the
+   anti-patterns section lists for good reason. Check the **staged files**, so the only
+   code that has to meet the bar is code you were already editing. The number
+   then falls as a side effect of doing the work, and no calendar entry is
+   required.
+
+   This is also a defect to fix before quoting the toolbox at anything.
+   `install-hooks.py` states in its own docstring that it "runs check.py
+   against staged files", collects them into `$STAGED`, uses that list only to
+   test whether anything was staged at all, and then runs `check.py .` against
+   the repo root. On greenfield the difference is invisible, because the whole
+   tree is clean either way. On anything inherited it is the difference between
+   an on-ramp and a wall.
+
+2. **Record the baseline, and hold the line at "no worse".** Ratcheting needs a
+   number to ratchet against. Commit the output of a full run, and have the
+   gate compare against it rather than against zero. Without that stored
+   number, a file that got worse and a file that was always bad are
+   indistinguishable, so no one can tell progress from noise and the effort
+   stops being visible to anyone including you.
+
+3. **Find out which checks are not running before believing the total.** Those
+   924 errors covered Python only. `phpstan`, `phpcs` and `rector` all reported
+   `unavailable` and contributed zero, so 11 PHP files were entirely unmeasured
+   while the summary read as authoritative. An inherited repo will be missing
+   toolchains that a greenfield one installs on day one. A check that did not
+   run looks exactly like a check that passed, and that costs more here than
+   anywhere else, because on unfamiliar code you have no intuition to
+   contradict the number.
+
+4. **Map the dependency graph before planning the order.** One grep for
+   cross-imports settles whether piecemeal is cheap or a fantasy. In
+   batocera-watch, 31 scripts held **three** internal edges between them, which
+   made extraction close to free; both plans drawn before that measurement had
+   assumed it would be expensive and were shaped around avoiding a cost that
+   did not exist. Measure the coupling first. It is the input that decides the
+   entire strategy, and it takes one command.
+
+5. **Let the work choose the order.** The component that most deserves a
+   rewrite and the component you have open are rarely the same one, and only
+   the second rewrite is free, because you were paying to understand that code
+   anyway. On a 400-line script the gap between editing it and rebuilding it
+   properly is small. `git log --since=<a month ago> --name-only` names the
+   real order in one command: in batocera-watch the finished, quiet component
+   was proposed first, while the four files carrying 26 commits in the previous
+   month were proposed last.
+
+6. **One component leaves at a time, and the tree runs between every step.** No
+   freeze, no big-bang split, no branch that lives for a month. If a
+   component's rewrite cannot be finished in a sitting, the unit is too large;
+   split it again until it can. The test of a good unit is that abandoning the
+   project immediately after it lands leaves the repo in a better state than
+   before, with nothing half-migrated.
+
+7. **Extract when you touch, never on a schedule.** The new repo gets created
+   the day real work lands on that component, with the hook and CI on from its
+   first commit. Six months later, whatever never moved is precisely what
+   nobody needed, and the effort spent on it is correctly zero. A migration
+   plan that names all components up front commits you to finishing the ones
+   that turn out not to matter.
+
+8. **A component leaves by moving, and leaves nothing behind.** Copying it
+   forward produces two versions that both keep receiving fixes.
+   `ntfs-inventory.py` exists in both JP_TOOLS and batocera-watch, diverged by
+   119 lines, each copy holding a repair the other lacks: one has the usage
+   block and the repo's first test, the other has the fix for the 285,471 sudo
+   invocations that wrote 857,000 lines into `auth.log`. Neither is the version
+   to keep, which is the cost of having allowed two. This is the vendoring
+   anti-pattern arriving through the side door, one convenient copy at a time.
+
+9. **Treat the gotchas document as a coverage report.** A long file of "do not
+   step here" is a list of defects that no test was in a position to catch, so
+   the mitigation had to live in prose and be re-read by a human before every
+   session. batocera-watch's ran to 604 lines. Each entry is a test case
+   waiting for a seam: `/runningGame` returns 201 when idle, the audit cache
+   keys on `(size, mtime)` so a fix outside the file replays the old verdict,
+   `ok` means two different things in the same summary. Port them into the
+   suite as the components move, and let the shrinking of that file be the
+   measure of whether the seams actually arrived.
+
+10. **Say in the README which packages meet the bar and which are
+    grandfathered.** Adoption is a rate, so at any moment part of the repo does
+    not comply, and a reader cannot tell an exempt package from a neglected one
+    by looking. Name them. JP_TOOLS carries its own "this repo does not yet
+    meet its own bar" section for the same reason: a gap that is written down
+    is a decision, and a gap that is discovered is a surprise.
+
+11. **When a component cannot be extracted, strangle it instead.** Some
+    components are one program rather than a collection, and there is no
+    version of "take a third of it out" that leaves the tree running. The
+    strangler fig pattern (Fowler, 2004) routes call by call: find a point
+    where the program already dispatches, send one case to a new
+    implementation, leave the rest on the old path, and repeat until the old
+    path has no callers and can be deleted. The whole technique rests on
+    finding that dispatch point, and everything after it is bookkeeping.
+
+    Both of batocera-watch's large files have one already. `batocerawatch.py`
+    switches on `route` in `do_GET` (`/ping`, `/running`, `/audit`,
+    `/controls`), so `/manual` can move onto a layered package while
+    `/controls` still runs the old module-level functions in the same process,
+    serving the same handheld, with no cutover. `audit_roms.py` switches on
+    file extension in `structural()`, so `.chd` and `.cue` can move behind
+    ports one format at a time. Deleting the host is part of the pattern, not
+    an optional finish: a strangler that never completes leaves two systems and
+    a facade, which is three things to maintain instead of one.
+
+12. **Pin current behaviour before rewriting it, including the parts that look
+    wrong.** A characterisation test (Feathers, *Working Effectively with
+    Legacy Code*, 2004) asserts what the code does today rather than what it
+    should do. It is a tripwire, not a certificate. The mechanic is to write an
+    assertion you know is false, run it, read the real value out of the failure
+    message, and paste that in as expected, which turns "I cannot test this
+    because I do not understand it yet" into a mechanical job. This matters on
+    inherited code because some of its surprising behaviour is load-bearing,
+    and you will not know which parts until later.
+
+    The gotchas file from item 9 is the shortlist. `/runningGame` returning 201
+    when idle is not a note to remember, it is an assertion: rewrite the client
+    to read the body instead of the status and the bug comes straight back,
+    while the change feels like an improvement. The bulk form, a golden master,
+    is often already lying around: a full `audit_roms.py` cache is a recorded
+    verdict for every ROM in the library, so freezing a copy and diffing after
+    a rewrite turns every changed verdict into a question that has to be
+    answered out loud. Two limits. Determinism has to be manufactured first,
+    since timestamps, dict ordering and anything with a live box in the loop
+    will differ on every run, which is why this suits the structural pass and
+    not the 25-minute launch pass. And these tests freeze bugs deliberately, so
+    deleting one the day you decide the behaviour was wrong is correct
+    behaviour rather than a lapse.
+
+The through-line: **the discipline arrives one file at a time, or it does not
+arrive.** Every rule in §7 is affordable on a repo with no history. On a repo
+with history, the only budget that reliably exists is the file already open on
+the screen, and any adoption plan costing more than that will be abandoned
+while still looking, from the commit log, like it is going fine.
+
+---
+
+## 9. Anti-patterns
 
 Things that look like they save time but defeat the methodology:
 
@@ -282,7 +435,7 @@ Things that look like they save time but defeat the methodology:
 
 ---
 
-## 9. Related reading
+## 10. Related reading
 
 - `~/projects/iteration8-core/CLAUDE.md`, domain layer rules (24 lines, prescriptive).
 - `~/projects/iteration8-utilities/CLAUDE.md`, infrastructure layer rules (30 lines), and the FileScanner reference implementation itself.
