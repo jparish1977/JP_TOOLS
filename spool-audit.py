@@ -163,6 +163,12 @@ class Entry:
     name: str
     kind: Kind
     job: int | None = None
+    # Where the file was found, recorded at the point classify() knows it
+    # rather than recovered from the name later. render() used to re-derive it
+    # by matching the "tmp/" prefix, which made the name a second source of
+    # truth for a fact the listing already had -- and re-applied the name trust
+    # that is_harmless_temp explicitly refuses at the top level.
+    in_temp: bool = False
 
 
 @dataclass(frozen=True)
@@ -331,8 +337,11 @@ def is_harmless_temp(f: TempFile, in_tempdir: bool = True) -> bool:
     "unknown", which stays classified as possible document content: the safe
     direction is to over-report, not to dismiss.
     """
-    # Checked first, so nothing below can excuse an actual document.
-    if any(f.head.startswith(m) for m in DOCUMENT_MAGIC):
+    # Checked first, so nothing below can excuse an actual document. Calls
+    # the positive question rather than repeating its body: the two were
+    # identical expressions over the same constant, and duplicated blocks
+    # drifting apart is the defect this file has produced most often.
+    if identified_as_print(f):
         return False
     # Content that could NOT be read. Every rule below reasons from the first
     # bytes or the size, so a file whose header is unavailable must not be
@@ -410,6 +419,7 @@ def classify(
     entries += [
         Entry(
             name=f"{listing.temp_label}/{f.name}",
+            in_temp=True,
             # Positively identified as print data, or merely not ruled out?
             # Kind drove the delete set, and TempDir files were all TEMP, so
             # `--purge` destroyed tmp/notes.txt while sparing an identical
@@ -422,7 +432,8 @@ def classify(
     ]
     artifacts = tuple(
         [
-            Entry(name=f"{listing.temp_label}/{f.name}", kind=Kind.ARTIFACT, job=None)
+            Entry(name=f"{listing.temp_label}/{f.name}", kind=Kind.ARTIFACT,
+                  job=None, in_temp=True)
             for f in temps
             if is_harmless_temp(f)
         ]
@@ -518,7 +529,6 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
     # from the path. Reading Kind as location inverted both explanatory blocks:
     # a tmp/ file was described as top-level and a top-level copy as TempDir
     # scratch, sending the operator to the wrong directory.
-    prefix = f"{TEMP_SUBDIR}/"
     # Split by EVIDENCE, because that is what Kind means. Merging TEMP with
     # UNRECOGNISED described a file whose first bytes say %!PS as "unrecognised,
     # may be document content", which understates a CONFIRMED leak as a maybe,
@@ -550,7 +560,7 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
             lines.append(f"  ... and {len(hidden)} more, all ordinary job files "
                          "that `cancel -a -x` clears")
     if identified:
-        in_temp = sum(1 for e in identified if e.name.startswith(prefix))
+        in_temp = sum(1 for e in identified if e.in_temp)
         lines.append("")
         lines.append(
             f"  {len(identified)} of these carry a print-data signature"
@@ -561,7 +571,7 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         if in_temp:
             lines.append(f"  {in_temp} of them are in the CUPS TempDir, mid-filter.")
     if unidentified:
-        in_temp = sum(1 for e in unidentified if e.name.startswith(prefix))
+        in_temp = sum(1 for e in unidentified if e.in_temp)
         lines.append("")
         lines.append(
             f"  {len(unidentified)} of these could not be identified at all,"
@@ -576,7 +586,17 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         # under "CUPS RUNTIME FILES" trains the operator to skim the one
         # section a real stray could hide in -- but dropping it from the report
         # instead would make it invisible, which is worse.
-        runtime = [e for e in audit.artifacts if ARTIFACT.match(e.name.rsplit("/", 1)[-1])]
+        # `e.in_temp and`, not the name alone. CUPS never creates cups-* files
+        # at the top level of the spool -- is_harmless_temp says so and gates
+        # the same regex on the same fact -- so a top-level cups-notifier was
+        # filed under "CUPS RUNTIME FILES" and the operator told to leave alone
+        # a file that, by this tool's own reasoning, CUPS cannot have created.
+        # Not a disclosure: reaching audit.artifacts at the top level still
+        # requires size 0 or a *PPD-Adobe header, verified against a fixture of
+        # both. It is the same name-trust defect as the classifier's, at the
+        # second site, which is this file's most repeated failure.
+        runtime = [e for e in audit.artifacts
+                   if e.in_temp and ARTIFACT.match(e.name.rsplit("/", 1)[-1])]
         other = [e for e in audit.artifacts if e not in runtime]
         if runtime:
             lines.append("")
@@ -944,7 +964,7 @@ def retention_state(conf: str) -> bool | None:
     """Is CUPS configured to keep job files? None if the config is unreadable.
 
     Nothing but the read lives here now. Read as bytes for the same reason
-    disable_retention writes bytes: a printer config is not guaranteed UTF-8,
+    this reads bytes: a printer config is not guaranteed UTF-8,
     and decoding it is a step that can fail or corrupt for no benefit when all
     that is wanted is a directive match.
     """
@@ -964,8 +984,8 @@ def _read_conf(path: str) -> bytes:
 
     Character devices are deliberately still allowed: `--conf /dev/null` is a
     legitimate "empty config" used throughout this repo's own suites, and it
-    reads as EOF immediately. That is why this refuses less than _write_atomic
-    does, which requires a regular file because REPLACING /dev/null is a very
+    reads as EOF immediately. That is why this refuses less than a writer
+    would have to, which requires a regular file because REPLACING /dev/null is a very
     different act from reading it.
     """
     st = os.stat(path)
