@@ -43,6 +43,28 @@ ck () { if [ "$2" = "$3" ]; then ok "$1"; else no "$1 (got '$2', want '$3')"; fi
 # all three exit-2 cases below still passed while testing nothing at all. Assert
 # the explanation too, so the code and the reason have to agree.
 has () { case "$3" in *"$2"*) ok "$1";; *) no "$1 (output lacked '$2')";; esac; }
+# EVERY invocation goes through this. Two things it pins that nothing else can:
+#
+#   1. The expected exit code, per call. Without it a check can only assert on
+#      output, and a tool that never ran produces no output to contradict.
+#   2. That the tool actually ran. On 2026-08-14 --purge and --fix were deleted
+#      from the tool and this suite still printed "13 passed, 0 failed":
+#      argparse rejected the unknown flag, exited 2, deleted nothing, and the
+#      two "the file survived a purge" checks passed over a purge that never
+#      happened. An unrecognised flag is a suite bug, never a result, so it is
+#      caught by name here rather than by whatever assertion happens to follow.
+#
+# Sets OUT and RC for the caller.
+run_tool () {   # run_tool <expected-rc> <label> [tool args...]
+  local want="$1" label="$2"; shift 2
+  OUT=$("$PY" "$T" "$@" 2>&1); RC=$?
+  case "$OUT" in
+    *"unrecognized arguments"*|*"invalid choice"*|*"expected one argument"*)
+      no "$label (THE TOOL NEVER RAN: $(printf '%s' "$OUT" | tail -1))"
+      return 0;;
+  esac
+  ck "$label" "$RC" "$want"
+}
 
 echo "FLAW 1: a check that did not run must never read as a pass"
 # Root bypasses permission bits, so chmod 000 does not make a directory
@@ -79,7 +101,14 @@ echo x > "$W/acct/d00085-001.bak"; echo y > "$W/acct/stray"; mkdir "$W/acct/subd
 : > "$W/acct/empty-stray"   # zero length: the case that slipped through
 printf '*PPD-Adobe: "4.3"\n' > "$W/acct/tmp/ppd"; printf '%%!PS\n' > "$W/acct/tmp/real.ps"
 echo z > "$W/acct/tmp/.cache/fc"
-"$PY" "$T" --spool "$W/acct" --include-control --conf /dev/null > "$W/o.txt" 2>&1
+# Exit 2, not 1: this fixture contains subdir/, which is neither a document
+# nor the TempDir, so the tool reports it as an area it did not examine and
+# the whole run is INCOMPLETE. "There is content AND something I could not
+# look inside" is a worse result than "there is content", and the exit code
+# says so.
+run_tool 2 "the accounting run is INCOMPLETE, because subdir/ was not examined" \
+  --spool "$W/acct" --include-control --conf /dev/null
+printf '%s\n' "$OUT" > "$W/o.txt"
 missing=0
 while read -r f; do
   # Whole-entry match on the relative path, not a substring of any basename.
@@ -101,29 +130,46 @@ while read -r f; do
 done < <(find "$W/acct" -mindepth 1 | sed "s|^$W/acct/||")
 ck "every path under the spool is reported" "$missing" "0"
 
-echo "FLAW 3: never claim a secret was destroyed when it was not"
+echo "FLAW 3: never claim to have examined what was never opened"
+# The original flaw was "never claim a secret was destroyed when it was not",
+# and it was checked by purging a symlink and confirming the target survived.
+# The tool no longer deletes, so that check now guards nothing -- and it was
+# the one that kept passing after --purge was deleted. What survives the cut
+# is the half that was always the real risk: a symlink is an area the tool did
+# NOT read, and reporting it as anything else is a false clean.
 mkdir -p "$W/sym/tmp" "$W/vault"; printf '%%!PS\nSECRET\n' > "$W/vault/keep.ps"
 ln -s "$W/vault/keep.ps" "$W/sym/tmp/link.ps"
-"$PY" "$T" --spool "$W/sym" --purge --conf /dev/null >/dev/null 2>&1
-[ -f "$W/vault/keep.ps" ] && ok "symlink target survives purge" || no "symlink target survives purge"
+# A decoy the tool MUST report, in the same fixture as the symlink it must
+# refuse. "The target was untouched" is a negative, and a negative is
+# satisfied by the tool never running at all -- it reads the same whether the
+# symlink was correctly refused or nothing happened. Pairing it with something
+# that must be FOUND is what makes the pair evidence that the tool ran and
+# discriminated, rather than evidence that it was absent.
+printf '%%!PS\nDECOY\n' > "$W/sym/tmp/decoy.ps"
+before=$(cat "$W/vault/keep.ps")
+run_tool 2 "a symlink makes the result INCOMPLETE, not clean" --spool "$W/sym" --conf /dev/null
+has "and says it was not followed" "NOT followed" "$OUT"
+has "while the decoy in the same directory IS reported" "decoy.ps" "$OUT"
+case "$OUT" in *"spool is clean"*) no "never says clean over a symlink";; *) ok "never says clean over a symlink";; esac
+[ "$(cat "$W/vault/keep.ps")" = "$before" ] && ok "the target is untouched" || no "the target is untouched"
 mkdir -p "$W/root/tmp2"; printf '%%!PS\nOUT\n' > "$W/root/tmp2/out.ps"
 mkdir -p "$W/esc"; ln -s "$W/root/tmp2" "$W/esc/tmp"
-"$PY" "$T" --spool "$W/esc" --purge --conf /dev/null >/dev/null 2>&1
-[ -f "$W/root/tmp2/out.ps" ] && ok "symlinked TempDir root not followed" || no "symlinked TempDir root not followed"
+run_tool 2 "a symlinked TempDir root is not followed" --spool "$W/esc" --conf /dev/null
+has "and names the TempDir as the unexamined area" "TempDir is a symlink" "$OUT"
+[ -f "$W/root/tmp2/out.ps" ] && ok "the file outside the spool is untouched" || no "the file outside the spool is untouched"
 
 echo "FLAW 4: a fix must apply to every path, not one of them"
 mkdir -p "$W/nl"; printf '%%!PS\n' > "$W/nl/$(printf 'evil\nd00099-001')"
-"$PY" "$T" --spool "$W/nl" --conf /dev/null 2>&1 | grep -q "d00099-001" \
-  && ok "newline filename survives the listing" || no "newline filename survives the listing"
+run_tool 1 "a newline in a filename does not derail the run" --spool "$W/nl" --conf /dev/null
+has "newline filename survives the listing" "d00099-001" "$OUT"
 
 echo "FLAW 5: known-harmless things must not be reported as secrets"
 mkdir -p "$W/noise/tmp/.cache/fontconfig"
 printf '*PPD-Adobe: "4.3"\n' > "$W/noise/tmp/ppd"
 : > "$W/noise/tmp/cups-dbus-notifier-lockfile"
 for i in 1 2 3 4 5; do echo bin > "$W/noise/tmp/.cache/fontconfig/c$i.cache-9"; done
-out=$("$PY" "$T" --spool "$W/noise" --conf /dev/null 2>&1); rc=$?
-ck "a spool of only caches is clean" "$rc" "0"
-case "$out" in *"spool is clean"*) ok "and says so";; *) no "and says so";; esac
+run_tool 0 "a spool of only caches is clean" --spool "$W/noise" --conf /dev/null
+case "$OUT" in *"spool is clean"*) ok "and says so";; *) no "and says so";; esac
 
 echo
 if [ "$skip" -gt 0 ]; then

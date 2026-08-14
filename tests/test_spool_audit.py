@@ -97,22 +97,12 @@ _spec.loader.exec_module(spool_audit)
 classify = spool_audit.classify
 parse_entry = spool_audit.parse_entry
 render = spool_audit.render
-victims_for = spool_audit.victims_for
-should_restart_cups = spool_audit.should_restart_cups
-_safe_resolve = spool_audit._safe_resolve
-Outcome = spool_audit.Outcome
-leftover_caveats = spool_audit.leftover_caveats
-fix_outcome = spool_audit.fix_outcome
-purge_precheck = spool_audit.purge_precheck
-purge_outcome = spool_audit.purge_outcome
 Audit = spool_audit.Audit
 Listing = spool_audit.Listing
 TempFile = spool_audit.TempFile
 is_harmless_temp = spool_audit.is_harmless_temp
 temp_child_note = spool_audit.temp_child_note
-is_inside = spool_audit.is_inside
 parse_retention = spool_audit.parse_retention
-delete = spool_audit.delete
 read_spool = spool_audit.read_spool
 classify_top = spool_audit.classify_top
 TopEntry = spool_audit.TopEntry
@@ -189,18 +179,8 @@ def test_tempdir_cannot_be_targeted_by_job() -> None:
 
 # --- bug 4: purge scope ----------------------------------------------------
 
-def test_purge_honours_job_filter() -> None:
-    """The 2026-08-12 case: '85 --purge' must not delete 77 and 99."""
-    audit = classify(spool(["d00085-001", "d00077-001", "d00099-001"]), frozenset({85}))
-    victims = victims_for(audit)
-
-    check("only one victim", len(victims), 1)
-    check("and it is job 85", victims[0].name, "d00085-001")
 
 
-def test_purge_without_jobs_takes_everything() -> None:
-    audit = classify(spool(["d00085-001", "d00077-001"], temp=["cups-abc"]))
-    check("all three", len(victims_for(audit)), 3)
 
 
 # --- bug 2: targeted gone vs spool clean -----------------------------------
@@ -333,7 +313,8 @@ def test_ppd_files_are_not_leaks() -> None:
     check("only the document counts", audit.total, 1)
     check("the document is the one kept", audit.others[0].name, "tmp/006816a8026a5")
     check("ppd is an artifact", len(audit.artifacts), 1)
-    check_true("ppd not a purge victim", "tmp/0777f6a7dc4fa" not in [e.name for e in victims_for(audit)])
+    check_true("ppd is not reported as content",
+               "tmp/0777f6a7dc4fa" not in [e.name for e in audit.others])
 
 
 
@@ -372,45 +353,10 @@ def test_retention_honours_the_last_directive() -> None:
             os.unlink(f)
 
 
-def test_scoped_purge_admits_what_it_cannot_touch() -> None:
-    """A job-scoped purge cannot target files with no job id.
-
-    Reproduced 2026-08-12: a spool holding d00085-001 and d00085-001.bak, both
-    PDFs, ran `85 --purge` and printed SCOPE CLEAN, exit 0, leaving the .bak --
-    a file the tool had itself classified as print data. `&& echo SAFE` fired.
-    """
-    doc = TempFile(name="d00085-001.bak", size=99, head="%PDF-1.7")
-    audit = classify(spool(["d00085-001"]), frozenset({85}))
-    after = classify(Listing(Verdict.CLEAN, (), (), (), TEMP_SUBDIR, (doc,)), frozenset({85}))
-
-    check("the named job is purgeable", len(victims_for(audit)), 1)
-    # After the purge, the .bak remains and carries no job id.
-    leftovers = [e for e in after.others if e.job is None]
-    check_true("the leftover is unattributable", len(leftovers) == 1)
-    check_true("and it is counted as content", after.total == 1)
 
 
-def test_fix_only_restarts_the_daemon_it_configured() -> None:
-    """`--fix --conf /tmp/x` restarted the machine's real cups.service and
-    reported success while /etc/cups/cupsd.conf was untouched."""
-    check_true("the system config restarts cups",
-               should_restart_cups(spool_audit.DEFAULT_CONF))
-    check_true("any other path does not", not should_restart_cups("/tmp/cupsd.conf"))
-    check_true("nor a relative one", not should_restart_cups("./fake.conf"))
 
 
-def test_safe_resolve_survives_a_symlink_loop() -> None:
-    """Path.resolve() raises RuntimeError, not OSError, on ELOOP in CPython
-    <= 3.12 -- which CI pins. Catching only OSError let it escape as a
-    traceback with exit 1, the code reserved for "content is still there"."""
-    with tempfile.TemporaryDirectory() as tmp:
-        loop = pathlib.Path(tmp) / "loop"
-        os.symlink(loop, loop)
-        check("a loop resolves to None, it does not raise", _safe_resolve(loop), None)
-
-    with tempfile.TemporaryDirectory() as tmp:
-        real = pathlib.Path(tmp)
-        check_true("a real path still resolves", _safe_resolve(real) is not None)
 
 
 def test_runtime_names_are_only_honoured_inside_tempdir() -> None:
@@ -458,12 +404,13 @@ def test_a_cups_prefixed_name_does_not_excuse_readable_content() -> None:
                not is_harmless_temp(secret, in_tempdir=True))
 
 
-def test_the_listing_shows_the_files_purge_will_not_remove() -> None:
+def test_the_listing_leads_with_what_needs_a_human() -> None:
     """The listing is capped at 20 and used to lead with ordinary job files, so
     a spool of 25 documents plus one stray and one TempDir leak named NEITHER
-    of the last two anywhere: the only two files --purge would not clear were
-    the two the operator never saw. That is "not worse than ls" failing at
-    exactly the point it exists for."""
+    of the last two anywhere. Those two are exactly the files no `cancel` will
+    clear and the only ones needing a decision, and they were the two the
+    operator never saw. That is "not worse than ls" failing at exactly the
+    point it exists for."""
     docs = tuple(f"d{i:05d}-001" for i in range(1, 26))
     stray = TempFile(name="passwords.txt", size=7, head="secret")
     leak = TempFile(name="leak.ps", size=5, head="%!PS")
@@ -515,35 +462,6 @@ def test_safe_name_defuses_terminal_escapes() -> None:
     check_true("ordinary names are untouched", spool_audit.safe_name("d00085-001") == "d00085-001")
 
 
-def test_containment_invariant() -> None:
-    """The rule that collapses five findings from three review rounds.
-
-    Nothing decided, in one place, whether a path was inside the directory
-    being audited. It was re-decided ad hoc at each site and was therefore
-    right at some and wrong at others: an absolute --temp escaped a pathlib
-    join and --purge deleted from the live spool; a relative --temp built a
-    path that did not exist and its FileNotFoundError counted as a delete; a
-    trailing slash skipped the configured TempDir; a symlinked TempDir let
-    --purge delete a file outside the named spool and print SCOPE CLEAN.
-    """
-    spool = pathlib.Path("/var/spool/cups")
-    roots = (spool,)
-
-    check_true("a file in the spool", is_inside(spool / "d00085-001", roots))
-    check_true("nested under it", is_inside(spool / "tmp" / ".cache" / "x", roots))
-    check_true("the root itself", is_inside(spool, roots))
-
-    check_true("a sibling is out", not is_inside(pathlib.Path("/var/spool/cupsX/f"), roots))
-    check_true("the parent is out", not is_inside(pathlib.Path("/var/spool"), roots))
-    check_true("elsewhere is out", not is_inside(pathlib.Path("/etc/passwd"), roots))
-    check_true("a prefix match is not containment",
-               not is_inside(pathlib.Path("/var/spool/cups-backup/f"), roots))
-
-    # An explicitly named --temp is a second root; a TempDir reached only
-    # through a symlink deliberately is not.
-    two = (spool, pathlib.Path("/var/tmp/cups"))
-    check_true("named temp is allowed", is_inside(pathlib.Path("/var/tmp/cups/f"), two))
-    check_true("still nothing else", not is_inside(pathlib.Path("/var/tmp/other/f"), two))
 
 
 def test_symlinks_are_never_followed() -> None:
@@ -726,7 +644,8 @@ def test_xdg_cache_under_tempdir_is_not_content() -> None:
 
     audit = classify(Listing(Verdict.CLEAN, (), (fc, doc)))
     check("only the document counts", audit.total, 1)
-    check_true("cache not purged", ".cache/fontconfig" not in "".join(e.name for e in victims_for(audit)))
+    check_true("cache is not reported as content",
+               ".cache/fontconfig" not in "".join(e.name for e in audit.others))
 
 
 def test_ppd_match_is_anchored() -> None:
@@ -769,13 +688,16 @@ def test_cups_runtime_files_are_not_leaks() -> None:
     check("one artifact", len(audit.artifacts), 1)
     check("artifact kind", audit.artifacts[0].kind, Kind.ARTIFACT)
 
-    # Never deleted: removing a lockfile under a running cupsd is not cleanup.
-    names = [e.name for e in victims_for(audit)]
-    check_true("lockfile not a purge victim", "tmp/cups-dbus-notifier-lockfile" not in names)
+    # Never counted as content. The tool no longer deletes anything, so the
+    # stake is the report: calling a live cupsd lockfile a leak sends the
+    # operator to remove a lock from under a running daemon.
+    names = [e.name for e in audit.others]
+    check_true("lockfile is not reported as content",
+               "tmp/cups-dbus-notifier-lockfile" not in names)
 
     text = "\n".join(render(audit, frozenset()))
     check_true("reported separately", "CUPS RUNTIME FILES" in text)
-    check_true("says never purged", "never purged" in text)
+    check_true("and says to leave them alone", "leave them alone" in text)
 
 
 def test_artifact_only_spool_is_clean() -> None:
@@ -1022,79 +944,12 @@ def test_walk_against_a_real_filesystem() -> None:
 # tested functions above produced almost none. That was the pattern, and these
 # tests are the response to it.
 
-def test_a_failed_fix_is_never_erased_by_a_later_success() -> None:
-    """`--fix --purge && echo SAFE` fired with retention still on.
-
-    disable_retention() failing printed FAILED, fell through to the purge, and
-    if the purge succeeded main returned 0. Nothing carried the failure
-    forward, so a caller could not tell that the next print would leak again.
-    """
-    failed = fix_outcome(False, "cups was not restarted", also_purging=True)
-    check("a failed fix is a failure", failed.code, 1)
-    check_true("but it does not stop the purge", "Continuing" in "\n".join(failed.lines))
-
-    ok_then_purge = fix_outcome(True, "restarted via systemctl", also_purging=True)
-    check("a good fix does not poison anything", ok_then_purge.code, 0)
-    check_true("and does not tell you to purge", "Run --purge" not in "\n".join(ok_then_purge.lines))
-
-    ok_alone = fix_outcome(True, "restarted", also_purging=False)
-    check("fix alone succeeds", ok_alone.code, 0)
-    check_true("and points at --purge", "Run --purge" in "\n".join(ok_alone.lines))
-
-    # The composition main() performs: max() of the two, so 1 survives 0.
-    post = purge_outcome(3, 0, classify(spool([])), frozenset())
-    check("purge alone is clean", post.code, 0)
-    check("but a failed fix wins", max(failed.code, post.code), 1)
 
 
-def test_both_purge_branches_share_one_caveat_function() -> None:
-    """The caveat lived twice and drifted: added to the post-purge branch and
-    not to "nothing to purge", so `85 --purge` over a spool holding only a
-    d00085-001.bak printed "Nothing to purge." and exited 0."""
-    bak = TempFile(name="d00085-001.bak", size=99, head="%PDF-1.7")
-    audit = classify(Listing(Verdict.CLEAN, (), (), (), TEMP_SUBDIR, (bak,)), frozenset({85}))
-
-    check("nothing is targetable", len(victims_for(audit)), 0)
-    caveats = leftover_caveats(audit, frozenset({85}))
-    check_true("but the leftover is named", any("no job id" in c for c in caveats))
-
-    pre = purge_precheck(audit, frozenset({85}), roots_ok=True)
-    assert pre is not None
-    text = "\n".join(pre.lines)
-    check_true("the nothing-to-purge branch says so too", "no job id" in text)
-    check_true("and does not claim plain success", text.strip() != "Nothing to purge.")
 
 
-def test_purge_precheck_refuses_when_the_root_is_unresolvable() -> None:
-    audit = classify(spool(["d00085-001"]))
-    out = purge_precheck(audit, frozenset(), roots_ok=False)
-    assert out is not None
-    check("cannot prove containment, so refuse", out.code, 2)
-    check_true("and says why", "REFUSING TO PURGE" in "\n".join(out.lines))
-
-    ok = purge_precheck(audit, frozenset(), roots_ok=True)
-    check("otherwise proceed to delete", ok, None)
 
 
-def test_purge_outcome_states() -> None:
-    clean = classify(spool([]))
-    check("a clean re-read is success", purge_outcome(2, 0, clean, frozenset()).code, 0)
-    # 2, not 1: a failed or refused delete means the tool cannot say what is
-    # left, and the contract reserves 1 for "content you care about is still
-    # there" and 2 for "cannot tell".
-    # 1, not 2: `failed` means unlink was tried and did not happen, so the
-    # file is demonstrably still there. A review round argued for 2 and it was
-    # applied without an independent view; this pins the corrected reading.
-    check("a failed delete means content remains", purge_outcome(0, 1, clean, frozenset()).code, 1)
-    check("an unreadable re-read is 2", purge_outcome(2, 0, None, frozenset()).code, 2)
-
-    unexamined = classify(Listing(Verdict.CLEAN, (), (), ("tmp/ (permission denied)",)))
-    out = purge_outcome(2, 0, unexamined, frozenset())
-    check("unexamined areas after a purge are 2", out.code, 2)
-    check_true("and never say clean", "SCOPE CLEAN" not in "\n".join(out.lines))
-
-    still = classify(spool(["d00085-001"]))
-    check("files remaining in scope is 1", purge_outcome(1, 0, still, frozenset()).code, 1)
 
 
 def test_parse_retention_precedence() -> None:
@@ -1122,59 +977,6 @@ def test_parse_retention_precedence() -> None:
         check(f"retention, {why}", parse_retention(body), want)
 
 
-def test_delete_maps_every_failure_to_the_right_outcome() -> None:
-    """The error-to-outcome mapping IS this function's logic, and it was
-    untestable while the whole function carried `pragma: no cover`.
-
-    Getting it wrong is bug 5 in this file's header: sudo rm's return code was
-    discarded, a permissions failure printed "something is recreating them",
-    and the user went hunting a process that did not exist. A file that could
-    not be removed must be counted as failed, never as deleted, because
-    `deleted` is what the caller turns into "your document is gone".
-    """
-    with tempfile.TemporaryDirectory() as tmp:
-        root = pathlib.Path(tmp)
-        roots = (root,)
-        entries = (Entry(name="d00085-001", kind=Kind.DOCUMENT, job=85),)
-
-        def run(on_unlink: BaseException | None,
-                on_resolve: BaseException | None = None) -> tuple[int, int]:
-            def fake_unlink(p: pathlib.Path) -> None:
-                if on_unlink is not None:
-                    raise on_unlink
-
-            def fake_resolve(p: pathlib.Path) -> pathlib.Path:
-                if on_resolve is not None:
-                    raise on_resolve
-                return p
-
-            with contextlib.redirect_stdout(io.StringIO()):
-                return delete(str(root), entries, roots,
-                              unlink=fake_unlink, resolve=fake_resolve)
-
-        check("a clean unlink is deleted", run(None), (1, 0))
-        check("FileNotFoundError is deleted, the file is gone either way",
-              run(FileNotFoundError()), (1, 0))
-        check("PermissionError is FAILED, never deleted",
-              run(PermissionError()), (0, 1))
-        check("IsADirectoryError is failed", run(IsADirectoryError()), (0, 1))
-        check("EROFS on a read-only spool is failed",
-              run(OSError(30, "Read-only file system")), (0, 1))
-        check("an OSError from resolve is failed", run(None, OSError()), (0, 1))
-        check("a symlink loop, RuntimeError from resolve, is failed",
-              run(None, RuntimeError()), (0, 1))
-
-        # Containment must be decided BEFORE the unlink, not after it. This
-        # unlink fails the test loudly if it is ever reached.
-        def must_not_run(p: pathlib.Path) -> None:
-            raise AssertionError(f"unlink was called on a refused path: {p}")
-
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            got = delete(str(root), entries, roots, unlink=must_not_run,
-                         resolve=lambda p: pathlib.Path("/somewhere/else/x"))
-        check("a target resolving outside the roots is refused", got, (0, 1))
-        check_true("and the refusal is printed", "REFUSED" in buf.getvalue())
 
 
 def test_classify_top_treats_named_and_unnamed_alike() -> None:
@@ -1324,235 +1126,14 @@ def test_retention_state_reads_and_delegates() -> None:
               spool_audit.retention_state(str(latin1)), False)
 
 
-def test_rewrite_conf_replaces_every_directive() -> None:
-    """Replacing only the FIRST would leave a later Yes in force, and cupsd
-    honours the last one, so --fix would report a fix that had not happened."""
-    rewrite = spool_audit.rewrite_conf
-    check("an absent directive is appended", rewrite(b"LogLevel warn\n"),
-          b"LogLevel warn\nPreserveJobFiles No\n")
-    check("an existing one is replaced", rewrite(b"PreserveJobFiles Yes\n"),
-          b"PreserveJobFiles No\n")
-    check("EVERY one is replaced, not just the first",
-          rewrite(b"PreserveJobFiles Yes\nLogLevel warn\nPreserveJobFiles Yes\n"),
-          b"PreserveJobFiles No\nLogLevel warn\nPreserveJobFiles No\n")
-    check("a non-UTF-8 byte elsewhere survives untouched",
-          rewrite(b"# d\xe9partement\nPreserveJobFiles Yes\n"),
-          b"# d\xe9partement\nPreserveJobFiles No\n")
-    # The output of a rewrite must satisfy the reader. These are the two halves
-    # of --fix and they used to use different matching rules.
-    check_true("and the result reads as not retaining",
-               spool_audit.parse_retention(rewrite(b"PreserveJobFiles Yes\n")) is False)
 
 
-def test_restart_cups_falls_through_a_failing_init() -> None:
-    """systemctl exists on hosts where it is not the running init and exits
-    non-zero. Stopping there reports "no working init command" on a machine
-    that has `service` and would have worked."""
-    restart = spool_audit._restart_cups
-
-    def which(present: set) -> object:
-        return lambda name: f"/usr/bin/{name}" if name in present else None
-
-    calls: list = []
-
-    def runner(rcs: dict) -> object:
-        def go(cmd: list) -> int:
-            calls.append(cmd[0])
-            return rcs.get(cmd[0], 0)
-        return go
-
-    calls.clear()
-    check("systemctl working is used",
-          restart(which=which({"systemctl", "service"}), run=runner({})),
-          (True, "systemctl"))
-    check("and service is never tried", calls, ["systemctl"])
-
-    calls.clear()
-    check("a FAILING systemctl falls through to service",
-          restart(which=which({"systemctl", "service"}), run=runner({"systemctl": 1})),
-          (True, "service"))
-    check("and both were attempted", calls, ["systemctl", "service"])
-
-    check("no systemctl at all uses service",
-          restart(which=which({"service"}), run=runner({})), (True, "service"))
-    check("neither present is an honest failure",
-          restart(which=which(set()), run=runner({})),
-          (False, "no working init command"))
-    check("both present and both failing is a failure",
-          restart(which=which({"systemctl", "service"}),
-                  run=runner({"systemctl": 1, "service": 1})),
-          (False, "no working init command"))
 
 
-def test_write_atomic_preserves_mode_and_never_half_writes() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        root = pathlib.Path(tmp)
-        conf = root / "cupsd.conf"
-        conf.write_bytes(b"original\n")
-        os.chmod(conf, 0o640)
-
-        spool_audit._write_atomic(str(conf), b"replaced\n")
-        check("the content is replaced", conf.read_bytes(), b"replaced\n")
-        check("the mode is preserved", oct(conf.stat().st_mode & 0o777), "0o640")
-        check("no temp file is left behind",
-              [p.name for p in root.iterdir() if p.name.startswith(".spool-audit-")], [])
-
-        # A non-regular target must be refused outright. os.replace happily
-        # unlinks a FIFO, a socket or a device node and leaves a regular file
-        # there: verified 2026-08-13, a FIFO became a 20-byte regular file.
-        # `--conf /dev/null` is the invocation this repo's own suites use
-        # everywhere, so `sudo spool-audit.py --fix --conf /dev/null` would
-        # have reported success while destroying the device node.
-        fifo = root / "afifo"
-        os.mkfifo(fifo)
-        try:
-            spool_audit._write_atomic(str(fifo), b"x\n")
-            check("a FIFO must be refused, not replaced", "no raise", "OSError")
-        except OSError:
-            pass
-        check_true("and it is still a FIFO", stat.S_ISFIFO(os.stat(fifo).st_mode))
-
-        # Reading one must not hang either. read_bytes() on a FIFO blocks
-        # forever waiting for a writer, and a hang in a security tool reads as
-        # "still checking" rather than as a failure.
-        # Under an alarm, because the failure mode here is a HANG, not a wrong
-        # answer. Without this, reintroducing the bug makes this suite block
-        # forever instead of failing -- verified by mutation, where it wedged
-        # the whole run. A test for "must not block" that can itself block is
-        # the same "a check that did not run reads as a pass" shape.
-        def _blocked(_sig: int, _frm: object) -> None:
-            raise TimeoutError("read blocked")
-
-        previous = signal.signal(signal.SIGALRM, _blocked)
-        signal.alarm(5)
-        try:
-            spool_audit._read_conf(str(fifo))
-            check("reading a FIFO must be refused, not blocked", "returned", "OSError")
-        except TimeoutError:
-            check("reading a FIFO must be refused, not blocked",
-                  "BLOCKED for 5s", "OSError")
-        except OSError:
-            pass
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, previous)
-        # A character device still reads as an empty config, deliberately:
-        # --conf /dev/null is used throughout this repo's suites and returns
-        # EOF at once. Reading one is a very different act from replacing one.
-        check("a character device still reads as empty",
-              spool_audit._read_conf("/dev/null"), b"")
-
-        def bad_chown(_p: str, _u: int, _g: int) -> None:
-            raise PermissionError(1, "Operation not permitted")
-
-        # A chown that fails but leaves the ownership already correct is fine,
-        # and is the ordinary case for a non-root user: their temp file is
-        # already theirs. This is the only branch reachable without injection,
-        # which is exactly why the dangerous one below needed a seam.
-        conf.write_bytes(b"original\n")
-        spool_audit._write_atomic(str(conf), b"tolerated\n", chown=bad_chown)
-        check("a chown failure with ownership already correct proceeds",
-              conf.read_bytes(), b"tolerated\n")
-
-        # A chown that fails AND leaves the WRONG owner must abort: the rename
-        # would otherwise hand cupsd.conf to a different user, quietly, from a
-        # tool whose entire purpose is not to damage what it touches.
-        real = os.stat(conf)
-        alien = os.stat_result((real.st_mode, 0, 0, 1, 999999, 999999, 0, 0, 0, 0))
-        conf.write_bytes(b"original\n")
-        try:
-            spool_audit._write_atomic(str(conf), b"nope\n", chown=bad_chown,
-                                      stat_fn=lambda _p: alien)
-            check("a chown failure that would change ownership must raise",
-                  "no raise", "OSError")
-        except OSError:
-            pass
-        check("and the original is untouched", conf.read_bytes(), b"original\n")
-        check("and no temp file is left behind",
-              [p.name for p in root.iterdir() if p.name.startswith(".spool-audit-")], [])
 
 
-def test_backup_once_never_overwrites() -> None:
-    """Running --fix twice replaced the pre-fix original with the already-fixed
-    copy, leaving nothing to restore from."""
-    with tempfile.TemporaryDirectory() as tmp:
-        root = pathlib.Path(tmp)
-        conf = root / "c.conf"
-        bak = root / "c.conf.bak"
-        conf.write_bytes(b"before the fix\n")
-        spool_audit._backup_once(str(conf), str(bak))
-        check("the first backup is taken", bak.read_bytes(), b"before the fix\n")
-
-        conf.write_bytes(b"after the fix\n")
-        spool_audit._backup_once(str(conf), str(bak))
-        check("the second run does NOT overwrite it", bak.read_bytes(), b"before the fix\n")
 
 
-def test_disable_retention_maps_each_failure_to_what_it_tells_the_operator() -> None:
-    """The order of operations and the failure messages are the whole logic of
-    a function that rewrites a live system config as root. Every step is
-    injected here, so no cupsd.conf is touched and no daemon is restarted."""
-    disable = spool_audit.disable_retention
-    ok_read = lambda _p: b"PreserveJobFiles No\n"  # noqa: E731
-    noop = lambda *_a: None  # noqa: E731
-
-    def boom(exc: BaseException) -> object:
-        def go(*_a: object) -> None:
-            raise exc
-        return go
-
-    # A conf that is not the system one must not restart the daemon at all.
-    ok, detail = disable("/tmp/not-the-system-conf", read=ok_read, backup=noop,
-                         write=noop, restart=boom(AssertionError("restarted!")))
-    check_true("a non-system conf is written without restarting", ok)
-    check_true("and says so", "not the system config" in detail)
-
-    ok, detail = disable("/tmp/x", read=boom(PermissionError()), backup=noop,
-                         write=noop, restart=lambda: (True, "systemctl"))
-    check("an unreadable conf fails", ok, False)
-    check_true("naming the error class", "PermissionError" in detail)
-
-    # The backup must be taken BEFORE the write, and a failed backup must stop
-    # the whole thing: a --fix that cannot be undone is not worth the risk.
-    ok, detail = disable("/tmp/x", read=ok_read, backup=boom(OSError()),
-                         write=boom(AssertionError("wrote without a backup!")),
-                         restart=lambda: (True, "systemctl"))
-    check("a failed backup refuses to rewrite", ok, False)
-    check_true("and says why", "refusing to rewrite" in detail)
-
-    ok, detail = disable("/tmp/x", read=ok_read, backup=noop, write=boom(OSError()),
-                         restart=lambda: (True, "systemctl"))
-    check("a failed write fails", ok, False)
-    check_true("and promises the original is untouched", "original untouched" in detail)
-
-    # Written but not restarted is NOT success: the daemon still has the old
-    # setting, so documents are still being kept.
-    ok, detail = disable("/etc/cups/cupsd.conf", read=ok_read, backup=noop,
-                         write=noop, restart=lambda: (False, "no working init command"))
-    check("a failed restart is a failure", ok, False)
-    check_true("and says the running daemon is unchanged",
-               "still has the old setting" in detail)
-
-    # The verify re-reads from disk. A config that does not actually say No
-    # must not be reported as fixed, however well the write went.
-    ok, detail = disable("/etc/cups/cupsd.conf", read=lambda _p: b"PreserveJobFiles Yes\n",
-                         backup=noop, write=noop, restart=lambda: (True, "systemctl"))
-    check("a config that still retains is not a success", ok, False)
-
-    # The case that separates a shared rule from a second matcher. cupsd
-    # honours the LAST directive, so this config RETAINS. A verify that stops
-    # at the first "PreserveJobFiles No" reports the fix as done over a host
-    # that is still keeping documents, which is danger reported as safety, and
-    # it is why the verify calls parse_retention rather than matching again.
-    ok, detail = disable("/etc/cups/cupsd.conf",
-                         read=lambda _p: b"PreserveJobFiles No\nPreserveJobFiles Yes\n",
-                         backup=noop, write=noop, restart=lambda: (True, "systemctl"))
-    check("No followed by Yes is NOT a successful fix", ok, False)
-
-    ok, detail = disable("/etc/cups/cupsd.conf", read=ok_read, backup=noop,
-                         write=noop, restart=lambda: (True, "systemctl"))
-    check("the whole happy path succeeds", ok, True)
-    check_true("naming how it restarted", "systemctl" in detail)
 
 
 def main() -> int:

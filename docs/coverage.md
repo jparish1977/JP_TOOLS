@@ -110,3 +110,15 @@ into a thin wrapper, tag that, and test the logic around it. §7.6 said to use
 the pragma "sparingly and only on IO leaves". The doctrine was right and
 unenforced, which is why §8 now exists as a checklist that verifies these claims
 rather than asserting them.
+
+## How it ended
+
+On 2026-08-14 the destructive half of `spool-audit.py` was deleted outright:
+1573 lines to 1018, and the exempt region with it. What remains is **1 line of
+1018, a single zero-branch listing wrapper**, and coverage held at 94%.
+
+Worth recording as the cheapest fix available, because it was never on the list.
+Every round of this branch treated the exempt region as something to test, seam,
+or justify. Deleting the feature underneath it removed the exemption, the seams
+it needed, and the bugs, in one commit. A pragma is a claim that code cannot be
+tested; sometimes the honest answer is that it did not need to exist.
