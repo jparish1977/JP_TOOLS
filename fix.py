@@ -12,7 +12,9 @@ import json
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 # One definition of where ruff's config comes from. check.py is import-safe
 # (its argparse sits behind a main guard), so this defers to it rather than
@@ -42,7 +44,7 @@ def _ruff_count(target: str) -> int:
         return 0
 
 
-def fix_ruff(target: str, dry_run: bool, unsafe: bool = False, **_: object) -> dict:
+def fix_ruff(target: str, dry_run: bool, unsafe: bool = False, **_: object) -> dict[str, Any]:
     """Apply ruff's fixes.
 
     `ruff check --fix` applies *safe* fixes only. Most of what accumulates in
@@ -84,7 +86,7 @@ def fix_ruff(target: str, dry_run: bool, unsafe: bool = False, **_: object) -> d
     }
 
 
-def fix_prettier(target: str, dry_run: bool, **_: object) -> dict:
+def fix_prettier(target: str, dry_run: bool, **_: object) -> dict[str, Any]:
     local_bin = Path(__file__).parent / "node_modules" / ".bin"
     cmd = (
         str(local_bin / "prettier.cmd") if (local_bin / "prettier.cmd").exists() else
@@ -122,7 +124,7 @@ def _php_cmd() -> str | None:
     return shutil.which("php") or shutil.which("php.exe")
 
 
-def fix_phpcs(target: str, dry_run: bool, **_: object) -> dict:
+def fix_phpcs(target: str, dry_run: bool, **_: object) -> dict[str, Any]:
     php  = _php_cmd()
     bin_ = _php_bin("phpcbf")
     if not php:
@@ -154,7 +156,7 @@ def fix_phpcs(target: str, dry_run: bool, **_: object) -> dict:
             "output": result.stdout.strip()}
 
 
-def fix_rector(target: str, dry_run: bool, **_: object) -> dict:
+def fix_rector(target: str, dry_run: bool, **_: object) -> dict[str, Any]:
     php  = _php_cmd()
     bin_ = _php_bin("rector")
     if not php:
@@ -179,7 +181,11 @@ def fix_rector(target: str, dry_run: bool, **_: object) -> dict:
                 "note": (result.stderr or result.stdout).strip()[:300]}
 
 
-FIXERS = {
+# Annotated because .get(lang, []) on a bare dict literal infers `object` for
+# the value, and the comprehension in main() then cannot iterate it.
+Fixer = Callable[..., dict[str, Any]]
+
+FIXERS: dict[str, list[tuple[str, Fixer]]] = {
     "python": [("ruff",    fix_ruff)],
     "js":     [("prettier",fix_prettier)],
     "css":    [("prettier",fix_prettier)],
@@ -209,7 +215,7 @@ def _detect_lang(target: str) -> str:
     return "unknown"
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Auto-fix code quality issues.")
     parser.add_argument("target", help="File or directory to fix")
     parser.add_argument("--lang",    choices=["python", "js", "css", "php", "auto"], default="auto")
