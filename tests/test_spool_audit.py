@@ -57,6 +57,7 @@ code always 0", "others list truncated" -- all in untested main()/CLI logic.
 
 import contextlib
 import importlib.util
+import errno
 import io
 import os
 import pathlib
@@ -730,6 +731,80 @@ def test_a_cups_name_at_the_top_level_is_not_a_cups_runtime_file() -> None:
                "cups-fake-lockfile" not in runtime_block)
     check_true("it is still listed, so nothing is hidden",
                "cups-fake-lockfile" in text)
+
+
+def test_an_unreadable_spool_that_sudo_cannot_fix_says_so() -> None:
+    """The corrected advice is rendered, not merely written.
+
+    A non-permission failure (ELOOP, ESTALE, EIO) answered with "re-run with
+    sudo" sends the operator to a command that fails identically, and the fix
+    was to pass the error class through to the report. Coverage of d36c661
+    showed the corrected branch never executed in any test: the guard existed
+    and nothing proved it fires. Reported by thinkpad-session, who rebuilt the
+    pinned gate and read the missing-statement list rather than the percentage.
+    """
+    audit = classify(Listing(
+        Verdict.DENIED, (), (), ("could not read the spool: OSError",),
+    ))
+    text = "\n".join(render(audit, frozenset()))
+
+    check_true("names the error class", "OSError" in text)
+    check_true("says sudo will not help", "sudo will not help" in text)
+    check_true("does not send the operator to sudo", "Re-run with sudo." not in text)
+    check_true("still not a clean result", "NOT a clean result" in text)
+
+
+def test_the_truncated_remainder_says_what_cancel_cannot_reach() -> None:
+    """The worst reported failure on this branch, and its fix was untested.
+
+    A spool of 25 documents plus a stray and a TempDir leak listed neither of
+    the last two: the only files no `cancel` can clear were the two the
+    operator never saw. Stubborn-first ordering fixed the listing, and this
+    line covers what ordering cannot -- the ones past the cap of 20.
+    """
+    stubborn = tuple(
+        TempFile(name=f"unknown-{i:02d}", size=9, head="???") for i in range(25)
+    )
+    audit = classify(Listing(Verdict.CLEAN, (), stubborn))
+    text = "\n".join(render(audit, frozenset()))
+
+    check("all 25 counted", audit.total, 25)
+    check_true("the remainder is declared", "... and 5 more" in text)
+    check_true("and says why they are stubborn",
+               "carry no job id, so `cancel` cannot reach them" in text)
+
+
+def test_reading_the_config_never_blocks_on_a_fifo() -> None:
+    """A hang in a security tool reads as "still checking".
+
+    os.stat on a fifo returns; opening one waits for a writer that never
+    arrives, so `--conf /path/to/fifo` would hang forever with no output. The
+    guard refuses before the open. Untested until 2026-08-14 despite existing
+    for exactly this.
+    """
+    if not hasattr(os, "mkfifo"):
+        print("  note: no os.mkfifo on this platform, fifo case skipped")
+        return
+    with tempfile.TemporaryDirectory() as raw:
+        fifo = Path(raw) / "cupsd.conf"
+        os.mkfifo(fifo)
+
+        try:
+            spool_audit._read_conf(str(fifo))
+        except OSError as exc:
+            check("refused with EINVAL", exc.errno, errno.EINVAL)
+        else:
+            FAILURES.append("_read_conf read a fifo instead of refusing it")
+
+        # And the caller turns that into "unknown", not into a false "OFF".
+        check("retention is unknown, not off",
+              spool_audit.retention_state(str(fifo)), None)
+
+        audit = classify(Listing(Verdict.CLEAN))
+        text = "\n".join(render(audit, frozenset(),
+                                spool_audit.retention_state(str(fifo))))
+        check_true("and the report says so",
+                   "RETENTION: unknown (could not read cupsd.conf)" in text)
 
 
 def test_artifact_only_spool_is_clean() -> None:

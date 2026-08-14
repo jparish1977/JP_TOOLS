@@ -963,10 +963,9 @@ def parse_retention(body: bytes) -> bool:
 def retention_state(conf: str) -> bool | None:
     """Is CUPS configured to keep job files? None if the config is unreadable.
 
-    Nothing but the read lives here now. Read as bytes for the same reason
-    this reads bytes: a printer config is not guaranteed UTF-8,
-    and decoding it is a step that can fail or corrupt for no benefit when all
-    that is wanted is a directive match.
+    Nothing but the read lives here now, and it reads bytes: a printer config
+    is not guaranteed UTF-8, and decoding it is a step that can fail or corrupt
+    for no benefit when all that is wanted is a directive match.
     """
     try:
         body = _read_conf(conf)
