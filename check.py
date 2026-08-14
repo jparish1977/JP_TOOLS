@@ -102,7 +102,7 @@ def run_ruff(target: str) -> dict[str, Any]:
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\([A-Z]")
 
 
-def _plain_env() -> dict:
+def _plain_env() -> dict[str, str]:
     """Environment with colour forcing removed."""
     env = {k: v for k, v in os.environ.items()
            if k not in ("FORCE_COLOR", "CLICOLOR_FORCE", "MYPY_FORCE_COLOR")}
@@ -718,7 +718,7 @@ _HAS_REASON = re.compile(r"reason:\s*\S")
 _BRANCHY = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try)
 
 
-def coverage_exemptions(path: Path) -> list[dict]:
+def coverage_exemptions(path: Path) -> list[dict[str, Any]]:
     """Every `# pragma: no cover` in one file, with the facts about each.
 
     The inventory, not the violations. Both the `no-cover` check and
@@ -780,8 +780,8 @@ def coverage_exemptions(path: Path) -> list[dict]:
             sum(isinstance(n, _BRANCHY) for n in ast.walk(node)),
         ))
 
-    found: list[dict] = []
-    seen: set = set()
+    found: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
     for lineno, text in comments:
         if lineno not in code_rows:
             continue
@@ -812,7 +812,7 @@ def coverage_exemptions(path: Path) -> list[dict]:
     return found
 
 
-def _branchy_no_cover(path: Path) -> list[dict]:
+def _branchy_no_cover(path: Path) -> list[dict[str, Any]]:
     return [
         {
             "file":     e["file"],
@@ -858,11 +858,11 @@ def is_project_file(p: Path, root: Path) -> bool:
     return not (root / "pyvenv.cfg").exists() if probe == root else True
 
 
-def run_no_cover(target: str) -> dict:
+def run_no_cover(target: str) -> dict[str, Any]:
     p = Path(target)
     files = ([f for f in sorted(p.rglob("*.py")) if is_project_file(f, p)]
              if p.is_dir() else [p])
-    issues: list[dict] = []
+    issues: list[dict[str, Any]] = []
     for f in files:
         issues.extend(_branchy_no_cover(f))
     return {"tool": "no-cover", "status": _status(issues), "issues": issues}

@@ -33,6 +33,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 CHECK_PY = Path(__file__).resolve().parent / "check.py"
 
@@ -52,7 +53,7 @@ def _load_check() -> object:
     return module
 
 
-def gather(target: Path, check_mod: object) -> tuple[list[dict], int]:
+def gather(target: Path, check_mod: object) -> tuple[list[dict[str, Any]], int]:
     """Exemptions across `target`, and the total line count scanned."""
     if target.is_dir():
         # check_mod.is_project_file, not a second skip list here. Two
@@ -64,7 +65,7 @@ def gather(target: Path, check_mod: object) -> tuple[list[dict], int]:
         )
     else:
         files = [target]
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     total_lines = 0
     for f in files:
         try:
