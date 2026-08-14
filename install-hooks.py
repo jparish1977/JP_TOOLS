@@ -82,7 +82,7 @@ exit 0
 """
 
 
-def install(repo_path: Path):
+def install(repo_path: Path) -> None:
     git_dir = repo_path / ".git"
     if not git_dir.is_dir():
         print(f"Error: {repo_path} is not a git repository (.git not found)")
@@ -126,7 +126,7 @@ def install(repo_path: Path):
     print(f"Read it: {METHODOLOGY_DOC}")
 
 
-def remove(repo_path: Path):
+def remove(repo_path: Path) -> None:
     hook_file = repo_path / ".git" / "hooks" / "pre-commit"
     if not hook_file.exists():
         print("No pre-commit hook found.")
@@ -156,7 +156,7 @@ def remove(repo_path: Path):
         print(f"Removed JP_TOOLS section from {hook_file} (kept existing hook)")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Install/remove JP_TOOLS pre-commit hook")
     parser.add_argument("path", nargs="?", default=".",
                         help="Path to git repository (default: cwd)")

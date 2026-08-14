@@ -1,8 +1,11 @@
 parameters:
-    # JP_TOOLS shared PHPStan config
-    # Start at level 5 — catches real bugs without demanding full type coverage.
-    # Bump toward 9 as the codebase matures.
-    level: 5
+    # JP_TOOLS shared PHPStan config.
+    # Level 8, because METHODOLOGY section 2.5 says level 8 and this file said
+    # 5. A gate quieter than the manual shipped beside it is worse than either
+    # setting on its own: batocera-watch's client/ reported 3 findings at 5 and
+    # 17 at 8, so four fifths of the PHP verdict was missing while the summary
+    # read as authoritative.
+    level: 8
 
     # Don't fail on missing vendor stubs for common frameworks.
     # Add project-specific ignores in a local phpstan.neon that includes this one.
