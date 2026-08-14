@@ -92,7 +92,7 @@ already own is usually what shrinks the job most.
 
 | Script | Purpose |
 |---|---|
-| `spool-audit.py` | Audit and clear documents CUPS keeps after printing, including its TempDir — `--fix` stops the retention, `--purge` clears what is there |
+| `spool-audit.py` | Report documents CUPS keeps after printing, including its TempDir. Reports only — it never deletes, edits or restarts anything, and names the CUPS commands that do |
 
 Printing sends the whole document through CUPS, and CUPS may keep a copy after
 the job finishes. Print a password, a recovery sheet or a private key and that
@@ -111,19 +111,31 @@ still present 60 seconds after the job finished. Writing `PreserveJobFiles No`
 explicitly stops it. An unset directive and an explicit `No` behave differently,
 which matches [apple/cups#6083](https://github.com/apple/cups/issues/6083)
 (open, no root cause, repo archived March 2026 -- reported there on macOS, and
-this reproduces it on Linux). That is what `--fix` addresses.
+this reproduces it on Linux). The explicit `No` is the fix, and the report
+says so rather than writing it for you.
 
 It audits `tmp/` as well as the top level. CUPS `TempDir` holds document
 content during filtering, so a top-level-only check reports clean while
-readable data sits one directory down. Passing job ids scopes `--purge` to
-those jobs only, because on a shared printer deleting everything destroys other
-people's documents.
+readable data sits one directory down. Passing job ids highlights those jobs in
+the report; the exit code still answers the wider question, because "the job
+you asked about is gone" and "the spool is empty" are different claims.
 
-`--purge` deletes what it can **identify** as print data. A file it cannot
-identify is reported and blocks a clean verdict, but is never deleted without
-`--include-unrecognised` -- over-reporting is the safe direction for a report
-and the destructive one for a delete set, and an earlier version used one rule
-for both and destroyed a plain-text README.
+A file it cannot identify is reported and blocks a clean verdict. Over-reporting
+is the safe direction for a report -- and it was the wrong direction for the
+delete set this tool used to have, which shared the same predicate and destroyed
+a plain-text README. Both halves lived here until 2026-08-14.
+
+**It clears nothing, on purpose.** The clearing half was `PreserveJobFiles No`
+plus a restart plus an unlink, which is `cancel -a -x` and one config line --
+work CUPS already does correctly. It was also where every dangerous bug lived: a
+`--fix` that could destroy a device node, one that truncated `cupsd.conf` to zero
+bytes, a `--purge` that followed a symlinked `TempDir` out of the directory it
+was told to audit. The report now names the commands and leaves them to you:
+
+```
+cancel -a -x                      # cancel every job and its documents
+PreserveJobFiles No               # in /etc/cups/cupsd.conf, then restart cups
+```
 
 It reads directly and has no privilege-escalation path, so run it under `sudo`
 for the real spool. That is deliberate: an internal sudo fallback was a second

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit and clear documents left behind in the CUPS print spool.
+"""Report documents left behind in the CUPS print spool. Reports only.
 
 Printing sends the whole document through CUPS, and CUPS may keep a copy after
 the job finishes. If you ever print a password, a recovery sheet or a key, that
@@ -8,19 +8,29 @@ copy outlives the paper, on a machine that may not be yours.
 Usage:
     python spool-audit.py                    # report on everything
     python spool-audit.py 85 86              # report, highlighting those jobs
-    python spool-audit.py 85 86 --purge      # delete ONLY those jobs' documents
-    python spool-audit.py --purge            # delete every retained document
-    python spool-audit.py --include-control  # also count/remove job control files
-    python spool-audit.py --include-unrecognised  # also DELETE unidentified files
-    python spool-audit.py --fix              # stop CUPS retaining documents
+    python spool-audit.py --include-control  # also count job control files
     python spool-audit.py --spool DIR        # audit a directory instead
+
+Exit status: 0 nothing retained, 1 content still on disk, 2 could not be read.
 
 Reads directly, so it must run as root for the real spool (sudo). There is no
 privilege-escalation path inside the tool: a second implementation of the same
 listing kept disagreeing with the first, and that divergence caused a large
 share of this file's history of bugs.
 
-Reading the spool needs root, so this normally runs under sudo.
+THIS TOOL NEVER WRITES
+    It opens files to read their first bytes and it reads cupsd.conf. It does
+    not delete, edit, restart or configure anything, and it takes no flag that
+    would. That is a deliberate cut, made 2026-08-14 after this file had spent
+    fifteen review rounds mostly on its own destructive half: a --fix that
+    could destroy a device node, a --fix that truncated cupsd.conf to zero
+    bytes, a --purge that followed a symlinked TempDir out of the directory it
+    was told to audit. None of those bugs were possible in the reporting half,
+    and the clearing they were re-implementing is something CUPS already does
+    correctly. See "HOW TO CLEAR IT" below.
+
+    The reporting half is the part with no equivalent: answering "what is this
+    file, actually" about spool contents you did not put there.
 
 WHY THE PROBLEM EXISTS AT ALL
     CUPS documents PreserveJobFiles as defaulting to No, so document files
@@ -32,15 +42,24 @@ WHY THE PROBLEM EXISTS AT ALL
         t+10s d-files=1     t+60s  d-files=1
 
     The document sat there for the full minute. Writing "PreserveJobFiles No"
-    explicitly -- which --fix does -- stops it: a print afterwards left no
-    document file at all. So an unset directive and an explicit No behave
-    DIFFERENTLY, and the documented default cannot be relied on.
+    explicitly stops it: a print afterwards left no document file at all. So an
+    unset directive and an explicit No behave DIFFERENTLY, and the documented
+    default cannot be relied on.
 
     That matches apple/cups issue #6083, open with no root cause and the
     repository archived in March 2026. The issue only reports macOS; this
     reproduces it on Linux.
 
-    It is the reason --fix is not ceremony around a setting you could just set.
+HOW TO CLEAR IT
+    With CUPS' own tools, which handle a running daemon correctly:
+
+        cancel -a -x                      # cancel every job and its documents
+        sudo nano /etc/cups/cupsd.conf    # add: PreserveJobFiles No
+        sudo systemctl restart cups       # and stop it happening again
+
+    The explicit "No" matters — see above, an unset directive is not the same
+    thing. Re-run this tool afterwards to check the spool is actually empty,
+    which is the job it is for.
 
 WHY THIS EXISTS AS A TOOL
     The obvious one-liner is wrong in a way that reports danger as safety:
@@ -63,10 +82,10 @@ WHAT COUNTS AS A LEAK
     c<job>       control files. Not document content, but they carry the job
                  title and submitting user, so a job named
                  "gpg-private-key.txt" is disclosure by itself. Counted only
-                 with --include-control, and never removed without it.
+                 with --include-control, because naming them in a report moves
+                 that disclosure somewhere less protected than the spool.
     tmp/cups-*   CUPS runtime files (lockfiles, notifier sockets). NOT content.
-                 Reported separately, never counted as a leak, never purged --
-                 deleting them removes a lock from under a running cupsd.
+                 Reported separately, never counted as a leak.
 """
 
 from __future__ import annotations
@@ -76,11 +95,8 @@ import contextlib
 import errno
 import os
 import re
-import shutil
 import stat
-import subprocess
 import sys
-import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -252,66 +268,6 @@ class Audit:
         return 0 if self.verdict is Verdict.CLEAN else 1
 
 
-def should_restart_cups(conf: str) -> bool:
-    """Should --fix restart the live daemon after writing `conf`?
-
-    Only when `conf` IS the daemon's config. `--fix --conf /tmp/x` restarted
-    the machine's real cups.service and reported success while
-    /etc/cups/cupsd.conf was untouched, then "verified" by re-reading the file
-    it had just written -- proof-shaped, and checking the wrong file.
-    """
-    here, system = _safe_resolve(Path(conf)), _safe_resolve(Path(DEFAULT_CONF))
-    if here is not None and system is not None:
-        return here == system
-    return conf == DEFAULT_CONF
-
-
-def _safe_resolve(p: Path) -> Path | None:
-    """resolve() or None. It touches the filesystem and CAN raise.
-
-    Same class as Path.exists() not swallowing EACCES: an unreadable component
-    anywhere in the path makes resolve() raise, and `--spool /proc/1/root/x`
-    crashed with a traceback. The containment roots are the safety boundary, so
-    a root that cannot be resolved must stop a purge rather than be guessed at.
-    """
-    try:
-        return p.resolve()
-    except (OSError, RuntimeError):
-        # RuntimeError("Symlink loop from ...") on ELOOP in CPython <= 3.12,
-        # which CI pins and Ubuntu 24.04 ships. Catching only OSError let it
-        # escape as a traceback with exit 1 -- the code this tool reserves for
-        # "content you care about is still there", so a wrapper could not tell
-        # a crash from a finding.
-        return None
-
-
-def is_inside(candidate: Path, roots: tuple[Path, ...]) -> bool:
-    """Is `candidate` at or below one of `roots`? Pure path arithmetic.
-
-    THE invariant this tool was missing. Five findings across three review
-    rounds were all one absent containment rule, re-decided ad hoc at each
-    site and therefore right at some and wrong at others:
-
-      - an absolute --temp replaced the spool in a pathlib join, so --purge
-        deleted from the live spool when told to audit a backup copy
-      - a relative --temp built a path that did not exist, and the resulting
-        FileNotFoundError counted as a successful delete
-      - `--spool /var/spool/cups/` with a trailing slash compared unequal and
-        skipped the configured TempDir
-      - symlinks among TempDir's children were followed and reported destroyed
-        while their targets survived
-      - TempDir ITSELF being a symlink was never checked, so --purge deleted a
-        file outside the named spool and printed SCOPE CLEAN
-
-    Each fix taught one site the rule and left its twins wrong. Deciding it
-    once, here, is what makes the class unable to recur.
-
-    Both arguments must already be resolved: resolution touches the filesystem,
-    this does not.
-    """
-    return any(candidate == r or candidate.is_relative_to(r) for r in roots)
-
-
 def temp_child_note(
     label: str,
     name: str,
@@ -335,7 +291,7 @@ def temp_child_note(
     if is_symlink:
         return (
             f"{label}/{name} -> {target} (symlink, NOT followed; "
-            "removing it would not remove the target)"
+            "not examined, and deleting the link would not remove the target)"
         )
     if is_dir:
         # Callers recurse into real directories. This branch remains for a
@@ -492,25 +448,6 @@ def classify(
     )
 
 
-def victims_for(audit: Audit, include_unrecognised: bool = False) -> tuple[Entry, ...]:
-    """What --purge should delete.
-
-    If job ids were given, only those. Deleting everything when the user named
-    specific jobs destroys other people's documents on a shared printer, which
-    is precisely the machine this tool is aimed at.
-    """
-    pool = audit.targeted if audit.asked_for_jobs else audit.targeted + audit.others
-    if include_unrecognised:
-        return pool
-    # "Over-report, never dismiss" is the right rule for a REPORT and the wrong
-    # one for a DELETE SET, and the same predicate was serving both. A file is
-    # UNRECOGNISED because it failed to be recognised as harmless, not because
-    # it matched a print format -- so `--purge` deleted README-do-not-delete,
-    # plain text with no print magic, and printed SCOPE CLEAN. Never destroy
-    # what could not be identified; say so instead.
-    return tuple(e for e in pool if e.kind is not Kind.UNRECOGNISED)
-
-
 def safe_name(name: str) -> str:
     """A filename that cannot forge a report line.
 
@@ -574,7 +511,7 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
             lines.append("  none present. Those documents are GONE.")
         else:
             lines += [f"  >>> {safe_name(e.name)}  STILL PRESENT" for e in audit.targeted]
-            lines.append("  remove ONLY these with: --purge")
+            lines.append("  clear these with: cancel -x " + " ".join(str(j) for j in sorted(jobs)))
         lines.append("")
 
     # Kind means EVIDENCE since the classification was split; location comes
@@ -608,10 +545,10 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
                        if e.kind in (Kind.TEMP, Kind.UNRECOGNISED))
         if stubborn:
             lines.append(f"  ... and {len(hidden)} more, {stubborn} of which "
-                         "--purge will NOT clear on its own")
+                         "carry no job id, so `cancel` cannot reach them")
         else:
             lines.append(f"  ... and {len(hidden)} more, all ordinary job files "
-                         "that --purge clears")
+                         "that `cancel -a -x` clears")
     if identified:
         in_temp = sum(1 for e in identified if e.name.startswith(prefix))
         lines.append("")
@@ -620,7 +557,7 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         )
         lines.append("  (PostScript, PDF or PJL), so they ARE document content by")
         lines.append("  evidence, not a maybe. They carry no job id, so they cannot be")
-        lines.append("  targeted by number. Purge without job ids.")
+        lines.append("  targeted by job number, so `cancel` cannot reach them.")
         if in_temp:
             lines.append(f"  {in_temp} of them are in the CUPS TempDir, mid-filter.")
     if unidentified:
@@ -629,8 +566,8 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         lines.append(
             f"  {len(unidentified)} of these could not be identified at all,"
         )
-        lines.append("  so they are not ruled out. Deleting them needs")
-        lines.append("  --include-unrecognised, and only without job ids.")
+        lines.append("  so they are not ruled out. Look at them before you")
+        lines.append("  decide anything; this tool will not decide for you.")
         if in_temp:
             lines.append(f"  {in_temp} of them are in the CUPS TempDir.")
 
@@ -643,7 +580,7 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         other = [e for e in audit.artifacts if e not in runtime]
         if runtime:
             lines.append("")
-            lines.append(f"CUPS RUNTIME FILES (not document content, never purged): {len(runtime)}")
+            lines.append(f"CUPS RUNTIME FILES (not document content, leave them alone): {len(runtime)}")
             lines += [f"  {safe_name(e.name)}" for e in runtime]
         if other:
             lines.append("")
@@ -663,11 +600,12 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
             f"NOT COUNTED: {audit.uncounted_control} control file(s). They carry the job"
         )
         lines.append("  title and submitting user, which can be disclosure by itself.")
-        lines.append("  Use --include-control to count and purge them.")
+        lines.append("  Use --include-control to count them.")
 
     lines.append("")
     if retention is True:
-        lines.append("RETENTION: ON. CUPS is keeping documents. --fix stops that.")
+        lines.append("RETENTION: ON. CUPS is keeping documents. Set")
+        lines.append("  'PreserveJobFiles No' in cupsd.conf and restart cups.")
     elif retention is False:
         lines.append("RETENTION: OFF (PreserveJobFiles No).")
     else:
@@ -679,180 +617,11 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
             f"{len(audit.unexamined)} area(s) could not be examined."
         )
     elif audit.verdict is Verdict.RETAINED:
-        lines.append(f"VERDICT: {audit.total} retained file(s) still on disk. --purge clears them.")
+        lines.append(f"VERDICT: {audit.total} retained file(s) still on disk. "
+                     "Clear them with: cancel -a -x")
     else:
         lines.append("VERDICT: spool is clean.")
     return lines
-
-
-@dataclass(frozen=True)
-class Outcome:
-    """What to print and what to exit with. Pure: no I/O, no printing.
-
-    main()'s decision logic lived inline and untested, and it produced findings
-    in every review round of this branch: a --fix failure discarded so the run
-    exited 0, a caveat present in one branch and missing from its twin, an exit
-    code that collapsed two states. The tested parts of this file stopped
-    generating defects; this part never did, because nothing exercised it.
-    """
-
-    lines: tuple[str, ...] = ()
-    code: int = 0
-
-
-def leftover_caveats(
-    audit: Audit, jobs: frozenset[int], include_unrecognised: bool = False
-) -> tuple[str, ...]:
-    """What a purge could not remove, and why. ONE function, both call sites.
-
-    The "nothing to purge" branch and the post-purge branch each grew their own
-    version of this and drifted: the caveat about files carrying no job id was
-    added to one and not the other, so `85 --purge` over a spool holding only a
-    d00085-001.bak printed "Nothing to purge." and exited 0 over a file it had
-    just classified as a PDF. Sharing the function is what stops the twins
-    diverging again.
-    """
-    out = []
-    if audit.uncounted_control:
-        out.append(
-            f"{audit.uncounted_control} control file(s) were not counted or removed; "
-            "they carry the job title. Use --include-control."
-        )
-    # ANY content a scoped purge will not touch, not just the unattributable
-    # kind. Checking only `job is None` meant a document belonging to job 77
-    # produced no caveat, so `85 --purge` printed SCOPE CLEAN and exited 0 with
-    # a readable PDF on disk. The invariant fixtures had the same blind spot:
-    # every scoped case paired job 85 with an unattributable leftover, never
-    # with another job's document.
-    unrecognised = [e for e in audit.others if e.kind is Kind.UNRECOGNISED]
-    if unrecognised and jobs:
-        # Checked BEFORE the flag: unrecognised files carry no job id, so a
-        # scoped purge can never reach them however the flag is set. The old
-        # ordering handed scoped runs advice that could not work, and only
-        # corrected itself after they had followed it.
-        out.append(
-            f"{len(unrecognised)} unidentified file(s) carry no job id, so a scoped "
-            "purge cannot reach them. Re-run --purge --include-unrecognised "
-            "without job ids."
-        )
-    elif unrecognised and not include_unrecognised:
-        out.append(
-            f"{len(unrecognised)} file(s) could not be identified and were NOT "
-            "deleted. Inspect them, then use --include-unrecognised if they "
-            "really are print data."
-        )
-
-    if jobs:
-        # Exclude the unrecognised: they are reported above, and counting them
-        # here too read as two files when there was one.
-        no_job = [e for e in audit.others
-                  if e.job is None and e.kind is not Kind.UNRECOGNISED]
-        other_job = [e for e in audit.others if e.job is not None]
-        if no_job:
-            out.append(
-                f"{len(no_job)} file(s) carry no job id and cannot be purged by job "
-                "number. Re-run --purge without job ids to clear them."
-            )
-        if other_job:
-            js = ", ".join(str(j) for j in sorted({e.job for e in other_job if e.job is not None}))
-            out.append(
-                f"{len(other_job)} file(s) belong to other job(s) ({js}) and were "
-                "not touched. Re-run --purge without job ids to clear them."
-            )
-    return tuple(out)
-
-
-def fix_outcome(ok: bool, detail: str, also_purging: bool) -> Outcome:
-    """Result of --fix. A failure must never be forgotten by a later success."""
-    if ok:
-        line = f"PreserveJobFiles set to No; {detail}."
-        if also_purging:
-            return Outcome((line,), 0)
-        return Outcome((line, "Existing files are untouched. Run --purge to clear them."), 0)
-    lines = [f"FAILED: {detail}"]
-    if also_purging:
-        # The config may be written and only the restart failed, so the files on
-        # disk are still worth clearing -- but the failure has to survive into
-        # the exit code, or `--fix --purge && echo SAFE` fires with retention
-        # still on and the next print leaks again.
-        lines.append("Continuing to --purge anyway; files on disk are unaffected.")
-    return Outcome(tuple(lines), 1)
-
-
-def purge_precheck(
-    audit: Audit, jobs: frozenset[int], roots_ok: bool, include_unrecognised: bool = False
-) -> Outcome | None:
-    """Decide before deleting. None means "go ahead and delete"."""
-    if not roots_ok:
-        return Outcome((
-            "REFUSING TO PURGE: the audited path could not be resolved,",
-            "  so nothing can be proven to be inside it.",
-        ), 2)
-    if victims_for(audit, include_unrecognised):
-        return None
-
-    lines = ["Nothing to purge."]
-    code = 1 if audit.total else 0
-    caveats = leftover_caveats(audit, jobs, include_unrecognised)
-    if caveats:
-        # Previously this printed the single line "Nothing to purge." over a
-        # retained document and exited 0, while the report path on the same
-        # spool said "1 retained file(s) still on disk" and exited 1. The tool
-        # contradicted itself depending on the flag.
-        scope = "for the job(s) named" if jobs else ""
-        state = f"{audit.total} file(s) still on disk" if audit.total else "see below"
-        headline = f"Nothing to purge{' ' + scope if scope else ''}: {state}."
-        lines = [headline] + [f"  {c}" for c in caveats]
-    if audit.unexamined:
-        lines += [f"{len(audit.unexamined)} area(s) could not be examined:"]
-        lines += [f"  {u}" for u in audit.unexamined]
-        lines += ["This is NOT a clean result."]
-        return Outcome(tuple(lines), 2)
-    return Outcome(tuple(lines), code)
-
-
-def purge_outcome(
-    deleted: int, failed: int, after: Audit | None, jobs: frozenset[int],
-    include_unrecognised: bool = False,
-) -> Outcome:
-    """Decide after deleting. `after` is None when the re-read failed."""
-    if failed:
-        # 1, not 2. A review round argued this was "cannot tell" and I applied
-        # it without forming my own view. `failed` is incremented on a
-        # containment refusal, a PermissionError from unlink, or an
-        # IsADirectoryError -- in every one of those the file is demonstrably
-        # STILL THERE. That is what 1 means here. Only a resolve failure is
-        # genuinely unknown, and it is the narrow case.
-        return Outcome((
-            f"DELETE FAILED for {failed} file(s); {deleted} removed.",
-            # Do not name a cause: permissions, a directory matching the
-            # document pattern, a read-only mount and a symlink loop all land
-            # here, and asserting the wrong one sends the user somewhere
-            # useless.
-            "Not files being recreated: the removals themselves failed.",
-        ), 1)
-    if after is None:
-        return Outcome((f"{deleted} removed, but the spool could not be re-read to confirm.",), 2)
-
-    remaining = len(victims_for(after, include_unrecognised))
-    lines = [f"{deleted} removed. Remaining in scope: {remaining}"]
-    if after.unexamined:
-        lines += [f"NOT CLEAN: {len(after.unexamined)} area(s) could not be examined:"]
-        lines += [f"  {u}" for u in after.unexamined]
-        return Outcome(tuple(lines), 2)
-    if remaining:
-        return Outcome((*lines, "STILL PRESENT after a successful delete."), 1)
-    caveats = leftover_caveats(after, jobs, include_unrecognised)
-    if caveats:
-        # The exit code comes from what REMAINS, not from a caveat string
-        # existing: uncounted control files are opt-in by design and the report
-        # path calls that spool clean, so making them force 1 here had the two
-        # paths contradict each other on the same spool.
-        lines += ["NOT FULLY CLEAN:" if after.total else "Note:"]
-        lines += [f"  {c}" for c in caveats]
-        return Outcome(tuple(lines), 1 if after.total else 0)
-    return Outcome((*lines, "SCOPE CLEAN."), 0)
-
 
 
 # --- I/O boundary ----------------------------------------------------------
@@ -1146,83 +915,6 @@ def read_spool(
 
 
 
-def _unlink_path(p: Path) -> None:  # pragma: no cover
-    p.unlink()
-
-
-def _resolve_path(p: Path) -> Path:  # pragma: no cover
-    return p.resolve()
-
-
-def delete(
-    spool: str,
-    entries: tuple[Entry, ...],
-    roots: tuple[Path, ...],
-    *,
-    unlink: Callable[[Path], None] = _unlink_path,
-    resolve: Callable[[Path], Path] = _resolve_path,
-) -> tuple[int, int]:
-    """Remove files, refusing anything outside `roots`. Returns (deleted, failed).
-
-    A failed delete must be reported as a failed delete. Reporting it as
-    "the files are still there" sends the user hunting a process that is
-    recreating them, when in fact the removal never had permission.
-
-    `unlink` and `resolve` are injectable because the mapping from error to
-    outcome IS the logic of this function, and it was untestable while the whole
-    thing carried `pragma: no cover`. Getting that mapping wrong is bug 5 in the
-    test suite's header: a permission failure reported as files respawning. The
-    two defaults above are the only part that touches the filesystem, and they
-    have no branches, which is what a wrapper exempt from coverage should look
-    like.
-    """
-    deleted = failed = 0
-    for e in entries:
-        target = Path(spool) / e.name
-        # Resolve before checking: a symlinked TempDir, or an absolute name
-        # replacing the join, both land outside the roots only after
-        # resolution. Refusing here is the last line of defence -- the walk
-        # should not have offered such a path in the first place.
-        try:
-            resolved = resolve(target)
-        except (OSError, RuntimeError):
-            failed += 1
-            continue
-        if not is_inside(resolved, roots):
-            # safe_name here too. Every other name in the report is escaped so a
-            # filename cannot forge a report line, and this one was not: a live
-            # spool races, so a listed file can become a symlink out of the
-            # spool between the listing and the unlink, and its name reaches
-            # this line verbatim on the purge path.
-            print(f"  REFUSED (outside the audited directory): "
-                  f"{safe_name(e.name)} -> {safe_name(str(resolved))}")
-            failed += 1
-            continue
-        try:
-            unlink(target)
-            deleted += 1
-            continue
-        except FileNotFoundError:
-            deleted += 1
-            continue
-        except PermissionError:
-            pass
-        except OSError:
-            # IsADirectoryError (a directory named d00085-001 matches DOCUMENT
-            # and both listing paths return directory names), EROFS on a
-            # read-only --spool, ELOOP, EBUSY. Any of these used to escape and
-            # kill the purge mid-way, after files were already gone and before
-            # any summary was printed.
-            failed += 1
-            continue
-        # No `rm` fallback: it would run as the same uid with the same
-        # directory permissions and fail identically. It was a leftover from
-        # the removed escalation path and contradicted the documented "no
-        # privilege-escalation path inside the tool".
-        failed += 1
-    return deleted, failed
-
-
 def parse_retention(body: bytes) -> bool:
     """Does this config body leave CUPS keeping job files?
 
@@ -1263,34 +955,6 @@ def retention_state(conf: str) -> bool | None:
     return parse_retention(body)
 
 
-def rewrite_conf(body: bytes) -> bytes:
-    """The config with PreserveJobFiles set to No, replacing or appending.
-
-    Pure, and bytes end to end. Reading with errors="replace" and writing the
-    result back was a lossy round-trip of the machine's printer config: a
-    Latin-1 comment came back as U+FFFD, and the replacement character is
-    unencodable in an ASCII locale. UnicodeEncodeError is a ValueError, which
-    `except OSError` does not catch, so cupsd.conf was left at 0 bytes with an
-    uncaught traceback and exit 1, the code reserved for "content you care
-    about is still there". Bytes cannot be mistranscoded and cannot raise on
-    encode. This file is a config, not text we need to interpret.
-
-    EVERY matching directive is replaced, not the first. cupsd honours the last
-    one, so replacing only the first would leave a later Yes in force and the
-    tool would report a fix that had not happened.
-    """
-    out, replaced = [], False
-    for line in body.splitlines():
-        if re.match(rb"^\s*PreserveJobFiles\b", line, re.IGNORECASE):
-            out.append(b"PreserveJobFiles No")
-            replaced = True
-        else:
-            out.append(line)
-    if not replaced:
-        out.append(b"PreserveJobFiles No")
-    return b"\n".join(out) + b"\n"
-
-
 def _read_conf(path: str) -> bytes:
     """Read a config file, refusing the types that would hang.
 
@@ -1310,179 +974,6 @@ def _read_conf(path: str) -> bytes:
     return Path(path).read_bytes()
 
 
-def _run_rc(cmd: list[str]) -> int:  # pragma: no cover
-    return subprocess.run(cmd, check=False).returncode
-
-
-def _backup_once(src: str, dest: str) -> None:
-    """Copy src to dest unless dest already exists. Raises OSError on failure.
-
-    Never overwrite: running --fix twice replaced the pre-fix original with the
-    already-fixed copy, leaving nothing to restore from. Done in Python rather
-    than `cp -p -n`, which is a crash path when cp is not on PATH and warns on
-    coreutils >= 9.2.
-    """
-    if not Path(dest).exists():
-        shutil.copy2(src, dest)
-
-
-def _write_atomic(
-    path: str,
-    body: bytes,
-    *,
-    chown: Callable[[str, int, int], None] = os.chown,
-    stat_fn: Callable[[str], os.stat_result] = os.stat,
-) -> None:
-    """Replace `path` with `body`, preserving mode and owner. Raises OSError.
-
-    Written to a temp file and renamed, never truncated in place: cupsd.conf
-    belongs to a running daemon, and any failure mid-write leaves it empty.
-    os.replace is atomic within a directory, so the daemon sees either the old
-    file or the new one and never a partial one.
-
-    `chown` and `stat_fn` are injectable because the dangerous branch is the
-    one where chown fails AND the ownership then differs, which a non-root user
-    cannot provoke: their temp file already has the ownership they wanted, so
-    the tolerant path is the only one they can reach for real.
-    """
-    src = stat_fn(path)
-    # Refuse anything that is not a regular file. os.replace happily unlinks a
-    # FIFO, a socket or a device node and puts a regular file there: verified
-    # 2026-08-13, a FIFO became a 20-byte regular file. `--conf /dev/null` is
-    # the invocation this branch's own suites use everywhere, so
-    # `sudo spool-audit.py --fix --conf /dev/null` would have reported success
-    # while destroying the device node. A tool whose purpose is not to damage
-    # what it touches does not get to replace things it was not pointed at.
-    if not stat.S_ISREG(src.st_mode):
-        raise OSError(errno.EINVAL, "not a regular file", path)
-    fd, tmp_name = tempfile.mkstemp(
-        dir=str(Path(path).parent), prefix=".spool-audit-", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(body)
-            fh.flush()
-            # The daemon is restarted immediately after this. Without fsync a
-            # crash between rename and restart can leave the rename durable and
-            # the contents not.
-            os.fsync(fh.fileno())
-        # mkstemp creates 0600 owned by the caller, and os.replace keeps the
-        # REPLACEMENT's mode and owner, not the original's. Renaming without
-        # this would quietly change cupsd.conf from its packaged root:lp 0640,
-        # a permissions change nobody asked for, made by a tool whose whole
-        # purpose is not to damage what it touches.
-        os.chmod(tmp_name, stat.S_IMODE(src.st_mode))
-        try:
-            chown(tmp_name, src.st_uid, src.st_gid)
-        except OSError:
-            # Tolerable only if the file already has the ownership we wanted,
-            # which is the ordinary case when not running as root. Otherwise
-            # the rename would change it, so refuse.
-            now = os.stat(tmp_name)
-            if (now.st_uid, now.st_gid) != (src.st_uid, src.st_gid):
-                raise
-        os.replace(tmp_name, path)
-    except OSError:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_name)
-        raise
-
-
-def _restart_cups(
-    *,
-    which: Callable[[str], str | None] = shutil.which,
-    run: Callable[[list[str]], int] = _run_rc,
-) -> tuple[bool, str]:
-    """Restart CUPS via whatever init this host has. Returns (ok, how).
-
-    A present-but-failing init falls through to the next one: systemctl exists
-    on hosts where it is not the running init, where it exits non-zero, and
-    stopping there would report "no working init command" on a machine that has
-    `service`.
-    """
-    for name, cmd in (
-        ("systemctl", ["systemctl", "restart", "cups"]),
-        ("service", ["service", "cups", "restart"]),
-    ):
-        if which(name) and run(cmd) == 0:
-            return True, name
-    return False, "no working init command"
-
-
-def disable_retention(
-    conf: str,
-    *,
-    read: Callable[[str], bytes] = _read_conf,
-    backup: Callable[[str, str], None] = _backup_once,
-    write: Callable[[str, bytes], None] = _write_atomic,
-    restart: Callable[[], tuple[bool, str]] = _restart_cups,
-) -> tuple[bool, str]:
-    """Set PreserveJobFiles No and restart CUPS. Returns (ok, detail).
-
-    The path is passed as an argument, never interpolated into a shell string:
-    this runs under sudo, and a conf path containing shell metacharacters would
-    otherwise execute as root.
-
-    Every IO step is injectable. What is left here is the order of operations
-    and the mapping from each failure to what the operator is told, which is
-    the whole logic of a function that rewrites a live system config as root,
-    and which was untestable while the whole thing carried `pragma: no cover`.
-    """
-    try:
-        body = rewrite_conf(read(conf))
-    except OSError as exc:
-        return False, f"could not read {conf}: {exc.__class__.__name__}"
-
-    # The backup comes first because the write replaces the file. Refusing
-    # without one is deliberate: a --fix that cannot be undone on a config it
-    # is about to rewrite is not worth the risk of the fix.
-    backup_path = f"{conf}.spool-audit.bak"
-    try:
-        backup(conf, backup_path)
-    except OSError:
-        return False, f"could not back up {conf}; refusing to rewrite it"
-
-    try:
-        write(conf, body)
-    except OSError as exc:
-        return False, (
-            f"could not write {conf} ({exc.__class__.__name__}); "
-            f"original untouched, backup at {backup_path}"
-        )
-
-    if not should_restart_cups(conf):
-        # Do NOT restart the live daemon for a config it does not read.
-        # `--fix --conf /tmp/x` restarted the machine's real cups.service and
-        # reported success while /etc/cups/cupsd.conf was untouched, then
-        # "verified" by re-reading the file it had just written.
-        return True, f"wrote {conf} (not the system config, so cups was not restarted)"
-    ok, how = restart()
-    if not ok:
-        return False, (
-            f"config updated but CUPS was NOT restarted ({how}). "
-            "The running daemon still has the old setting."
-        )
-
-    # Re-read from disk rather than trusting `body`: the point is to confirm
-    # what the daemon will actually read. An unreadable file here is a failure,
-    # not a pass.
-    try:
-        verified = read(conf)
-    except OSError as exc:
-        return False, (
-            f"wrote and restarted, but could not re-read {conf} "
-            f"({exc.__class__.__name__}) to confirm the setting"
-        )
-    # parse_retention, NOT a second matcher. The check that used to live here
-    # returned True on the FIRST "PreserveJobFiles No" while parse_retention
-    # honours the LAST directive, so on a config saying No then Yes the two
-    # disagreed: --fix would report success over a host still retaining. One
-    # rule, one function, both callers.
-    if not parse_retention(verified):
-        return True, f"restarted via {how}"
-    return False, "config did not contain PreserveJobFiles No after writing"
-
-
 def main(argv: list[str] | None = None) -> int:
     # Filenames are bytes on Linux and arrive as str with lone surrogates, from
     # both listing paths. print() encodes strictly and dies mid-report with
@@ -1495,78 +986,29 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("jobs", nargs="*", type=int, help="job ids to highlight or purge")
-    ap.add_argument("--purge", action="store_true", help="delete retained files")
-    ap.add_argument("--fix", action="store_true", help="stop CUPS retaining documents")
-    ap.add_argument(
-        "--include-unrecognised",
-        action="store_true",
-        help="also DELETE files that could not be identified (default: report only)",
-    )
+    ap.add_argument("jobs", nargs="*", type=int, help="job ids to highlight")
     ap.add_argument(
         "--include-control",
         action="store_true",
-        help="also count/remove c<job> control files, which carry job titles",
+        help="also count c<job> control files, which carry job titles",
     )
     ap.add_argument("--spool", default=DEFAULT_SPOOL, help=f"spool directory (default {DEFAULT_SPOOL})")
     ap.add_argument("--conf", default=DEFAULT_CONF, help=f"cupsd.conf path (default {DEFAULT_CONF})")
     args = ap.parse_args(argv)
 
-    # --fix and --purge are independent and both may be requested.
-    fix_code = 0
-    if args.fix:
-        outcome = fix_outcome(*disable_retention(args.conf), also_purging=args.purge)
-        for line in outcome.lines:
-            print(line)
-        fix_code = outcome.code
-        if fix_code and not args.purge:
-            return fix_code
-
     jobs = frozenset(args.jobs)
     audit = classify(read_spool(args.spool), jobs, args.include_control)
-
-    # The audited region is exactly the spool. Anything resolving outside it is
-    # refused by delete(), which is what stops a symlinked TempDir taking a
-    # purge out of the directory the user named.
-    spool_root = _safe_resolve(Path(args.spool))
-    allowed = (spool_root,) if spool_root is not None else ()
 
     if not audit.readable:
         for line in render(audit, jobs):
             print(line)
-        return max(fix_code, 2)
-
-    if args.purge:
-        pre = purge_precheck(
-            audit, jobs, roots_ok=spool_root is not None,
-            include_unrecognised=args.include_unrecognised,
-        )
-        if pre is not None:
-            for line in pre.lines:
-                print(line)
-            return max(fix_code, pre.code)
-
-        victims = victims_for(audit, args.include_unrecognised)
-        scope = f"job(s) {', '.join(str(j) for j in sorted(jobs))}" if jobs else "all retained files"
-        print(f"Deleting {len(victims)} file(s) [{scope}]...")
-        deleted, failed = delete(args.spool, victims, allowed)
-        after = classify(read_spool(args.spool), jobs, args.include_control) if not failed else None
-        post = purge_outcome(
-            deleted, failed, after if (after and after.readable) else None, jobs,
-            include_unrecognised=args.include_unrecognised,
-        )
-        for line in post.lines:
-            print(line)
-        # max(), not the post code alone: a --fix that failed must not be
-        # erased by a purge that succeeded.
-        return max(fix_code, post.code)
+        return 2
 
     for line in render(audit, jobs, retention_state(args.conf)):
         print(line)
-    # --fix on its own used to return 0 without ever reading the spool, so
-    # `--fix && echo SAFE` fired on a spool full of retained documents. The
-    # exit code means one thing throughout: nothing is left.
-    return max(fix_code, audit.exit_code)
+    # The exit code means one thing and only one thing: nothing is left. It
+    # never reports on an action, because this tool takes none.
+    return audit.exit_code
 
 
 if __name__ == "__main__":
