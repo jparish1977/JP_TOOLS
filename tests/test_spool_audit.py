@@ -700,6 +700,38 @@ def test_cups_runtime_files_are_not_leaks() -> None:
     check_true("and says to leave them alone", "leave them alone" in text)
 
 
+def test_a_cups_name_at_the_top_level_is_not_a_cups_runtime_file() -> None:
+    """The name-trust rule holds in the REPORT, not only in the classifier.
+
+    is_harmless_temp gates the ARTIFACT regex behind in_tempdir, because CUPS
+    never creates cups-* files at the top level of the spool and honouring the
+    name there dismissed a file called cups-dbus-secret unread. render() then
+    re-derived the same judgement from the basename with no such gate, so a
+    top-level cups-notifier was listed under "CUPS RUNTIME FILES" and the
+    operator told to leave alone a file CUPS could not have created.
+
+    Not a disclosure hole -- reaching audit.artifacts at the top level still
+    needs size 0 or a *PPD-Adobe header -- but it is the same defect at a
+    second site, which is this file's most repeated failure. Found by
+    thinkpad-session reviewing d36c661 over the fleet mailbox, reproduced here
+    before being believed.
+    """
+    top_lockfile = TempFile(name="cups-fake-lockfile", size=0, head="")
+    real_lockfile = TempFile(name="cups-dbus-notifier-lockfile", size=0, head="")
+    audit = classify(Listing(
+        Verdict.CLEAN, (), (real_lockfile,), (), TEMP_SUBDIR, (top_lockfile,),
+    ))
+    text = "\n".join(render(audit, frozenset()))
+    runtime_block = text.split("CUPS RUNTIME FILES")[1].split("\n\n")[0]
+
+    check_true("the real TempDir lockfile is a runtime file",
+               "tmp/cups-dbus-notifier-lockfile" in runtime_block)
+    check_true("the top-level one is NOT filed as a runtime file",
+               "cups-fake-lockfile" not in runtime_block)
+    check_true("it is still listed, so nothing is hidden",
+               "cups-fake-lockfile" in text)
+
+
 def test_artifact_only_spool_is_clean() -> None:
     """A spool holding nothing but a lockfile is clean, not retained."""
     # A real lockfile is zero bytes with no content. The generic fixture
