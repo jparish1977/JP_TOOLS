@@ -287,20 +287,55 @@ of them because they treated adoption as an event rather than a rate.
    then falls as a side effect of doing the work, and no calendar entry is
    required.
 
-   This is also a defect to fix before quoting the toolbox at anything.
-   `install-hooks.py` states in its own docstring that it "runs check.py
-   against staged files", collects them into `$STAGED`, uses that list only to
-   test whether anything was staged at all, and then runs `check.py .` against
+   This was a defect in the toolbox itself, fixed in `9fa6803`.
+   `install-hooks.py` stated in its own docstring that it "runs check.py
+   against staged files", collected them into `$STAGED`, used that list only to
+   test whether anything was staged at all, and then ran `check.py .` against
    the repo root. On greenfield the difference is invisible, because the whole
    tree is clean either way. On anything inherited it is the difference between
    an on-ramp and a wall.
 
-2. **Record the baseline, and hold the line at "no worse".** Ratcheting needs a
-   number to ratchet against. Commit the output of a full run, and have the
-   gate compare against it rather than against zero. Without that stored
-   number, a file that got worse and a file that was always bad are
-   indistinguishable, so no one can tell progress from noise and the effort
-   stops being visible to anyone including you.
+   It is left recorded here rather than deleted, because the same mismatch came
+   straight back through step 2: the hook was fixed to measure per-file while
+   the instruction for recording a baseline still said to measure the whole
+   repo. Fixing one half of a scope mismatch leaves the other half looking
+   correct.
+
+2. **Record the baseline the same way the gate measures, and hold the line at
+   "no worse".** Ratcheting needs a number to ratchet against. Commit a
+   **per-file** run — `check.py --record-baseline` — and have the gate compare
+   against it rather than against zero. Without that stored number, a file that
+   got worse and a file that was always bad are indistinguishable, so no one
+   can tell progress from noise and the effort stops being visible to anyone
+   including you.
+
+   **Per-file, because that is what step 1 made the gate do**, and the two
+   measurements are different quantities in the same units. This sentence used
+   to read "commit the output of a full run", which is how the batocera-watch
+   baseline came to be recorded at the repo root while the hook it had to be
+   compared against ran file by file. The result looked exactly like tool
+   drift: 2472 recorded against 2870 measured, +398 across seven files that
+   nobody had touched since the baseline was taken.
+
+   The signature is worth knowing, because it will happen again to someone.
+   Only the tools that **resolve across files** move between the two modes —
+   `mypy` and `phpstan`. The ones that judge a file in isolation — `ruff`,
+   `phpcs`, `rector` — were byte-identical on every file. If a baseline
+   disagrees with a fresh run on exactly the import-sensitive tools and on
+   nothing else, suspect scope before you suspect versions.
+
+   Note also that "a full run" reads two ways, and both are natural: a run over
+   the full **repo**, and a full run of every **tool** rather than a partial
+   one. Whoever records a baseline tends to read it the first way, which is
+   also the way that produces the larger and more impressive number, and
+   nothing downstream contradicts them. Say per-file, and say why, or it gets
+   helpfully "improved" back.
+
+   A per-file baseline is the **worse** measurement for `mypy` and `phpstan` —
+   in isolation they cannot resolve imports and report more. That is the right
+   trade anyway: the gate can only compare against what it can reproduce, and
+   the excess is real findings rather than noise. On `audit_roms.py` the extra
+   172 were `no-untyped-call` and `no-untyped-def`, not import errors.
 
 3. **Find out which checks are not running before believing the total.** Those
    924 errors covered Python only. `phpstan`, `phpcs` and `rector` all reported
