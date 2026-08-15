@@ -55,14 +55,11 @@ code always 0", "others list truncated" -- all in untested main()/CLI logic.
     python tests/test_spool_audit.py
 """
 
-import contextlib
-import importlib.util
 import errno
-import io
+import importlib.util
 import os
 import pathlib
 import signal
-import stat
 import sys
 import tempfile
 from pathlib import Path
