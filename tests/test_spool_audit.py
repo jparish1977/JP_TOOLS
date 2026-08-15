@@ -774,6 +774,18 @@ def test_the_truncated_remainder_says_what_cancel_cannot_reach() -> None:
                "carry no job id, so `cancel` cannot reach them" in text)
 
 
+class _Blocked(BaseException):
+    """Raised by the fifo deadline below.
+
+    BaseException, not Exception, and deliberately NOT a subclass of OSError.
+    The first version raised TimeoutError -- which IS an OSError subclass -- so
+    retention_state's own `except OSError: return None` swallowed the alarm and
+    turned a tool that hung forever into a tidy "retention unknown". The test
+    would then have passed over the exact failure it exists to catch, using the
+    error type as the disguise.
+    """
+
+
 def test_reading_the_config_never_blocks_on_a_fifo() -> None:
     """A hang in a security tool reads as "still checking".
 
@@ -781,30 +793,58 @@ def test_reading_the_config_never_blocks_on_a_fifo() -> None:
     arrives, so `--conf /path/to/fifo` would hang forever with no output. The
     guard refuses before the open. Untested until 2026-08-14 despite existing
     for exactly this.
+
+    THE DEADLINE IS PART OF THE TEST. thinkpad-session mutation-checked the
+    first version of this and it HUNG rather than failed: exit 124 under
+    `timeout`. That proved the test drives a real fifo -- stronger evidence
+    than a coverage line disappearing, because it shows discrimination and not
+    just execution -- but the test had inherited the defect it was written to
+    pin. On a GitHub runner a hang is a six-hour job timeout and someone
+    reading a stuck build instead of a failed assertion.
+
+    My first repair armed the alarm around two of the three calls and left the
+    render one bare, so the mutant still hung for the full 120s. One deadline
+    around the whole body, and every path out of it is loud.
     """
-    if not hasattr(os, "mkfifo"):
-        print("  note: no os.mkfifo on this platform, fifo case skipped")
+    if not hasattr(os, "mkfifo") or not hasattr(signal, "SIGALRM"):
+        print("  note: no os.mkfifo/SIGALRM on this platform, fifo case skipped")
         return
-    with tempfile.TemporaryDirectory() as raw:
-        fifo = Path(raw) / "cupsd.conf"
-        os.mkfifo(fifo)
 
-        try:
-            spool_audit._read_conf(str(fifo))
-        except OSError as exc:
-            check("refused with EINVAL", exc.errno, errno.EINVAL)
-        else:
-            FAILURES.append("_read_conf read a fifo instead of refusing it")
+    def _too_slow(signum: int, frame: object) -> None:
+        raise _Blocked("blocked on a fifo")
 
-        # And the caller turns that into "unknown", not into a false "OFF".
-        check("retention is unknown, not off",
-              spool_audit.retention_state(str(fifo)), None)
+    previous = signal.signal(signal.SIGALRM, _too_slow)
+    signal.alarm(5)
+    try:
+        with tempfile.TemporaryDirectory() as raw:
+            fifo = Path(raw) / "cupsd.conf"
+            os.mkfifo(fifo)
 
-        audit = classify(Listing(Verdict.CLEAN))
-        text = "\n".join(render(audit, frozenset(),
-                                spool_audit.retention_state(str(fifo))))
-        check_true("and the report says so",
-                   "RETENTION: unknown (could not read cupsd.conf)" in text)
+            try:
+                spool_audit._read_conf(str(fifo))
+            except OSError as exc:
+                check("refused with EINVAL", exc.errno, errno.EINVAL)
+            else:
+                FAILURES.append("_read_conf read a fifo instead of refusing it")
+
+            # And the caller turns that into "unknown", not into a false "OFF".
+            check("retention is unknown, not off",
+                  spool_audit.retention_state(str(fifo)), None)
+
+            audit = classify(Listing(Verdict.CLEAN))
+            text = "\n".join(render(audit, frozenset(),
+                                    spool_audit.retention_state(str(fifo))))
+            check_true("and the report says so",
+                       "RETENTION: unknown (could not read cupsd.conf)" in text)
+    except _Blocked:
+        FAILURES.append(
+            "reading a fifo BLOCKED instead of being refused; the S_ISFIFO "
+            "guard is not firing, and in the real tool this is a hang with no "
+            "output rather than an error"
+        )
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def test_artifact_only_spool_is_clean() -> None:
