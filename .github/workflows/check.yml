@@ -50,6 +50,24 @@ jobs:
           for f in *.py; do
             case " $checked " in *" $f "*) ;; *) echo "  $f" ;; esac
           done
+          # tests/ too, and NO test file is linted by any job here. The suites
+          # are what stands between this toolbox and a green badge that means
+          # nothing -- they caught a --purge that had been deleted, a guard
+          # that hung instead of failing, and an exemption region holding 51
+          # branches -- and nothing checks them at all. Measured 2026-08-14:
+          # 31 findings across nine suites, 21 of them in test_spool_audit.py
+          # and none newer than that date, so gating here would be red for
+          # reasons unrelated to any diff, exactly like the root-script list
+          # above. Seven of the nine sit at 0-2. See issue #30.
+          #
+          # Printing is not gating, on purpose. The version of this that says
+          # "so let us not mention it" is how spool-audit.py reached a PR with
+          # a green badge and no job touching it. Run `python check.py <file>`
+          # on any of these to see what is actually in them.
+          echo "NOT linted, in tests/ (nothing here is checked by any job):"
+          for f in tests/test_*.py tests/test_*.sh; do
+            [ -e "$f" ] && echo "  $f"
+          done
       # The PHP tools live in vendor/, so without this every phpstan assertion
       # in tests/ skips, and a skip is indistinguishable from a pass in the log.
       # test_check_phpstan.py pins a bug that reported the repo directory as
