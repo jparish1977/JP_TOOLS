@@ -14,12 +14,15 @@ Exit codes:
 """
 
 import argparse
+import ast
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +91,31 @@ def run_ruff(target: str) -> dict[str, Any]:
     return {"tool": "ruff", "status": _status(issues), "issues": issues}
 
 
+# Tools honour FORCE_COLOR/CLICOLOR_FORCE even when their output is captured,
+# and ANSI escapes then break every line-oriented parser here. Measured
+# 2026-08-12: with FORCE_COLOR=3 in the environment, mypy emitted
+# "\x1b[1m\x1b[31merror:" and check.py reported 0 issues on a file mypy was
+# failing with 2 -- the same "reported a pass on a failing file" bug this
+# module's mypy parser comment already documents, arriving by a different
+# route. CI has no FORCE_COLOR, so the build went red while the local gate
+# stayed green.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\([A-Z]")
+
+
+def _plain_env() -> dict[str, str]:
+    """Environment with colour forcing removed."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("FORCE_COLOR", "CLICOLOR_FORCE", "MYPY_FORCE_COLOR")}
+    env["NO_COLOR"] = "1"
+    env["TERM"] = "dumb"
+    return env
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escapes. Belt and braces alongside _plain_env()."""
+    return _ANSI.sub("", text)
+
+
 # mypy prints "file:line: severity: message [code]", optionally with a column,
 # and on Windows the path carries a drive letter. The previous parser split on
 # ":" with maxsplit=3, which put the severity in one field and then searched a
@@ -121,10 +149,10 @@ def run_mypy(target: str) -> dict[str, Any]:
     result = subprocess.run(
         ["mypy", "--show-error-codes", "--no-error-summary",
          "--ignore-missing-imports", *_mypy_config_args(target), target],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, env=_plain_env(),
     )
     issues = []
-    for line in result.stdout.splitlines():
+    for line in strip_ansi(result.stdout).splitlines():
         m = _MYPY_LINE.match(line)
         if not m:
             continue
@@ -388,9 +416,9 @@ def run_prettier(target: str) -> dict[str, Any]:
     cmd = shutil.which("prettier") or shutil.which("prettier.cmd")
     if not cmd:
         return _tool_missing("prettier")
-    result = subprocess.run([cmd, "--check", target], capture_output=True, text=True, check=False)
+    result = subprocess.run([cmd, "--check", target], capture_output=True, text=True, check=False, env=_plain_env())
     issues = []
-    for line in (result.stdout + result.stderr).splitlines():
+    for line in (strip_ansi(result.stdout + result.stderr)).splitlines():
         line = line.strip()
         if line.startswith("[warn]"):
             fp = line[len("[warn]"):].strip()
@@ -641,10 +669,10 @@ def run_cppcheck(target: str) -> dict[str, Any]:
         *[f"--suppress={s}" for s in suppress],
         target,
     ]
-    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    result = subprocess.run(args, capture_output=True, text=True, check=False, env=_plain_env())
     issues = []
     # cppcheck writes findings to stderr, not stdout.
-    for line in result.stderr.splitlines():
+    for line in strip_ansi(result.stderr).splitlines():
         parts = line.split("|", 5)
         if len(parts) < 6:
             continue
@@ -662,8 +690,187 @@ def run_cppcheck(target: str) -> dict[str, Any]:
     return {"tool": "cppcheck", "status": _status(issues), "issues": issues}
 
 
+# A coverage exemption is a CLAIM: that the function is a thin wrapper with
+# nothing in it worth testing. Nothing rechecks that claim, so it goes stale
+# silently as the function grows, and the exempt region becomes the region
+# nobody looks at.
+#
+# Measured on spool-audit.py, 2026-08-13: `# pragma: no cover` covered 430 lines
+# of 1350, 32% of the file, holding 51 branch, loop and try statements. A thin
+# wrapper has none. Every serious defect on that branch came from inside that
+# region, and ruff and mypy together caught 0 of 112 findings. This check exists
+# because the gate had no opinion about the one region that mattered.
+#
+# Worse, nothing in this repo measures coverage at all, so these pragmas never
+# suppressed a measurement. They only ever told a reader not to look. See
+# docs/coverage.md.
+#
+# The rule is not "no exemptions". It is that an exemption must SAY WHY, so the
+# claim is visible and can be disagreed with:
+#
+#     def _unlink(p): ...                    # pragma: no cover
+#     def restart():  ...                    # pragma: no cover -- reason: runs systemctl
+#
+# A pragma on a function with no branches needs no reason: it is self-evidently
+# a wrapper. One with branches is making a decision, and decisions are testable.
+_NO_COVER = re.compile(r"#\s*pragma:\s*no\s*cover(?P<rest>.*)$")
+_HAS_REASON = re.compile(r"reason:\s*\S")
+_BRANCHY = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try)
+
+
+def coverage_exemptions(path: Path) -> list[dict[str, Any]]:
+    """Every `# pragma: no cover` in one file, with the facts about each.
+
+    The inventory, not the violations. Both the `no-cover` check and
+    list-exemptions.py read this, so there is ONE implementation of "what
+    counts as an exemption" rather than two that must agree, which is this
+    repo's most repeated defect.
+
+    Reporting only violations is not enough on its own. On 2026-08-13 the check
+    reported "0 unjustified" on a file whose inventory immediately showed two
+    reasons that were three words long and justified nothing.
+
+    EVERY pragma line is scanned, not just function signatures. The first
+    version walked FunctionDef only, so a pragma on a class, on a bare
+    statement, or at module level was invisible to the gate AND to the
+    inventory, which then printed "No coverage exemptions" as though it had
+    looked. A checker that silently cannot see a construct is the same failure
+    it was written to catch.
+    """
+    try:
+        src = path.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(src)
+    except (OSError, SyntaxError, ValueError):
+        # Not this check's job to report unparseable files; ruff already does,
+        # and reporting it twice makes one problem look like two.
+        return []
+    # Only a trailing comment on a LINE OF CODE is a directive. A line scan
+    # flagged this very function, because the comment block above documents the
+    # pragma and prose about a directive is not a directive. Tokenising also
+    # excludes docstrings for free, which matters in a repo that explains this
+    # marker in several files.
+    code_rows: set[int] = set()
+    comments: list[tuple[int, str]] = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            if tok.type == tokenize.COMMENT:
+                comments.append((tok.start[0], tok.string))
+            elif tok.type not in (
+                tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
+                tokenize.DEDENT, tokenize.ENDMARKER, tokenize.ENCODING,
+            ):
+                for row in range(tok.start[0], tok.end[0] + 1):
+                    code_rows.add(row)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return []
+
+    # Every construct a pragma could sit inside, so the innermost one can be
+    # named. Sorted by span so the tightest enclosing owner wins.
+    owners: list[tuple[int, int, str, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            label = node.name
+        elif isinstance(node, _BRANCHY):
+            label = f"<{type(node).__name__.lower()} line {node.lineno}>"
+        else:
+            continue
+        end = node.end_lineno or node.lineno
+        owners.append((
+            node.lineno, end, label,
+            sum(isinstance(n, _BRANCHY) for n in ast.walk(node)),
+        ))
+
+    found: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for lineno, text in comments:
+        if lineno not in code_rows:
+            continue
+        match = _NO_COVER.search(text)
+        if not match:
+            continue
+        rest = match.group("rest")
+        reason = rest.split("reason:", 1)[1].strip() if _HAS_REASON.search(rest) else ""
+        holding = [o for o in owners if o[0] <= lineno <= o[1]]
+        if holding:
+            begin, finish, label, branches = min(holding, key=lambda o: o[1] - o[0])
+        else:
+            begin, finish, label, branches = lineno, lineno, "<module level>", 0
+        # One entry per owner. Two pragmas inside the same function are one
+        # exemption, and counting the span twice would overstate the share of
+        # the file that is exempt.
+        if (label, begin) in seen:
+            continue
+        seen.add((label, begin))
+        found.append({
+            "file":     str(path),
+            "line":     begin,
+            "function": label,
+            "lines":    finish - begin,
+            "branches": branches,
+            "reason":   reason,
+        })
+    return found
+
+
+def _branchy_no_cover(path: Path) -> list[dict[str, Any]]:
+    return [
+        {
+            "file":     e["file"],
+            "line":     e["line"],
+            "col":      1,
+            "severity": "error",
+            "rule":     "no-cover-branchy",
+            "message":  (
+                f"'{e['function']}' is exempt from coverage but contains "
+                f"{e['branches']} branch/loop/try statement(s) over "
+                f"{e['lines']} lines. An exemption claims there is nothing to "
+                "test. Extract the decision, or state the claim: "
+                "'# pragma: no cover -- reason: ...'"
+            ),
+            "fixable":        False,
+            "fixable_unsafe": False,
+        }
+        for e in coverage_exemptions(path)
+        if e["branches"] and not e["reason"]
+    ]
+
+
+# Directories that are not this project's source. docs/coverage.md tells the
+# reader to run `python3 -m venv .venv` in the repo root, so following the
+# instructions in this repo put third-party code in the walk: the exemption
+# share became a number about site-packages. pyvenv.cfg catches venvs under any
+# name, which is the case a hardcoded list misses.
+_SKIP_DIRS = {".git", "__pycache__", "node_modules", "vendor", ".mypy_cache",
+              ".ruff_cache", ".tox", "site-packages"}
+
+
+def is_project_file(p: Path, root: Path) -> bool:
+    """Is this a file of the project rooted at `root`, not a dependency?"""
+    rel = p.relative_to(root) if p.is_relative_to(root) else p
+    for part in rel.parts[:-1]:
+        if part in _SKIP_DIRS:
+            return False
+    probe = p.parent
+    while probe != root and probe.parent != probe:
+        if (probe / "pyvenv.cfg").exists():
+            return False
+        probe = probe.parent
+    return not (root / "pyvenv.cfg").exists() if probe == root else True
+
+
+def run_no_cover(target: str) -> dict[str, Any]:
+    p = Path(target)
+    files = ([f for f in sorted(p.rglob("*.py")) if is_project_file(f, p)]
+             if p.is_dir() else [p])
+    issues: list[dict[str, Any]] = []
+    for f in files:
+        issues.extend(_branchy_no_cover(f))
+    return {"tool": "no-cover", "status": _status(issues), "issues": issues}
+
+
 TOOL_RUNNERS = {
     "cppcheck":       run_cppcheck,
+    "no-cover":       run_no_cover,
     "ruff":           run_ruff,
     "mypy":           run_mypy,
     "eslint":         run_eslint,
@@ -678,7 +885,7 @@ TOOL_RUNNERS = {
 }
 
 DEFAULT_TOOLS = {
-    "python": ["ruff", "mypy"],
+    "python": ["ruff", "mypy", "no-cover"],
     "js":     ["eslint", "prettier"],
     "css":    ["stylelint", "prettier"],
     "html":   ["eslint", "stylelint", "prettier"],
@@ -693,7 +900,7 @@ AUDIT_TOOLS = {
 }
 
 # Tools that accept directories natively (pass the dir, not individual files)
-_DIR_CAPABLE = {"ruff", "mypy", "phpstan", "phpcs", "rector",
+_DIR_CAPABLE = {"ruff", "mypy", "no-cover", "phpstan", "phpcs", "rector",
                 "pip-audit", "npm-audit", "composer-audit"}
 # cppcheck is deliberately not in _DIR_CAPABLE: the .ino suppression is decided
 # per file, and passing a directory would apply sketch rules to every .cpp.

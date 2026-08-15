@@ -1,0 +1,180 @@
+#!/bin/bash
+# Does spool-audit.py clear the bar Joe set?
+#   1. not worse than `ls` -- nothing may be invisible
+#   2. it works
+#   3. none of the flaws we fought all day
+#
+# Each check names the flaw it is guarding against. Prints PASS/FAIL per case.
+#
+# This is the black-box suite: it drives the real CLI and reads what an operator
+# would read, where tests/test_spool_audit.py tests the functions underneath.
+# Both are needed. Round after round, the bug was in the gap between a function
+# behaving correctly and the report describing it correctly.
+#
+# FLAW 5's fixture is the one piece here that was not invented. The name
+# cups-dbus-notifier-lockfile came from a real CUPS spool, and no fixture built
+# from what we already suspected would have contained it.
+set -u
+# Resolved from this script's own location, not a hardcoded home directory: the
+# repo is deployed to other machines under other paths, and a wrong T would run
+# every check against the wrong copy of the tool -- or against no tool at all,
+# which prints failures that look like findings.
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+T="$REPO/spool-audit.py"
+# Whoever runs this suite chooses the interpreter. Hardcoding python3
+# meant a coverage wrapper could not trace these runs, so the tool looked
+# uncovered while this file was exercising it ten times over -- and the
+# obvious fix for a low coverage number is to add a pragma, which is how
+# code stops being looked at.
+PY=${PYTHON:-python3}
+if [ ! -f "$T" ]; then
+  echo "FAIL  cannot find spool-audit.py at $T"
+  exit 2
+fi
+W=$(mktemp -d); trap 'chmod -R u+rwX "$W" 2>/dev/null; rm -rf "$W"' EXIT
+pass=0; fail=0; skip=0
+ok () { echo "  PASS  $1"; pass=$((pass+1)); }
+no () { echo "  FAIL  $1"; fail=$((fail+1)); }
+sk () { echo "  SKIP  $1"; skip=$((skip+1)); }
+ck () { if [ "$2" = "$3" ]; then ok "$1"; else no "$1 (got '$2', want '$3')"; fi; }
+# An exit code on its own is not evidence of the reason for it. argparse exits 2
+# for a malformed argument, exactly like a genuinely unreadable spool does, so
+# when a bad edit to this script turned `--spool "$W/x"` into `--spool"$W/x"`
+# all three exit-2 cases below still passed while testing nothing at all. Assert
+# the explanation too, so the code and the reason have to agree.
+has () { case "$3" in *"$2"*) ok "$1";; *) no "$1 (output lacked '$2')";; esac; }
+# EVERY invocation goes through this. Two things it pins that nothing else can:
+#
+#   1. The expected exit code, per call. Without it a check can only assert on
+#      output, and a tool that never ran produces no output to contradict.
+#   2. That the tool actually ran. On 2026-08-14 --purge and --fix were deleted
+#      from the tool and this suite still printed "13 passed, 0 failed":
+#      argparse rejected the unknown flag, exited 2, deleted nothing, and the
+#      two "the file survived a purge" checks passed over a purge that never
+#      happened. An unrecognised flag is a suite bug, never a result, so it is
+#      caught by name here rather than by whatever assertion happens to follow.
+#
+# Sets OUT and RC for the caller.
+run_tool () {   # run_tool <expected-rc> <label> [tool args...]
+  local want="$1" label="$2"; shift 2
+  OUT=$("$PY" "$T" "$@" 2>&1); RC=$?
+  case "$OUT" in
+    *"unrecognized arguments"*|*"invalid choice"*|*"expected one argument"*)
+      no "$label (THE TOOL NEVER RAN: $(printf '%s' "$OUT" | tail -1))"
+      return 0;;
+  esac
+  ck "$label" "$RC" "$want"
+}
+
+echo "FLAW 1: a check that did not run must never read as a pass"
+# Root bypasses permission bits, so chmod 000 does not make a directory
+# unreadable to it and these two cannot be tested as root -- and the tool is
+# normally run under sudo, so that is not a hypothetical. Skipped loudly and
+# counted separately rather than silently passing, which would make this suite
+# commit the very flaw it is named after.
+if [ "$(id -u)" = 0 ]; then
+  # Covered uid-independently by test_unreadable_tempdir_is_never_clean in
+  # tests/test_spool_audit.py, which injects the PermissionError instead of
+  # relying on permission bits root does not obey.
+  sk "unreadable TempDir exits 2 (running as root; chmod 000 does not apply)"
+  sk "unreadable is reported as denied (running as root)"
+  sk "unreadable never says clean (running as root)"
+else
+  mkdir -p "$W/denied/tmp"; printf '%%!PS\n' > "$W/denied/tmp/doc.ps"; chmod 000 "$W/denied/tmp"
+  out=$("$PY" "$T" --spool "$W/denied" --conf /dev/null 2>&1); rc=$?
+  ck "unreadable TempDir exits 2" "$rc" "2"
+  has "unreadable is reported as denied" "permission denied" "$out"
+  case "$out" in *"spool is clean"*) no "unreadable never says clean";; *) ok "unreadable never says clean";; esac
+  chmod 755 "$W/denied/tmp"
+fi
+out=$("$PY" "$T" --spool "$W/nonexistent" --conf /dev/null 2>&1); rc=$?
+ck "missing path exits 2" "$rc" "2"
+has "missing path says so" "THAT PATH DOES NOT EXIST" "$out"
+touch "$W/afile"; out=$("$PY" "$T" --spool "$W/afile" --conf /dev/null 2>&1); rc=$?
+ck "not-a-directory exits 2" "$rc" "2"
+has "not-a-directory says so" "THAT PATH IS NOT A DIRECTORY" "$out"
+
+echo "FLAW 2: nothing may be invisible (the ls baseline)"
+mkdir -p "$W/acct/tmp/.cache"
+touch "$W/acct/d00085-001" "$W/acct/c00085"
+echo x > "$W/acct/d00085-001.bak"; echo y > "$W/acct/stray"; mkdir "$W/acct/subdir"
+: > "$W/acct/empty-stray"   # zero length: the case that slipped through
+printf '*PPD-Adobe: "4.3"\n' > "$W/acct/tmp/ppd"; printf '%%!PS\n' > "$W/acct/tmp/real.ps"
+echo z > "$W/acct/tmp/.cache/fc"
+# Exit 2, not 1: this fixture contains subdir/, which is neither a document
+# nor the TempDir, so the tool reports it as an area it did not examine and
+# the whole run is INCOMPLETE. "There is content AND something I could not
+# look inside" is a worse result than "there is content", and the exit code
+# says so.
+run_tool 2 "the accounting run is INCOMPLETE, because subdir/ was not examined" \
+  --spool "$W/acct" --include-control --conf /dev/null
+printf '%s\n' "$OUT" > "$W/o.txt"
+missing=0
+while read -r f; do
+  # Whole-entry match on the relative path, not a substring of any basename.
+  # `grep -qF d00085-001` is satisfied by the report line for d00085-001.bak,
+  # so a regression that dropped the real document while keeping its backup
+  # passed this check -- and "nothing is invisible" is the one promise here
+  # that is strictly stronger than `ls`. The report prints each entry as an
+  # indented relative path, optionally followed by an annotation (" -> target",
+  # " (subdirectory, not examined)"); a parent directory appears only as the
+  # prefix of its children, hence the "/" case.
+  awk -v p="$f" '
+    { line = $0; sub(/^[[:space:]]+/, "", line)
+      if (index(line, p) == 1) {
+        c = substr(line, length(p) + 1, 1)
+        if (c == "" || c == " " || c == "/") { found = 1 }
+      } }
+    END { exit !found }' "$W/o.txt" \
+    || { missing=$((missing+1)); echo "        invisible: $f"; }
+done < <(find "$W/acct" -mindepth 1 | sed "s|^$W/acct/||")
+ck "every path under the spool is reported" "$missing" "0"
+
+echo "FLAW 3: never claim to have examined what was never opened"
+# The original flaw was "never claim a secret was destroyed when it was not",
+# and it was checked by purging a symlink and confirming the target survived.
+# The tool no longer deletes, so that check now guards nothing -- and it was
+# the one that kept passing after --purge was deleted. What survives the cut
+# is the half that was always the real risk: a symlink is an area the tool did
+# NOT read, and reporting it as anything else is a false clean.
+mkdir -p "$W/sym/tmp" "$W/vault"; printf '%%!PS\nSECRET\n' > "$W/vault/keep.ps"
+ln -s "$W/vault/keep.ps" "$W/sym/tmp/link.ps"
+# A decoy the tool MUST report, in the same fixture as the symlink it must
+# refuse. "The target was untouched" is a negative, and a negative is
+# satisfied by the tool never running at all -- it reads the same whether the
+# symlink was correctly refused or nothing happened. Pairing it with something
+# that must be FOUND is what makes the pair evidence that the tool ran and
+# discriminated, rather than evidence that it was absent.
+printf '%%!PS\nDECOY\n' > "$W/sym/tmp/decoy.ps"
+before=$(cat "$W/vault/keep.ps")
+run_tool 2 "a symlink makes the result INCOMPLETE, not clean" --spool "$W/sym" --conf /dev/null
+has "and says it was not followed" "NOT followed" "$OUT"
+has "while the decoy in the same directory IS reported" "decoy.ps" "$OUT"
+case "$OUT" in *"spool is clean"*) no "never says clean over a symlink";; *) ok "never says clean over a symlink";; esac
+[ "$(cat "$W/vault/keep.ps")" = "$before" ] && ok "the target is untouched" || no "the target is untouched"
+mkdir -p "$W/root/tmp2"; printf '%%!PS\nOUT\n' > "$W/root/tmp2/out.ps"
+mkdir -p "$W/esc"; ln -s "$W/root/tmp2" "$W/esc/tmp"
+run_tool 2 "a symlinked TempDir root is not followed" --spool "$W/esc" --conf /dev/null
+has "and names the TempDir as the unexamined area" "TempDir is a symlink" "$OUT"
+[ -f "$W/root/tmp2/out.ps" ] && ok "the file outside the spool is untouched" || no "the file outside the spool is untouched"
+
+echo "FLAW 4: a fix must apply to every path, not one of them"
+mkdir -p "$W/nl"; printf '%%!PS\n' > "$W/nl/$(printf 'evil\nd00099-001')"
+run_tool 1 "a newline in a filename does not derail the run" --spool "$W/nl" --conf /dev/null
+has "newline filename survives the listing" "d00099-001" "$OUT"
+
+echo "FLAW 5: known-harmless things must not be reported as secrets"
+mkdir -p "$W/noise/tmp/.cache/fontconfig"
+printf '*PPD-Adobe: "4.3"\n' > "$W/noise/tmp/ppd"
+: > "$W/noise/tmp/cups-dbus-notifier-lockfile"
+for i in 1 2 3 4 5; do echo bin > "$W/noise/tmp/.cache/fontconfig/c$i.cache-9"; done
+run_tool 0 "a spool of only caches is clean" --spool "$W/noise" --conf /dev/null
+case "$OUT" in *"spool is clean"*) ok "and says so";; *) no "and says so";; esac
+
+echo
+if [ "$skip" -gt 0 ]; then
+  echo "  $pass passed, $fail failed, $skip SKIPPED (not run -- not the same as passed)"
+else
+  echo "  $pass passed, $fail failed"
+fi
+exit $((fail > 0))
