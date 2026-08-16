@@ -149,6 +149,45 @@ def main() -> int:
         check("and says so out loud rather than silently passing",
               "cannot compare ruff" in r.stderr, r.stderr)
 
+        # Reported by batocera-watch reviewing PR #32. Recording rebuilds the
+        # whole document, so two per-file invocations at one path kept only the
+        # second -- and BOTH printed "recorded 1 file(s)". The loss surfaced a
+        # step later as the first file failing for having no recorded count,
+        # which reads as an unrelated bug. Pinning the refusal AND the
+        # untouched file, because a guard that refuses after corrupting the
+        # destination has not helped anyone.
+        print("recording a second file must not silently discard the first")
+        narrow = str(Path(repo) / "narrow.json")
+        r = run("dirty.py", "--record-baseline", narrow, cwd=repo)
+        check("recording one file exits 0", r.returncode == 0, r.stderr)
+        r = run("clean.py", "--record-baseline", narrow, cwd=repo)
+        check("recording a second file over it REFUSES", r.returncode == 2,
+              f"exit {r.returncode}: {r.stdout}{r.stderr}")
+        check("  and names the file that would be lost",
+              "dirty.py" in r.stderr, r.stderr)
+        check("  and points at the whole-directory path that works",
+              "--record-baseline" in r.stderr and "<dir>" in r.stderr, r.stderr)
+        doc = json.loads(Path(narrow).read_text(encoding="utf-8"))
+        check("  and leaves the existing baseline intact",
+              "dirty.py" in doc.get("files", {}), sorted(doc.get("files", {})))
+
+        print("the loss is allowed when it is asked for, and said out loud")
+        r = run("clean.py", "--record-baseline", narrow, "--force-baseline",
+                cwd=repo)
+        check("--force-baseline writes it", r.returncode == 0, r.stderr)
+        check("  and reports what it discarded rather than just what it wrote",
+              "discarding" in r.stdout, r.stdout)
+        doc = json.loads(Path(narrow).read_text(encoding="utf-8"))
+        check("  and the discard really happened",
+              "dirty.py" not in doc.get("files", {}), sorted(doc.get("files", {})))
+
+        print("widening an existing baseline is not a discard and is not refused")
+        r = run(".", "--record-baseline", narrow, cwd=repo)
+        check("recording the whole tree over a narrower baseline exits 0",
+              r.returncode == 0, r.stderr)
+        check("  and says what it replaced, which the old message never did",
+              "replaced a baseline of" in r.stdout, r.stdout)
+
         print("a repo with no baseline behaves exactly as before")
         (Path(repo) / "dirty.py").write_text(DIRTY, encoding="utf-8")
         r = run("dirty.py", cwd=repo)
