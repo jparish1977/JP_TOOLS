@@ -858,7 +858,32 @@ def _per_file_checks(target: str, audit: bool = False) -> list[dict[str, Any]]:
     return checks
 
 
-def record_baseline(target: str, dest: str, audit: bool = False) -> int:
+def _dropped_entries(dest: str, files: dict[str, Any]) -> tuple[list[str], int]:
+    """Files the existing baseline records that this write would not.
+
+    Returns (dropped, existing_count). A destination that does not exist, or
+    cannot be parsed, drops nothing -- there is no prior measurement to lose.
+
+    Recording is whole-file: the doc is rebuilt and rewritten, so pointing two
+    per-file invocations at one path keeps only the second. Both print
+    "recorded 1 file(s)" and the loss surfaces one step later, as the first
+    file failing for being un-baselined -- which reads as a different problem
+    entirely. That is this tool's own failure mode aimed at itself: a zero that
+    means "never measured" wearing the face of a zero that means "measured, and
+    clean".
+    """
+    try:
+        prior = json.loads(Path(dest).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], 0
+    had = prior.get("files")
+    if not isinstance(had, dict):
+        return [], 0
+    return sorted(set(had) - set(files)), len(had)
+
+
+def record_baseline(target: str, dest: str, audit: bool = False,
+                    force: bool = False) -> int:
     root   = _repo_root(target)
     checks = _per_file_checks(target, audit)
     files  = _counts_by_file(checks, root)
@@ -880,11 +905,41 @@ def record_baseline(target: str, dest: str, audit: bool = False) -> int:
         "totals":   _summarize(checks),
         "files":    files,
     }
+    existed = Path(dest).exists()
+    dropped, existing = _dropped_entries(dest, files)
+    if dropped and not force:
+        shown = ", ".join(dropped[:3]) + (f", +{len(dropped) - 3} more"
+                                          if len(dropped) > 3 else "")
+        print(f"baseline: REFUSING to write {dest} -- it records {existing} "
+              f"file(s) and this run measured {len(files)}, so "
+              f"{len(dropped)} would be discarded: {shown}",
+              file=sys.stderr)
+        print("  A discarded file is not baselined, so it fails the next gate "
+              "for having no recorded count -- which looks like a different "
+              "bug one step later.", file=sys.stderr)
+        print(f"  To baseline a whole tree in one go:  "
+              f"check.py <dir> --record-baseline {dest}", file=sys.stderr)
+        print("  To replace the baseline deliberately, including on purpose "
+              "after deleting files:  --force-baseline", file=sys.stderr)
+        return 2
+
     Path(dest).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n",
                           encoding="utf-8")
     missing = [t for t, s in sorted(status.items()) if s != "pass" and s != "fail"]
     print(f"recorded {len(files)} file(s) from {len(tools)} tool(s), "
           f"mode=per-file, to {dest}")
+    # Say what was displaced. The old message was true about what it wrote and
+    # silent about what it removed, which is exactly why reading it carefully
+    # did not catch the loss.
+    # Keyed on the file having EXISTED, not on how much it recorded. A baseline
+    # of zero files is a real baseline -- every file was clean -- and it is the
+    # one most easily mistaken for no baseline at all, so overwriting it is
+    # exactly when saying so matters.
+    if existed:
+        note = f"  replaced a baseline of {existing} file(s)"
+        if dropped:
+            note += f", discarding {len(dropped)} on --force-baseline"
+        print(note)
     if missing:
         print("  WARNING: recorded while these tools were not running: "
               + ", ".join(f"{t} ({status[t]})" for t in missing))
@@ -990,6 +1045,11 @@ def main() -> None:
                              "Per-file because that is what the gate does; see "
                              "METHODOLOGY, 'Adopting this in a codebase you "
                              "inherited', step 2.")
+    parser.add_argument("--force-baseline", action="store_true",
+                        help="Allow --record-baseline to write a baseline that "
+                             "drops files the existing one recorded. Needed "
+                             "only when that loss is intended, such as after "
+                             "deleting files.")
     args = parser.parse_args()
 
     target = str(Path(args.target).resolve())
@@ -1004,7 +1064,8 @@ def main() -> None:
     # DIFFERENTLY: it runs every file on its own even when handed a directory,
     # which is exactly what `check.py .` does not do.
     if args.record_baseline:
-        sys.exit(record_baseline(target, args.record_baseline, args.audit))
+        sys.exit(record_baseline(target, args.record_baseline, args.audit,
+                                 args.force_baseline))
 
     # ── Single file or explicit --lang / --tools ──────────────────────────
     if not is_dir or args.lang != "auto" or args.tools:
