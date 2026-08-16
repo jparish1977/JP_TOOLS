@@ -858,11 +858,20 @@ def _per_file_checks(target: str, audit: bool = False) -> list[dict[str, Any]]:
     return checks
 
 
-def _dropped_entries(dest: str, files: dict[str, Any]) -> tuple[list[str], int]:
+def _dropped_entries(dest: str, files: dict[str, Any]) -> tuple[list[str], int, bool]:
     """Files the existing baseline records that this write would not.
 
-    Returns (dropped, existing_count). A destination that does not exist, or
-    cannot be parsed, drops nothing -- there is no prior measurement to lose.
+    Returns (dropped, existing_count, unreadable). A destination that does not
+    exist drops nothing -- there is no prior measurement to lose.
+
+    A destination that exists and CANNOT BE PARSED is a third state and is
+    reported as such, not folded into the first. Raised by batocera-watch
+    re-reviewing this guard, and it is the same overloaded empty the guard
+    exists to fix: a file that fails to parse did hold a measurement -- a
+    truncated write, conflict markers, a half-synced copy over a real baseline
+    -- and its contents are precisely what nobody can recover. Treating it as
+    absent destroys the one case where the prior numbers are unknown, which is
+    the one case where losing them costs most.
 
     Recording is whole-file: the doc is rebuilt and rewritten, so pointing two
     per-file invocations at one path keeps only the second. Both print
@@ -872,14 +881,18 @@ def _dropped_entries(dest: str, files: dict[str, Any]) -> tuple[list[str], int]:
     means "never measured" wearing the face of a zero that means "measured, and
     clean".
     """
+    if not Path(dest).exists():
+        return [], 0, False
     try:
         prior = json.loads(Path(dest).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return [], 0
+        return [], 0, True
     had = prior.get("files")
     if not isinstance(had, dict):
-        return [], 0
-    return sorted(set(had) - set(files)), len(had)
+        # Parsed, but not a baseline this tool wrote. Same argument: something
+        # is there, and this run cannot say what it was worth.
+        return [], 0, True
+    return sorted(set(had) - set(files)), len(had), False
 
 
 def record_baseline(target: str, dest: str, audit: bool = False,
@@ -906,7 +919,18 @@ def record_baseline(target: str, dest: str, audit: bool = False,
         "files":    files,
     }
     existed = Path(dest).exists()
-    dropped, existing = _dropped_entries(dest, files)
+    dropped, existing, unreadable = _dropped_entries(dest, files)
+    if unreadable and not force:
+        print(f"baseline: REFUSING to write {dest} -- it exists but cannot be "
+              f"read as a baseline, so this run cannot say what would be lost.",
+              file=sys.stderr)
+        print("  That is a reason to stop, not to proceed: a truncated write, "
+              "conflict markers or a half-synced file all look like this, and "
+              "the numbers in it are the ones nobody can reconstruct.",
+              file=sys.stderr)
+        print("  Inspect it, or overwrite deliberately with --force-baseline.",
+              file=sys.stderr)
+        return 2
     if dropped and not force:
         shown = ", ".join(dropped[:3]) + (f", +{len(dropped) - 3} more"
                                           if len(dropped) > 3 else "")

@@ -188,6 +188,38 @@ def main() -> int:
         check("  and says what it replaced, which the old message never did",
               "replaced a baseline of" in r.stdout, r.stdout)
 
+        # Raised by batocera-watch re-reviewing the guard above. "Cannot parse"
+        # was folded into "does not exist", so a corrupt baseline -- a
+        # truncated write, conflict markers, a half-synced copy -- was
+        # overwritten at exit 0 with nothing said. It is the one case where the
+        # prior numbers cannot be reconstructed, which makes it the worst one
+        # to discard quietly.
+        print("an unparseable baseline is not an absent one")
+        broken = str(Path(repo) / "broken.json")
+        Path(broken).write_text("{ this is not json", encoding="utf-8")
+        r = run("dirty.py", "--record-baseline", broken, cwd=repo)
+        check("recording over an unparseable baseline REFUSES",
+              r.returncode == 2, f"exit {r.returncode}: {r.stdout}{r.stderr}")
+        check("  and says it cannot tell what would be lost",
+              "cannot be read as a baseline" in r.stderr, r.stderr)
+        check("  and leaves the unreadable file untouched for a human",
+              Path(broken).read_text(encoding="utf-8") == "{ this is not json",
+              Path(broken).read_text(encoding="utf-8")[:60])
+        r = run("dirty.py", "--record-baseline", broken, "--force-baseline",
+                cwd=repo)
+        check("  --force-baseline still overwrites it deliberately",
+              r.returncode == 0, r.stderr)
+        check("  and the overwrite really happened",
+              "dirty.py" in json.loads(Path(broken).read_text(encoding="utf-8"))
+              .get("files", {}))
+
+        print("valid JSON that is not a baseline is also refused")
+        alien = str(Path(repo) / "alien.json")
+        Path(alien).write_text('{"something": "else"}', encoding="utf-8")
+        r = run("dirty.py", "--record-baseline", alien, cwd=repo)
+        check("a parseable non-baseline is refused too", r.returncode == 2,
+              f"exit {r.returncode}: {r.stdout}{r.stderr}")
+
         print("a repo with no baseline behaves exactly as before")
         (Path(repo) / "dirty.py").write_text(DIRTY, encoding="utf-8")
         r = run("dirty.py", cwd=repo)
