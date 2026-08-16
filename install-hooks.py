@@ -50,7 +50,25 @@ if [ -z "$STAGED" ]; then
     exit 0
 fi
 
+# An inherited repo ratchets against a recorded baseline rather than against
+# zero. If one is committed at the repo root, use it; with no baseline the gate
+# is unchanged and still fails on any finding, which is correct for a clean
+# repo. METHODOLOGY.md, "Adopting this in a codebase you inherited", step 2.
+#
+# check.py REFUSES to compare a baseline recorded in a different mode, so a
+# whole-repo baseline dropped here fails loudly instead of reporting scope
+# difference as regression.
+BASELINE_FILE="$(git rev-parse --show-toplevel)/quality-baseline.json"
+
 # Split on newlines only, so paths with spaces survive.
+#
+# WARNING to whoever adds the next flag to this loop: newline IFS also DISABLES
+# word-splitting on spaces, so a variable holding "--flag value" arrives as ONE
+# argument. argparse then prints the option in its own usage text while saying
+# "unrecognized arguments", which reads as "this option does not exist" -- and
+# the same command pasted into an interactive shell works, because IFS is
+# default there, so it looks like a race. Cost twenty minutes on 2026-08-16.
+# Pass flags as separate literal arguments, never through a variable.
 OLDIFS=$IFS
 IFS='
 '
@@ -60,7 +78,11 @@ for f in $STAGED; do
     [ -f "$f" ] || continue     # staged then removed from the tree
     # --skip-unsupported: a staged README or JSON file exits 0 rather than 2.
     # Without it every non-source file in a commit blocks the commit.
-    "$PY" "$CHECK_PY" "$f" --pretty --skip-unsupported || rc=1
+    if [ -f "$BASELINE_FILE" ]; then
+        "$PY" "$CHECK_PY" "$f" --baseline "$BASELINE_FILE" --pretty --skip-unsupported || rc=1
+    else
+        "$PY" "$CHECK_PY" "$f" --pretty --skip-unsupported || rc=1
+    fi
     checked=$((checked + 1))
 done
 IFS=$OLDIFS
