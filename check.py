@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -727,6 +728,316 @@ def _summarize(checks: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+# ── baseline ──────────────────────────────────────────────────────────────────
+#
+# A baseline is a stored per-file, per-tool count the gate compares against
+# instead of comparing against zero. Three things about it are load-bearing, and
+# all three were measured on batocera-watch on 2026-08-15 rather than reasoned:
+#
+# MODE. A baseline must be measured the way the gate measures. That repo's was
+# recorded with a whole-repo run while the hook checks staged files one at a
+# time, and the two disagreed by +398 errors across seven files nobody had
+# touched since a week before. Only the tools that resolve ACROSS files moved --
+# mypy and phpstan -- while ruff, phpcs and rector were byte-identical on every
+# file. That partition is the signature of scope, not of drift, and it is why
+# the mode is recorded here and a mismatch is REFUSED rather than compared.
+# METHODOLOGY step 2 mandated the mismatch until this landed: it said to commit
+# "the output of a full run", which reads as whole-repo to most people.
+#
+# TOOLS THAT DID NOT RUN. An unavailable tool reports zero issues. That reads as
+# an improvement, lets a real regression through, and then bakes a false zero
+# into the next re-record, after which the true count reads as a regression. A
+# tool that is unavailable now, or whose version differs from the recording, is
+# reported as "cannot compare" and excluded from the verdict. Never counted as
+# zero, never silently passed. This is METHODOLOGY step 3 applied to the
+# baseline itself: a check that did not run looks exactly like one that passed.
+#
+# VERSIONS DEGRADE, THEY DO NOT REFUSE. Compare only when BOTH sides are known.
+# An unknown version is not evidence of a match, but refusing on one would make
+# the feature unusable wherever a tool has no version we can parse -- and a
+# guard that fires on "cannot tell" gets switched off, which is the reasoning
+# coord.py already uses for session ownership.
+#
+# The verdict is on ERRORS, because that is what the gate already exits on.
+# Warnings are recorded per file so a later change can use them, and are printed
+# in the report, but they do not fail a commit that errors would not fail.
+
+BASELINE_VERSION = 1
+
+_VERSION_CMD = {
+    "ruff":      ["ruff", "--version"],
+    "mypy":      ["mypy", "--version"],
+    "eslint":    ["eslint", "--version"],
+    "stylelint": ["stylelint", "--version"],
+    "prettier":  ["prettier", "--version"],
+    "cppcheck":  ["cppcheck", "--version"],
+}
+_VERSION_RE = re.compile(r"\d+\.\d+(?:\.\d+)?")
+
+
+def _tool_version(name: str) -> str:
+    """Best-effort version string, or "" meaning "cannot tell"."""
+    cmd = _VERSION_CMD.get(name)
+    if not cmd or not shutil.which(cmd[0]):
+        return ""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    m = _VERSION_RE.search(f"{r.stdout} {r.stderr}")
+    return m.group(0) if m else ""
+
+
+def _repo_root(target: str) -> Path:
+    """What baseline paths are relative to.
+
+    Git toplevel where there is one, so a file is the same key no matter which
+    directory the gate ran from. Keyed on absolute paths a baseline is useless
+    on any other machine; keyed on cwd-relative ones it silently changes meaning
+    when the hook runs from a subdirectory.
+    """
+    p = Path(target).resolve()
+    start = p if p.is_dir() else p.parent
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=False, timeout=30)
+        if r.returncode == 0 and r.stdout.strip():
+            return Path(r.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return start
+
+
+def _rel(path_str: str, root: Path) -> str:
+    try:
+        return Path(path_str).resolve().relative_to(root).as_posix()
+    except (ValueError, OSError):
+        return Path(path_str).as_posix()
+
+
+def _counts_by_file(checks: list[dict[str, Any]], root: Path) -> dict[str, Any]:
+    """{path: {tool: {"errors": n, "warnings": n}}} for one run."""
+    out: dict[str, Any] = {}
+    for c in checks:
+        tool = c.get("tool", "?")
+        for i in c.get("issues", []):
+            slot = out.setdefault(_rel(i.get("file", ""), root), {})
+            counts = slot.setdefault(tool, {"errors": 0, "warnings": 0})
+            counts["errors" if i.get("severity") == "error" else "warnings"] += 1
+    return out
+
+
+def _statuses(checks: list[dict[str, Any]]) -> dict[str, str]:
+    return {c.get("tool", "?"): c.get("status", "unknown") for c in checks}
+
+
+def _per_file_checks(target: str, audit: bool = False) -> list[dict[str, Any]]:
+    """Run the measurement the GATE performs: every file on its own.
+
+    Deliberately not `check.py .`. The entire point of the mode field is that
+    the two produce different numbers, so a recorder taking the cheaper
+    whole-repo route would record exactly the quantity the gate cannot
+    reproduce -- which is the bug this feature exists to remove.
+    """
+    p = Path(target)
+    if p.is_file():
+        files = [str(p)]
+    else:
+        groups, _ = _collect_files(str(p))
+        files = sorted(f for fs in groups.values() for f in fs)
+    checks: list[dict[str, Any]] = []
+    for f in files:
+        lang = _detect_lang(f)
+        names = list(DEFAULT_TOOLS.get(lang, []))
+        if audit:
+            names.extend(AUDIT_TOOLS.get(lang, []))
+        if names:
+            checks.extend(_run_tools(names, f))
+    return checks
+
+
+def _dropped_entries(dest: str, files: dict[str, Any]) -> tuple[list[str], int, bool]:
+    """Files the existing baseline records that this write would not.
+
+    Returns (dropped, existing_count, unreadable). A destination that does not
+    exist drops nothing -- there is no prior measurement to lose.
+
+    A destination that exists and CANNOT BE PARSED is a third state and is
+    reported as such, not folded into the first. Raised by batocera-watch
+    re-reviewing this guard, and it is the same overloaded empty the guard
+    exists to fix: a file that fails to parse did hold a measurement -- a
+    truncated write, conflict markers, a half-synced copy over a real baseline
+    -- and its contents are precisely what nobody can recover. Treating it as
+    absent destroys the one case where the prior numbers are unknown, which is
+    the one case where losing them costs most.
+
+    Recording is whole-file: the doc is rebuilt and rewritten, so pointing two
+    per-file invocations at one path keeps only the second. Both print
+    "recorded 1 file(s)" and the loss surfaces one step later, as the first
+    file failing for being un-baselined -- which reads as a different problem
+    entirely. That is this tool's own failure mode aimed at itself: a zero that
+    means "never measured" wearing the face of a zero that means "measured, and
+    clean".
+    """
+    if not Path(dest).exists():
+        return [], 0, False
+    try:
+        prior = json.loads(Path(dest).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], 0, True
+    had = prior.get("files")
+    if not isinstance(had, dict):
+        # Parsed, but not a baseline this tool wrote. Same argument: something
+        # is there, and this run cannot say what it was worth.
+        return [], 0, True
+    return sorted(set(had) - set(files)), len(had), False
+
+
+def record_baseline(target: str, dest: str, audit: bool = False,
+                    force: bool = False) -> int:
+    root   = _repo_root(target)
+    checks = _per_file_checks(target, audit)
+    files  = _counts_by_file(checks, root)
+    tools  = sorted({c.get("tool", "?") for c in checks})
+    status = _statuses(checks)
+    doc = {
+        "baseline_version": BASELINE_VERSION,
+        "mode":     "per-file",
+        "recorded": time.strftime("%Y-%m-%d"),
+        "root":     root.name,
+        # Recorded so a later run can refuse to compare numbers that two
+        # different tools produced. "" means the version could not be
+        # established, which downstream treats as "cannot tell", not "same".
+        "tools":    {t: _tool_version(t) for t in tools},
+        # A tool that was unavailable WHEN RECORDED contributed zero, and that
+        # zero is not a measurement. Keeping the status makes it visible rather
+        # than letting it read as a clean file.
+        "status":   status,
+        "totals":   _summarize(checks),
+        "files":    files,
+    }
+    existed = Path(dest).exists()
+    dropped, existing, unreadable = _dropped_entries(dest, files)
+    if unreadable and not force:
+        print(f"baseline: REFUSING to write {dest} -- it exists but cannot be "
+              f"read as a baseline, so this run cannot say what would be lost.",
+              file=sys.stderr)
+        print("  That is a reason to stop, not to proceed: a truncated write, "
+              "conflict markers or a half-synced file all look like this, and "
+              "the numbers in it are the ones nobody can reconstruct.",
+              file=sys.stderr)
+        print("  Inspect it, or overwrite deliberately with --force-baseline.",
+              file=sys.stderr)
+        return 2
+    if dropped and not force:
+        shown = ", ".join(dropped[:3]) + (f", +{len(dropped) - 3} more"
+                                          if len(dropped) > 3 else "")
+        print(f"baseline: REFUSING to write {dest} -- it records {existing} "
+              f"file(s) and this run measured {len(files)}, so "
+              f"{len(dropped)} would be discarded: {shown}",
+              file=sys.stderr)
+        print("  A discarded file is not baselined, so it fails the next gate "
+              "for having no recorded count -- which looks like a different "
+              "bug one step later.", file=sys.stderr)
+        print(f"  To baseline a whole tree in one go:  "
+              f"check.py <dir> --record-baseline {dest}", file=sys.stderr)
+        print("  To replace the baseline deliberately, including on purpose "
+              "after deleting files:  --force-baseline", file=sys.stderr)
+        return 2
+
+    Path(dest).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n",
+                          encoding="utf-8")
+    missing = [t for t, s in sorted(status.items()) if s != "pass" and s != "fail"]
+    print(f"recorded {len(files)} file(s) from {len(tools)} tool(s), "
+          f"mode=per-file, to {dest}")
+    # Say what was displaced. The old message was true about what it wrote and
+    # silent about what it removed, which is exactly why reading it carefully
+    # did not catch the loss.
+    # Keyed on the file having EXISTED, not on how much it recorded. A baseline
+    # of zero files is a real baseline -- every file was clean -- and it is the
+    # one most easily mistaken for no baseline at all, so overwriting it is
+    # exactly when saying so matters.
+    if existed:
+        note = f"  replaced a baseline of {existing} file(s)"
+        if dropped:
+            note += f", discarding {len(dropped)} on --force-baseline"
+        print(note)
+    if missing:
+        print("  WARNING: recorded while these tools were not running: "
+              + ", ".join(f"{t} ({status[t]})" for t in missing))
+        print("  Their zeros are not measurements. Re-record where they run, "
+              "or a later real count will read as a regression.")
+    return 0
+
+
+def compare_baseline(checks: list[dict[str, Any]], target: str,
+                     source: str, mode: str) -> int:
+    """0 = no worse, 1 = worse, 2 = cannot compare."""
+    try:
+        doc = json.loads(Path(source).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"baseline: cannot read {source}: {exc}", file=sys.stderr)
+        return 2
+
+    recorded_mode = doc.get("mode", "unknown")
+    if recorded_mode != mode:
+        print(f"baseline: REFUSING to compare. It was recorded as "
+              f"mode={recorded_mode!r} and this run is {mode!r}. Those are "
+              f"different quantities in the same units -- for any tool that "
+              f"resolves across files they disagree by hundreds of findings on "
+              f"unchanged code. Re-record with --record-baseline.",
+              file=sys.stderr)
+        return 2
+
+    root   = _repo_root(target)
+    now    = _counts_by_file(checks, root)
+    was    = doc.get("files", {})
+    old_v  = doc.get("tools", {})
+    status = _statuses(checks)
+
+    skipped: list[tuple[str, str]] = []
+    for tool, st in sorted(status.items()):
+        if st not in ("pass", "fail"):
+            skipped.append((tool, f"did not run ({st})"))
+            continue
+        was_v, now_v = old_v.get(tool, ""), _tool_version(tool)
+        if was_v and now_v and was_v != now_v:
+            skipped.append((tool, f"version {was_v} -> {now_v}"))
+    skip = {t for t, _ in skipped}
+
+    worse, deltas = [], []
+    for path in sorted(set(now) | set(was)):
+        tools = set(now.get(path, {})) | set(was.get(path, {}))
+        for tool in sorted(tools - skip):
+            before = int(was.get(path, {}).get(tool, {}).get("errors", 0))
+            after  = int(now.get(path, {}).get(tool, {}).get("errors", 0))
+            if after != before:
+                deltas.append(f"  {path}  {tool}  {before} -> {after} "
+                              f"({after - before:+d})")
+            if after > before:
+                worse.append((path, tool, before, after))
+
+    for tool, why in skipped:
+        print(f"baseline: cannot compare {tool} -- {why}. Excluded from the "
+              f"verdict rather than counted as zero.", file=sys.stderr)
+    for line in deltas:
+        print(line)
+    if not deltas:
+        # Say it. A ratchet that only speaks when it fails is indistinguishable
+        # from one that never ran, which is the whole complaint in step 3.
+        print(f"baseline: no change against {Path(source).name}")
+
+    if worse:
+        print("", file=sys.stderr)
+        print("baseline: WORSE than recorded --", file=sys.stderr)
+        for path, tool, before, after in worse:
+            print(f"  {path}  {tool}  {before} -> {after}", file=sys.stderr)
+        return 1
+    return 0
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -748,6 +1059,21 @@ def main() -> None:
                              "instead of 2. For callers handed an arbitrary file "
                              "list (the pre-commit hook), where a README is not "
                              "a failure.")
+    parser.add_argument("--baseline", metavar="FILE",
+                        help="Compare against a recorded baseline and fail only "
+                             "where a file got WORSE, instead of failing on any "
+                             "finding at all. Refuses if the baseline was "
+                             "recorded in a different mode.")
+    parser.add_argument("--record-baseline", metavar="FILE",
+                        help="Measure per-file and write a baseline to FILE. "
+                             "Per-file because that is what the gate does; see "
+                             "METHODOLOGY, 'Adopting this in a codebase you "
+                             "inherited', step 2.")
+    parser.add_argument("--force-baseline", action="store_true",
+                        help="Allow --record-baseline to write a baseline that "
+                             "drops files the existing one recorded. Needed "
+                             "only when that loss is intended, such as after "
+                             "deleting files.")
     args = parser.parse_args()
 
     target = str(Path(args.target).resolve())
@@ -756,6 +1082,14 @@ def main() -> None:
         sys.exit(2)
 
     is_dir = Path(target).is_dir()
+
+    # ── Record a baseline and stop ────────────────────────────────────────
+    # Its own path, before the normal flow, because recording MEASURES
+    # DIFFERENTLY: it runs every file on its own even when handed a directory,
+    # which is exactly what `check.py .` does not do.
+    if args.record_baseline:
+        sys.exit(record_baseline(target, args.record_baseline, args.audit,
+                                 args.force_baseline))
 
     # ── Single file or explicit --lang / --tools ──────────────────────────
     if not is_dir or args.lang != "auto" or args.tools:
@@ -786,6 +1120,10 @@ def main() -> None:
             "summary":  summary,
         }
         print(json.dumps(output, indent=2 if args.pretty else None))
+        # A single file IS the per-file measurement, so a per-file baseline is
+        # comparable here and the verdict replaces the compare-against-zero one.
+        if args.baseline:
+            sys.exit(compare_baseline(checks, target, args.baseline, "per-file"))
         sys.exit(1 if summary["errors"] > 0 else 0)
 
     # ── Directory: scan, group by language, run appropriate tools ─────────
@@ -848,6 +1186,11 @@ def main() -> None:
     }
 
     print(json.dumps(output, indent=2 if args.pretty else None))
+    # A directory run lets the dir-capable tools resolve across files, so this
+    # is the WHOLE-REPO measurement. Declaring it as such is what makes
+    # compare_baseline refuse rather than report scope as regression.
+    if args.baseline:
+        sys.exit(compare_baseline(all_checks, target, args.baseline, "whole-repo"))
     sys.exit(1 if summary["errors"] > 0 else 0)
 
 
