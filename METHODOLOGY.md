@@ -309,6 +309,16 @@ of them because they treated adoption as an event rather than a rate.
    can tell progress from noise and the effort stops being visible to anyone
    including you.
 
+   **Name it `quality-baseline.json` at the repo root.** The pre-commit hook
+   looks for exactly that path and passes `--baseline` automatically when it is
+   there; with no such file the gate is unchanged and still fails on any
+   finding, which is what a clean repo wants. A fixed path rather than a
+   setting, so a repo either has a baseline the hook uses or has none — never a
+   third state where a baseline is recorded, committed, and invoked by nothing.
+   That third state is exactly what #32 shipped in: `--baseline` was merged and
+   unreachable from the only place that enforces anything, because
+   `install-hooks.py` named it zero times. Written, merged, and not running.
+
    **Per-file, because that is what step 1 made the gate do**, and the two
    measurements are different quantities in the same units. This sentence used
    to read "commit the output of a full run", which is how the batocera-watch
