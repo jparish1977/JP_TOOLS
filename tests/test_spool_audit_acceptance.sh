@@ -132,11 +132,13 @@ ck "every path under the spool is reported" "$missing" "0"
 
 echo "FLAW 3: never claim to have examined what was never opened"
 # The original flaw was "never claim a secret was destroyed when it was not",
-# and it was checked by purging a symlink and confirming the target survived.
-# The tool no longer deletes, so that check now guards nothing -- and it was
-# the one that kept passing after --purge was deleted. What survives the cut
-# is the half that was always the real risk: a symlink is an area the tool did
-# NOT read, and reporting it as anything else is a false clean.
+# and it was checked by purging a symlink and confirming the target survived --
+# a check that kept passing after --purge was deleted, because a tool that
+# never runs destroys nothing. The purge-path version lives in FLAW 6 below
+# and in the invariant suite, both pinned by run_tool's status. What THIS
+# fixture pins is the report half, which was always the real risk: a symlink
+# is an area the tool did NOT read, and reporting it as anything else is a
+# false clean.
 mkdir -p "$W/sym/tmp" "$W/vault"; printf '%%!PS\nSECRET\n' > "$W/vault/keep.ps"
 ln -s "$W/vault/keep.ps" "$W/sym/tmp/link.ps"
 # A decoy the tool MUST report, in the same fixture as the symlink it must
@@ -170,6 +172,110 @@ printf '*PPD-Adobe: "4.3"\n' > "$W/noise/tmp/ppd"
 for i in 1 2 3 4 5; do echo bin > "$W/noise/tmp/.cache/fontconfig/c$i.cache-9"; done
 run_tool 0 "a spool of only caches is clean" --spool "$W/noise" --conf /dev/null
 case "$OUT" in *"spool is clean"*) ok "and says so";; *) no "and says so";; esac
+
+echo "FLAW 6: --purge removes only what its evidence proves, only where it was pointed"
+# The returned destructive half, held to the bar that killed the first one.
+# Every survivor check below is a negative, which a tool that never ran
+# satisfies for free -- so each fixture pairs them with a removal that must
+# be FOUND, and run_tool pins the status. The canary's vandal stub is what
+# keeps the survivor checks honest.
+mkdir -p "$W/purge/tmp"
+printf '%%!PS-Adobe-3.0\n' > "$W/purge/tmp/leak.ps"
+printf '*PPD-Adobe: "4.3"\n' > "$W/purge/tmp/ppd"
+echo notes > "$W/purge/README"
+printf '%%PDF-1.7\n' > "$W/purge/d00085-001"
+# Before anything is destroyed: the report must say WHICH entries the purge
+# set is. "N of these carry a print-data signature" above an unmarked mixed
+# listing left "these" as a count the operator could not resolve into names
+# short of running the purge and reading what it destroyed.
+run_tool 1 "the report names the delete set before anything is destroyed" \
+  --spool "$W/purge" --conf /dev/null
+has "the purgeable entry is marked in the listing" "tmp/leak.ps  <- --purge removes this" "$OUT"
+case "$OUT" in
+  *"README  <- --purge"*|*"d00085-001  <- --purge"*)
+    no "only the delete set carries the mark";;
+  *) ok "only the delete set carries the mark";;
+esac
+run_tool 1 "purge leaves the job file for cancel, so the spool is not clean" \
+  --spool "$W/purge" --conf /dev/null --purge
+has "the residue removal is reported" "removed: tmp/leak.ps" "$OUT"
+[ ! -e "$W/purge/tmp/leak.ps" ] && ok "the identified leak is gone" || no "the identified leak is gone"
+[ -f "$W/purge/tmp/ppd" ] && ok "the driver cache survives" || no "the driver cache survives"
+[ -f "$W/purge/README" ] && ok "the unidentified file survives" || no "the unidentified file survives"
+[ -f "$W/purge/d00085-001" ] && ok "the job file survives" || no "the job file survives"
+has "and cancel is named for it" "cancel -a -x" "$OUT"
+
+mkdir -p "$W/purge2/tmp"
+printf '%%!PS\n' > "$W/purge2/tmp/leak.ps"
+run_tool 0 "a residue-only spool is clean after purge" --spool "$W/purge2" --conf /dev/null --purge
+has "and says so" "spool is clean" "$OUT"
+
+run_tool 1 "purging where nothing is removable says what it will not do" \
+  --spool "$W/purge" --conf /dev/null --purge
+has "names the refusal to decide" "unidentified files are yours to judge" "$OUT"
+
+run_tool 2 "purge scoped by job id is refused" --spool "$W/purge" --conf /dev/null 85 --purge
+has "and names the CUPS tool that IS scoped" "cancel -x 85" "$OUT"
+[ -f "$W/purge/d00085-001" ] && ok "the refusal deleted nothing" || no "the refusal deleted nothing"
+
+# The bug that killed the first --purge, as a black-box case: a TempDir that
+# is a symlink pointing out of the spool. The listing refuses to look through
+# it, so nothing inside can become a victim, whatever the deleter would do.
+mkdir -p "$W/proot/real"; printf '%%!PS\nOUT\n' > "$W/proot/real/out.ps"
+mkdir -p "$W/pesc"; ln -s "$W/proot/real" "$W/pesc/tmp"
+run_tool 2 "a symlinked TempDir makes a purge INCOMPLETE, not a delete set" \
+  --spool "$W/pesc" --conf /dev/null --purge
+has "and is named as unexamined" "TempDir is a symlink" "$OUT"
+[ -f "$W/proot/real/out.ps" ] && ok "the file outside the spool survives the purge" || no "the file outside the spool survives the purge"
+
+echo "FLAW 7: removing one name of a document is not destroying the document"
+# A hard-linked victim: CUPS cannot create hard links, but an operator's
+# `ln` can, and the pre-fix run printed `removed:` plus `VERDICT: spool is
+# clean` plus exit 0 while identical readable content survived at the other
+# link. Refusing would be worse (two copies instead of one), so the entry is
+# still unlinked; the claim and the exit code are what change.
+mkdir -p "$W/hard/tmp" "$W/hardvault"
+printf '%%!PS\nSECRET\n' > "$W/hard/tmp/leak.ps"
+ln "$W/hard/tmp/leak.ps" "$W/hardvault/other-link.ps"
+run_tool 1 "a hard-linked victim raises the exit code" \
+  --spool "$W/hard" --conf /dev/null --purge
+has "and is reported as removed but NOT destroyed" \
+  "removed but NOT destroyed: tmp/leak.ps" "$OUT"
+[ ! -e "$W/hard/tmp/leak.ps" ] \
+  && ok "the spool's entry is still unlinked" \
+  || no "the spool's entry is still unlinked"
+grep -q SECRET "$W/hardvault/other-link.ps" 2>/dev/null \
+  && ok "the content survives at the other link, as the report says" \
+  || no "the content survives at the other link, as the report says"
+
+echo "FLAW 8: the report must not promise what the purge just failed to do"
+# With the containing directory at mode 500 the unlink fails EACCES; the old
+# report then printed "--purge removes exactly these files and nothing else"
+# four lines under the failure, and the VERDICT advised --purge for the very
+# entry it had just failed on. Root bypasses the mode bit, so this is skipped
+# loudly there like FLAW 1's chmod cases; the same suppression is covered
+# uid-independently in tests/test_spool_audit.py.
+if [ "$(id -u)" = 0 ]; then
+  sk "a failed purge withdraws its promises (running as root; chmod 500 does not apply)"
+else
+  mkdir -p "$W/stuck/tmp"
+  printf '%%!PS\n' > "$W/stuck/tmp/leak.ps"
+  chmod 500 "$W/stuck/tmp"
+  run_tool 1 "a failed unlink exits 1" --spool "$W/stuck" --conf /dev/null --purge
+  has "the failure is reported" "delete FAILED" "$OUT"
+  case "$OUT" in
+    *"--purge removes exactly these files"*)
+      no "no capability claim over a failure";;
+    *) ok "no capability claim over a failure";;
+  esac
+  v=$(printf '%s\n' "$OUT" | grep '^VERDICT:')
+  case "$v" in
+    *"Clear them with:"*) no "the verdict does not advise what just failed";;
+    *) ok "the verdict does not advise what just failed";;
+  esac
+  has "and it points at the failure instead" "just FAILED" "$v"
+  chmod 755 "$W/stuck/tmp"
+fi
 
 echo
 if [ "$skip" -gt 0 ]; then

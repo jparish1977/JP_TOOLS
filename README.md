@@ -92,7 +92,7 @@ already own is usually what shrinks the job most.
 
 | Script | Purpose |
 |---|---|
-| `spool-audit.py` | Report documents CUPS keeps after printing, including its TempDir. Reports only — it never deletes, edits or restarts anything, and names the CUPS commands that do |
+| `spool-audit.py` | Report documents CUPS keeps after printing, including its TempDir, and remove (`--purge`) the content-proven leftovers `cancel` cannot reach. Never touches config, daemon, job files, or anything it could not identify — it names the CUPS commands that clear those |
 
 Printing sends the whole document through CUPS, and CUPS may keep a copy after
 the job finishes. Print a password, a recovery sheet or a private key and that
@@ -125,17 +125,36 @@ is the safe direction for a report -- and it was the wrong direction for the
 delete set this tool used to have, which shared the same predicate and destroyed
 a plain-text README. Both halves lived here until 2026-08-14.
 
-**It clears nothing, on purpose.** The clearing half was `PreserveJobFiles No`
-plus a restart plus an unlink, which is `cancel -a -x` and one config line --
-work CUPS already does correctly. It was also where every dangerous bug lived: a
-`--fix` that could destroy a device node, one that truncated `cupsd.conf` to zero
+**What CUPS can clear, CUPS clears.** The first destructive half was cut
+entirely on 2026-08-14: `--fix` was "set `PreserveJobFiles No`, restart cupsd,
+delete the leftovers", which is `cancel -a -x` and one config line -- work CUPS
+already does correctly -- and it was where every dangerous bug lived: a `--fix`
+that could destroy a device node, one that truncated `cupsd.conf` to zero
 bytes, a `--purge` that followed a symlinked `TempDir` out of the directory it
-was told to audit. The report now names the commands and leaves them to you:
+was told to audit. `--fix` is not coming back; the report names the commands
+and leaves them to you:
 
 ```
 cancel -a -x                      # cancel every job and its documents
 PreserveJobFiles No               # in /etc/cups/cupsd.conf, then restart cups
 ```
+
+**`--purge` is back, for the one job those commands cannot do.** Files whose
+own first bytes prove they are print data but which carry no job id -- TempDir
+leftovers, a document copied to `d00085-001.bak` -- are unreachable by
+`cancel`, and without this flag the report can only tell you to remove them by
+hand, with filenames that may contain newlines and terminal escapes. `--purge`
+removes exactly those files and nothing else. The delete set is the
+classifier's evidence Kind, so job files, unidentified files and runtime
+artifacts are excluded by type rather than by a check; it refuses job ids
+(nothing it removes has one); it writes no file and touches no daemon, so the
+two `--fix` bugs have no code to live in; and it cannot traverse a symlink --
+every path component is opened `O_NOFOLLOW` against a directory descriptor, so
+the escape that killed the old purge is the kernel's ELOOP rather than a path
+comparison that can be raced. Unidentified files stay yours to judge:
+over-reporting is the safe direction for a report, and it was the wrong
+direction for the old delete set, which destroyed a plain-text README on
+exactly that confusion.
 
 It reads directly and has no privilege-escalation path, so run it under `sudo`
 for the real spool. That is deliberate: an internal sudo fallback was a second

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Report documents left behind in the CUPS print spool. Reports only.
+"""Report documents left behind in the CUPS print spool, and remove the
+leftovers that CUPS' own tools cannot reach.
 
 Printing sends the whole document through CUPS, and CUPS may keep a copy after
 the job finishes. If you ever print a password, a recovery sheet or a key, that
@@ -9,28 +10,64 @@ Usage:
     python spool-audit.py                    # report on everything
     python spool-audit.py 85 86              # report, highlighting those jobs
     python spool-audit.py --include-control  # also count job control files
+    python spool-audit.py --purge            # remove content-proven files
+                                             # that `cancel` cannot reach
     python spool-audit.py --spool DIR        # audit a directory instead
 
-Exit status: 0 nothing retained, 1 content still on disk, 2 could not be read.
+Exit status: 0 nothing retained, 1 content still on disk (including anything
+--purge failed to remove), 2 could not be read.
 
 Reads directly, so it must run as root for the real spool (sudo). There is no
 privilege-escalation path inside the tool: a second implementation of the same
 listing kept disagreeing with the first, and that divergence caused a large
 share of this file's history of bugs.
 
-THIS TOOL NEVER WRITES
-    It opens files to read their first bytes and it reads cupsd.conf. It does
-    not delete, edit, restart or configure anything, and it takes no flag that
-    would. That is a deliberate cut, made 2026-08-14 after this file had spent
-    fifteen review rounds mostly on its own destructive half: a --fix that
-    could destroy a device node, a --fix that truncated cupsd.conf to zero
-    bytes, a --purge that followed a symlinked TempDir out of the directory it
-    was told to audit. None of those bugs were possible in the reporting half,
-    and the clearing they were re-implementing is something CUPS already does
-    correctly. See "HOW TO CLEAR IT" below.
+WHAT --purge REMOVES, AND WHY THE ANSWER IS A TYPE
+    Exactly the files whose own first bytes prove them to be print data and
+    which carry no job id -- the ones the report describes with "`cancel`
+    cannot reach them". That is the one clearing job with no CUPS equivalent.
+    Everything else is out of scope by classification, not by a check that
+    could be forgotten:
 
-    The reporting half is the part with no equivalent: answering "what is this
-    file, actually" about spool contents you did not put there.
+      d<job>-<n>, c<job>  CUPS' own files. `cancel -a -x` removes them
+                          through the daemon, correctly. See HOW TO CLEAR IT.
+      unidentified files  never removed. "Not recognised as harmless" is the
+                          right rule for a report and the wrong one for a
+                          delete set; this tool does not destroy what it
+                          could not identify.
+      runtime artifacts   lockfiles, driver caches. Not content, not touched.
+
+    So --purge takes no scope arguments. Job ids alongside it are refused --
+    nothing it removes has one -- and no flag widens the set.
+
+WHAT IT WILL NEVER DO, BY CONSTRUCTION
+    The first destructive half of this file was cut entirely on 2026-08-14,
+    after sixteen review rounds kept finding bugs in it: a --fix that could
+    destroy a device node, a --fix that truncated cupsd.conf to zero bytes, a
+    --purge that followed a symlinked TempDir out of the directory it was told
+    to audit. Most of what it did -- retention off, jobs cancelled -- was
+    re-implementing work CUPS already does correctly, and deleting it removed
+    the bugs with it. What returned is only the residue removal above, built
+    so those bugs have no code to live in rather than so they are checked for:
+
+      - No file is ever written and no daemon is ever touched. --fix is not
+        back: it was `cancel -a -x` plus one config line, and even a version
+        that shells out to CUPS re-imports its worst bug -- acting on the
+        LIVE daemon while pointed at some other --conf or --spool. Nothing
+        here opens cupsd.conf for writing, so nothing can truncate it, and
+        nothing calls os.replace, so nothing can destroy a device node.
+      - Removal cannot traverse a symlink. Every path component is opened
+        O_NOFOLLOW relative to the previous descriptor and the unlink is
+        anchored to the last of them, so a symlink anywhere in the path is
+        the kernel's ELOOP, not a path comparison that can go stale between
+        the check and the unlink.
+      - Only regular files are unlinked. The leaf is opened (O_NONBLOCK, so a
+        fifo cannot hang the run) and fstat'd, and anything else is refused
+        by type -- including a symlink, because unlinking a link while its
+        target survives is a false assurance of destruction.
+
+    The reporting half remains the part with no equivalent: answering "what
+    is this file, actually" about spool contents you did not put there.
 
 WHY THE PROBLEM EXISTS AT ALL
     CUPS documents PreserveJobFiles as defaulting to No, so document files
@@ -59,7 +96,8 @@ HOW TO CLEAR IT
 
     The explicit "No" matters — see above, an unset directive is not the same
     thing. Re-run this tool afterwards to check the spool is actually empty,
-    which is the job it is for.
+    which is the job it is for. Whatever `cancel` could not reach -- content
+    with no job id -- is what --purge is for.
 
 WHY THIS EXISTS AS A TOOL
     The obvious one-liner is wrong in a way that reports danger as safety:
@@ -85,7 +123,7 @@ WHAT COUNTS AS A LEAK
                  with --include-control, because naming them in a report moves
                  that disclosure somewhere less protected than the spool.
     tmp/cups-*   CUPS runtime files (lockfiles, notifier sockets). NOT content.
-                 Reported separately, never counted as a leak.
+                 Reported separately, never counted as a leak, never removed.
 """
 
 from __future__ import annotations
@@ -459,6 +497,30 @@ def classify(
     )
 
 
+def purgeable(audit: Audit) -> tuple[Entry, ...]:
+    """What --purge removes: files proven to be print data by their own bytes.
+
+    The whole scope decision is one Kind test, because the classification
+    already answers it. Kind.TEMP means "content-identified, carrying no job
+    id that classify() looked for" -- precisely the set `cancel` cannot
+    reach. Note the qualifier: inside TempDir the walk classifies by content
+    alone and never applies parse_entry, so tmp/d00086-001 holding %PDF is
+    TEMP and is purged. That is correct -- CUPS does not put d-files in
+    TempDir, and a real job file at the top level parses as DOCUMENT first,
+    so `cancel`'s own files are never in this set. DOCUMENT and CONTROL
+    carry job ids and are CUPS' own to remove; UNRECOGNISED merely failed to
+    be recognised as harmless, which is grounds to report and never grounds
+    to destroy (the old delete set deleted README-do-not-delete on exactly
+    that confusion); ARTIFACT is not content at all. There are no scope
+    flags to combine with, because there is nothing left to decide.
+
+    Both partitions are scanned so the selection cannot depend on how the
+    audit was scoped -- although in practice a purge run has no targeted
+    entries, since --purge refuses job ids.
+    """
+    return tuple(e for e in (*audit.targeted, *audit.others) if e.kind is Kind.TEMP)
+
+
 def safe_name(name: str) -> str:
     """A filename that cannot forge a report line.
 
@@ -475,7 +537,12 @@ def safe_name(name: str) -> str:
     return "".join(ch if ch.isprintable() or ch == " " else repr(ch)[1:-1] for ch in out)
 
 
-def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) -> list[str]:
+def render(
+    audit: Audit,
+    jobs: frozenset[int],
+    retention: bool | None = None,
+    purge_failed: frozenset[str] = frozenset(),
+) -> list[str]:
     """Format an Audit for a human. Returns lines; printing is the caller's job.
 
     `retention` is whether CUPS is currently configured to keep documents, read
@@ -483,6 +550,15 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
     "are there files here" told Joe the host still retained data immediately
     after a successful --fix had turned retention off, because leftover
     documents from before the fix were still on disk.
+
+    `purge_failed` names the entries a purge THIS RUN already failed to
+    remove. The identified paragraph and the VERDICT were written for a
+    pre-purge spool, and purge_outcome feeds this same function a post-purge
+    one: without this input the capability sentence was printed four lines
+    under proof that it did not hold, and the VERDICT advised --purge for an
+    entry --purge had just failed on. It is an input to the one renderer
+    rather than a second renderer, which is the drift purge_outcome exists
+    to prevent.
     """
     if audit.verdict is Verdict.DENIED:
         # A non-permission error (ELOOP, ESTALE, EIO) must not be answered with
@@ -545,7 +621,18 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
     # operator never saw. That is the "not worse than ls" promise failing at
     # precisely the point it exists for.
     ordered = unidentified + identified + rest
-    lines += [f"  {safe_name(e.name)}" for e in ordered[:20]]
+    # The delete set is marked per entry, not only counted. "N of these" above
+    # an unmarked mixed listing left the operator unable to determine WHICH
+    # files "--purge removes exactly these files" meant, short of running the
+    # purge and reading what it destroyed. An entry the purge just failed on
+    # is not marked: the mark is the same per-entry promise the capability
+    # sentence makes, and it has just been disproven for that entry.
+    lines += [
+        f"  {safe_name(e.name)}"
+        + ("  <- --purge removes this"
+           if e.kind is Kind.TEMP and e.name not in purge_failed else "")
+        for e in ordered[:20]
+    ]
     hidden = ordered[20:]
     if hidden:
         # Say what was hidden, not just how much. With the order above the
@@ -568,6 +655,11 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
         lines.append("  (PostScript, PDF or PJL), so they ARE document content by")
         lines.append("  evidence, not a maybe. They carry no job id, so they cannot be")
         lines.append("  targeted by job number, so `cancel` cannot reach them.")
+        # The capability sentence asserts a future the caller may have already
+        # spent: on a post-purge render with failures it sat four lines under
+        # "delete FAILED". A run with failures does not get to promise.
+        if not purge_failed:
+            lines.append("  --purge removes exactly these files and nothing else.")
         if in_temp:
             lines.append(f"  {in_temp} of them are in the CUPS TempDir, mid-filter.")
     if unidentified:
@@ -637,11 +729,103 @@ def render(audit: Audit, jobs: frozenset[int], retention: bool | None = None) ->
             f"{len(audit.unexamined)} area(s) could not be examined."
         )
     elif audit.verdict is Verdict.RETAINED:
-        lines.append(f"VERDICT: {audit.total} retained file(s) still on disk. "
-                     "Clear them with: cancel -a -x")
+        # Name the remover that actually fits what remains. The old line said
+        # `cancel -a -x` unconditionally, which over a spool holding only
+        # TempDir residue named a command that clears none of it -- advice the
+        # report's own "cancel cannot reach them" paragraph contradicts.
+        everything = audit.targeted + audit.others
+        # An entry --purge just failed on must not have --purge advised for
+        # it: the advice would name a command whose failure is printed a few
+        # lines up, in the same report.
+        stuck = [e for e in everything
+                 if e.kind is Kind.TEMP and e.name in purge_failed]
+        how = []
+        if any(e.job is not None for e in everything):
+            how.append("cancel -a -x")
+        if any(e.kind is Kind.TEMP and e.name not in purge_failed
+               for e in everything):
+            how.append("--purge")
+        if how:
+            advice = "Clear them with: " + ", then ".join(how)
+            if stuck:
+                advice += (" (--purge already FAILED on the rest; "
+                           "see the NOT removed line(s) above)")
+        elif stuck:
+            advice = ("--purge just FAILED on what remains; "
+                      "see the NOT removed line(s) above.")
+        else:
+            # Only unidentified files remain. No command fits by design:
+            # nothing here removes what could not be identified.
+            advice = ("Nothing removes what could not be identified; "
+                      "look at the listing above.")
+        lines.append(f"VERDICT: {audit.total} retained file(s) still on disk. {advice}")
     else:
         lines.append("VERDICT: spool is clean.")
     return lines
+
+
+@dataclass(frozen=True)
+class Removal:
+    """What one purge pass did, entry by entry.
+
+    `removed` is names whose content is gone. `undestroyed` is (name, other
+    links): the spool's directory entry was unlinked, but st_nlink said that
+    many OTHER hard links to the same content remain, so the entry is removed
+    and the document is not destroyed -- two different claims, and collapsing
+    them printed "removed:" plus exit 0 over readable content. `failed` is
+    report-safe notes for entries still present; `failed_names` mirrors it
+    with the raw names, so the renderer can stop advising --purge for exactly
+    the entries this run just failed on.
+    """
+
+    removed: tuple[str, ...] = ()
+    undestroyed: tuple[tuple[str, int], ...] = ()
+    failed: tuple[str, ...] = ()
+    failed_names: tuple[str, ...] = ()
+
+
+def purge_outcome(
+    result: Removal,
+    after: Audit,
+    retention: bool | None,
+) -> tuple[list[str], int]:
+    """What a purge run prints and exits with, from what actually happened.
+
+    Pure, so main() carries no untested decision -- the shape whose absence
+    produced findings in every review round of the first destructive half.
+
+    The old half had purge_outcome AND leftover_caveats AND a nothing-to-purge
+    branch: three renderers that had to agree about what remained, and they
+    drifted twice. Here the after-state goes through render(), the same
+    function the report path uses, so there is no second description of a
+    spool to fall out of step with the first.
+    """
+    lines = [f"removed: {safe_name(n)}" for n in result.removed]
+    # Removed-but-not-destroyed is its own line, never a bare "removed:". An
+    # operator reads "removed" as "destroyed", and for a multiply-linked file
+    # that reading is false: identical readable content survives at every
+    # other link. CUPS itself cannot create a hard link (verified against
+    # cupsd and its filters/backends), so anything here was linked by a hand
+    # this tool cannot follow -- say so and raise the exit code below.
+    lines += [
+        f"removed but NOT destroyed: {safe_name(n)} ({k} other hard link(s) "
+        "to the same content remain readable elsewhere)"
+        for n, k in result.undestroyed
+    ]
+    # The notes arrive already escaped: they are built around safe_name at the
+    # point of failure, where the raw name is still in hand.
+    lines += [f"NOT removed: {n}" for n in result.failed]
+    lines.append("")
+    lines.append("The spool as it stands now:")
+    lines += render(after, frozenset(), retention,
+                    purge_failed=frozenset(result.failed_names))
+    # A failed removal means the file is demonstrably still there (or, for a
+    # refusal, was never touched), and an undestroyed one means the content
+    # is -- just not at this path -- so the exit code may rise but never
+    # fall: a clean-looking re-read does not erase either. after.exit_code
+    # already answers 2 for an unreadable or incomplete re-read.
+    return lines, max(after.exit_code,
+                      1 if (result.failed or result.undestroyed) else 0)
 
 
 # --- I/O boundary ----------------------------------------------------------
@@ -882,6 +1066,14 @@ def read_spool(
     # d00085-001 was unlinked, "1 removed" was printed, and the target survived.
     # False assurance of destruction, the worst failure this tool can have.
     #
+    # That property is NOT unique to symlinks, and stating it as though it were
+    # is what hid the next instance: a HARD link passes S_ISREG, is unlinked
+    # correctly, and still leaves identical content readable under the other
+    # name. Three reviewers hit it independently on 2026-08-17. So this refusal
+    # is not the whole answer to "did the content actually die" -- _unlink_at
+    # reports st_nlink survivors, and purge_outcome raises the exit code, so the
+    # claim matches what happened rather than what was attempted.
+    #
     # Names matching neither pattern are read the same way TempDir files are,
     # so a document copied to d00085-001.bak is counted rather than dropped;
     # `ls` would have shown it.
@@ -933,6 +1125,180 @@ def read_spool(
         tuple(extra),
     )
 
+
+
+# CUPS spools live on POSIX filesystems, and the anchored unlink below is
+# built from POSIX openat semantics. A platform without them gets a refusal,
+# not a fallback to path arithmetic -- the arithmetic is the thing that was
+# raceable.
+_CAN_ANCHOR = (
+    hasattr(os, "O_DIRECTORY")
+    and hasattr(os, "O_NOFOLLOW")
+    and os.open in os.supports_dir_fd
+    and os.unlink in os.supports_dir_fd
+)
+
+
+def _component_note(rel: str, part: str, fd: int, exc: OSError) -> str:
+    """Why a path component refused to open, with symlinks named as such.
+
+    The kernel refuses a symlinked component -- but as ENOTDIR, not ELOOP,
+    when O_DIRECTORY is set alongside O_NOFOLLOW (measured on Linux 7.0: the
+    directory check sees the link itself and wins). Both classes therefore
+    lstat the component so a symlink is reported as the symlink it is; the
+    lstat is for the MESSAGE only, after the refusal has already happened,
+    so racing it cannot reopen the path.
+    """
+    if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+        with contextlib.suppress(OSError):
+            if stat.S_ISLNK(os.lstat(part, dir_fd=fd).st_mode):
+                return (f"{safe_name(rel)} (refused: {safe_name(part)} is "
+                        "a symlink, NOT followed)")
+    return f"{safe_name(rel)} (could not reach it: {exc.__class__.__name__})"
+
+
+def _unlink_at(root_fd: int, rel: str) -> tuple[str | None, int]:
+    """Remove `rel` under an already-open spool directory, or say why not.
+
+    Returns (note, survivors). `note` is None when the file is gone -- which
+    includes finding it already gone, the goal state however reached -- and a
+    report-safe note on any refusal or failure. `survivors` is how many OTHER
+    hard links to the same content remain after a successful unlink, read
+    from st_nlink on the fstat already taken for the S_ISREG check -- no
+    second stat, no second window. Unlinking one name of a multiply-linked
+    file removes the entry and destroys nothing, and the caller must not be
+    allowed to collapse those two claims.
+
+    Containment is enforced by the kernel, not by path arithmetic: every
+    directory component is opened O_NOFOLLOW | O_DIRECTORY relative to the
+    previous descriptor, and the unlink is anchored to the last of them, so a
+    symlink anywhere in the path fails with ELOOP instead of being traversed.
+    The old delete() resolved the path and compared it against the spool
+    root, a fact that could stop being true between the comparison and the
+    unlink; a descriptor cannot be redirected that way. The one path decision
+    left in code is refusing '', '.' and '..' as components, because '..' is
+    a real directory, not a symlink, and O_NOFOLLOW would step through it and
+    out of the spool without complaint.
+
+    The leaf is opened (O_NONBLOCK, so a fifo cannot hang the run -- the
+    _read_conf lesson, applied before it is relearned) and fstat'd, and
+    anything that is not a regular file is refused by type. That includes a
+    leaf that became a symlink: unlinking a link while its target survives
+    would print "removed" over readable content, the false assurance of
+    destruction that is the worst failure this tool can have. The window
+    between that fstat and the unlink is real but sits inside the audited
+    directory: anyone who can swap files there can already read them.
+    """
+    parts = rel.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        # No listing can produce such a name -- iterdir cannot return one --
+        # so an entry containing it did not come from the audit.
+        return f"{safe_name(rel)} (refused: not a name the audit could have produced)", 0
+    opened: list[int] = []
+    try:
+        fd = root_fd
+        for part in parts[:-1]:
+            try:
+                fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                             | os.O_CLOEXEC, dir_fd=fd)
+            except FileNotFoundError:
+                return None, 0  # the parent is gone, so the file is too
+            except OSError as exc:
+                return _component_note(rel, part, fd, exc), 0
+            opened.append(fd)
+        leaf = parts[-1]
+        try:
+            lfd = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                          | os.O_CLOEXEC, dir_fd=fd)
+        except FileNotFoundError:
+            return None, 0
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                return (f"{safe_name(rel)} (refused: a symlink, NOT removed; "
+                        "unlinking a link does not destroy its target)"), 0
+            return f"{safe_name(rel)} (refused, could not verify it: {exc.__class__.__name__})", 0
+        try:
+            st = os.fstat(lfd)
+        finally:
+            os.close(lfd)
+        if not stat.S_ISREG(st.st_mode):
+            return f"{safe_name(rel)} (refused: not a regular file)", 0
+        try:
+            os.unlink(leaf, dir_fd=fd)
+        except FileNotFoundError:
+            return None, 0
+        except OSError as exc:
+            return (f"{safe_name(rel)} (delete FAILED: {exc.__class__.__name__}; "
+                    "it is still there)"), 0
+        # st_nlink counted this entry, so anything above 1 is links that
+        # SURVIVE the unlink just performed. The unlink still happens -- a
+        # refusal would leave the spool copy in place too, handing the
+        # operator two copies of the document instead of one -- but the
+        # claim "removed" must not become the claim "destroyed".
+        return None, max(0, st.st_nlink - 1)
+    finally:
+        for f in opened:
+            os.close(f)
+
+
+def delete_residue(
+    spool: str,
+    entries: tuple[Entry, ...],
+    *,
+    can_anchor: bool = _CAN_ANCHOR,
+) -> Removal:
+    """Unlink `entries` under `spool`. Returns a Removal, per entry.
+
+    No injectable unlink and no injectable resolve, on purpose: in the old
+    delete() the seams were the test surface, and the safety property lived
+    in the defaults the tests bypassed. Here the safety property IS the
+    syscall pattern, so the suites drive real fixture filesystems -- no root
+    needed for any of them. The only seam is the platform capability, which a
+    test on Linux could not otherwise make false.
+
+    The spool root itself is opened WITHOUT O_NOFOLLOW: the operator named
+    that path, the same trust read_spool extends when it lists through it.
+    Everything below the root refuses symlinks, matching the listing exactly,
+    so the purge can only reach what the audit reached, by the same rules.
+    """
+    if not can_anchor:
+        return Removal(
+            failed=tuple(
+                f"{safe_name(e.name)} (refused: no openat/unlinkat on this "
+                "platform, so removal cannot be anchored to the audited directory)"
+                for e in entries
+            ),
+            failed_names=tuple(e.name for e in entries),
+        )
+    try:
+        root_fd = os.open(spool, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    except OSError as exc:
+        return Removal(
+            failed=tuple(
+                f"{safe_name(e.name)} (the spool itself could not be opened: "
+                f"{exc.__class__.__name__})"
+                for e in entries
+            ),
+            failed_names=tuple(e.name for e in entries),
+        )
+    removed: list[str] = []
+    undestroyed: list[tuple[str, int]] = []
+    failed: list[str] = []
+    failed_names: list[str] = []
+    try:
+        for e in entries:
+            note, survivors = _unlink_at(root_fd, e.name)
+            if note is not None:
+                failed.append(note)
+                failed_names.append(e.name)
+            elif survivors:
+                undestroyed.append((e.name, survivors))
+            else:
+                removed.append(e.name)
+    finally:
+        os.close(root_fd)
+    return Removal(tuple(removed), tuple(undestroyed), tuple(failed),
+                   tuple(failed_names))
 
 
 def parse_retention(body: bytes) -> bool:
@@ -1007,6 +1373,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("jobs", nargs="*", type=int, help="job ids to highlight")
     ap.add_argument(
+        "--purge",
+        action="store_true",
+        help="remove files identified as print data by their own content, "
+             "which `cancel` cannot reach; never job files, never "
+             "unidentified files",
+    )
+    ap.add_argument(
         "--include-control",
         action="store_true",
         help="also count c<job> control files, which carry job titles",
@@ -1014,6 +1387,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--spool", default=DEFAULT_SPOOL, help=f"spool directory (default {DEFAULT_SPOOL})")
     ap.add_argument("--conf", default=DEFAULT_CONF, help=f"cupsd.conf path (default {DEFAULT_CONF})")
     args = ap.parse_args(argv)
+
+    if args.purge and args.jobs:
+        # Refused, not reinterpreted and not silently ignored: the scoped
+        # purge ("85 --purge") is the invocation that fired `&& echo SAFE` in
+        # four separate review rounds of the deleted half. Nothing --purge
+        # removes carries a job id, so a job-scoped purge is a request this
+        # tool cannot mean anything by. Job files are CUPS' own.
+        ap.error(
+            "--purge cannot be scoped by job id; nothing it removes has one. "
+            "For job files use: cancel -x "
+            + " ".join(str(j) for j in sorted(set(args.jobs)))
+        )
 
     jobs = frozenset(args.jobs)
     audit = classify(read_spool(args.spool), jobs, args.include_control)
@@ -1023,10 +1408,30 @@ def main(argv: list[str] | None = None) -> int:
             print(line)
         return 2
 
+    if args.purge:
+        victims = purgeable(audit)
+        if not victims:
+            # An incomplete audit lands here too, with victims empty or not:
+            # removing what WAS positively seen is safe regardless, and the
+            # exit code below stays 2 through audit.exit_code either way.
+            print("--purge: nothing here is identified as print data by its own")
+            print("content, so there is nothing this tool will remove. Job files")
+            print("belong to `cancel`; unidentified files are yours to judge.")
+            print("")
+            for line in render(audit, jobs, retention_state(args.conf)):
+                print(line)
+            return audit.exit_code
+        result = delete_residue(args.spool, victims)
+        after = classify(read_spool(args.spool), frozenset(), args.include_control)
+        lines, code = purge_outcome(result, after, retention_state(args.conf))
+        for line in lines:
+            print(line)
+        return code
+
     for line in render(audit, jobs, retention_state(args.conf)):
         print(line)
-    # The exit code means one thing and only one thing: nothing is left. It
-    # never reports on an action, because this tool takes none.
+    # On the report path the exit code means one thing and only one thing:
+    # nothing is left. It never reports on an action, because none was taken.
     return audit.exit_code
 
 
