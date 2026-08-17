@@ -421,6 +421,37 @@ def test_the_listing_leads_with_what_needs_a_human() -> None:
                "all ordinary job files" in text)
 
 
+def test_the_listing_marks_the_delete_set() -> None:
+    """`--purge removes exactly these files` was printed above an UNMARKED
+    mixed listing: "these" was a count, not a list, and the operator could
+    not determine the delete set from the report short of running the purge
+    and reading what it destroyed. The purgeable entries are now marked in
+    the listing itself -- one renderer, no --dry-run -- so the sentence's
+    "these" is resolvable by eye."""
+    listing = Listing(
+        Verdict.CLEAN,
+        ("d00077-001",),
+        (
+            TempFile(name="leak.ps", size=5, head="%!PS"),
+            TempFile(name="mystery", size=9, head="???"),
+        ),
+    )
+    lines = render(classify(listing), frozenset())
+    marked = [ln for ln in lines if "<- --purge removes this" in ln]
+    check("exactly the delete set is marked", len(marked), 1)
+    # bool() first: indexing an empty list aborts the whole run with a
+    # traceback under exactly the mutation this test exists to catch,
+    # hiding every result after it -- the first_note lesson, same suite.
+    check_true("and it is the content-proven entry",
+               bool(marked) and marked[0].strip().startswith("tmp/leak.ps"))
+    check_true("the job file is not marked",
+               not any("d00077-001" in ln for ln in marked))
+    check_true("the unidentified file is not marked",
+               not any("mystery" in ln for ln in marked))
+    check_true("the capability sentence still stands over the marks",
+               any("--purge removes exactly these files" in ln for ln in lines))
+
+
 def test_report_reads_location_from_the_path() -> None:
     """Kind means EVIDENCE since the split; location comes from the path.
 
@@ -686,9 +717,10 @@ def test_cups_runtime_files_are_not_leaks() -> None:
     check("one artifact", len(audit.artifacts), 1)
     check("artifact kind", audit.artifacts[0].kind, Kind.ARTIFACT)
 
-    # Never counted as content. The tool no longer deletes anything, so the
-    # stake is the report: calling a live cupsd lockfile a leak sends the
-    # operator to remove a lock from under a running daemon.
+    # Never counted as content. Since --purge returned the stake is no longer
+    # just the report: an artifact miscounted as content would enter the
+    # delete set and remove a lock from under a running cupsd -- the delete
+    # set is Kind-driven, so this classification IS the guard.
     names = [e.name for e in audit.others]
     check_true("lockfile is not reported as content",
                "tmp/cups-dbus-notifier-lockfile" not in names)
@@ -1087,6 +1119,478 @@ def test_walk_against_a_real_filesystem() -> None:
 # It produced findings in EVERY review round of this branch while the pure,
 # tested functions above produced almost none. That was the pattern, and these
 # tests are the response to it.
+
+
+# --- the returned destructive half: --purge --------------------------------
+#
+# Scope is a type (Kind.TEMP), containment is a syscall pattern (O_NOFOLLOW at
+# every component, unlink anchored to a descriptor), and there are no seams to
+# inject through: the old delete() made unlink and resolve injectable, and the
+# safety property then lived in defaults the tests bypassed. Every test here
+# drives a real fixture filesystem, no root needed, and each guard is proven
+# to FIRE, not to exist -- each was mutated out on 2026-08-17 and its test
+# watched failing before this section was committed.
+
+
+def first_note(failed: tuple) -> str:  # type: ignore[type-arg]
+    """failed[0], surviving a mutant that refuses nothing.
+
+    Indexing an empty tuple aborts the whole run with a traceback at the
+    first broken guard, hiding every result after it. Under mutation the
+    interesting output is ALL the failures, so an absent note becomes a
+    string no real note matches instead of an IndexError.
+    """
+    return str(failed[0]) if failed else "<no refusal was recorded>"
+
+
+def test_purgeable_is_selected_by_evidence_alone() -> None:
+    """The delete set is Kind.TEMP and nothing else, decided by the settled
+    classification rather than re-derived: DOCUMENT and CONTROL carry job ids
+    and belong to `cancel`; UNRECOGNISED is never destroyed (the old delete
+    set removed README-do-not-delete on exactly that confusion); ARTIFACT is
+    not content. Built over classify()'s real output, not hand-made entries,
+    so the selection is tested against what the audit actually produces."""
+    listing = Listing(
+        Verdict.CLEAN,
+        ("d00085-001", "c00085"),
+        (
+            TempFile(name="leak.ps", size=64, head="%!PS-Adobe-3.0"),
+            TempFile(name="NOTES.txt", size=20, head="plain notes"),
+            TempFile(name="cups-dbus-notifier-lockfile", size=0, head=""),
+        ),
+        (),
+        TEMP_SUBDIR,
+        (
+            TempFile(name="d00085-001.bak", size=64, head="%PDF-1.7"),
+            TempFile(name="README", size=10, head="hello"),
+        ),
+    )
+    audit = classify(listing, frozenset(), include_control=True)
+    victims = sorted(e.name for e in spool_audit.purgeable(audit))
+    check("only content-proven, job-less files are in the delete set",
+          victims, ["d00085-001.bak", "tmp/leak.ps"])
+
+    # And a scoped audit cannot smuggle a document into the set through the
+    # targeted partition: main() refuses jobs with --purge, but the selection
+    # itself must not depend on that refusal.
+    scoped = classify(listing, frozenset({85}), include_control=True)
+    check("a scoped audit selects the same set",
+          sorted(e.name for e in spool_audit.purgeable(scoped)), victims)
+
+
+def test_kind_temp_means_no_job_id_that_classify_looked_for() -> None:
+    """What purgeable()'s docstring now says, pinned. Inside TempDir the walk
+    classifies by content alone and never applies parse_entry, so a
+    job-NAMED file in tmp/ holding print magic is TEMP and IS purged --
+    CUPS does not put d-files in TempDir, so nothing real is at stake. The
+    same name at the top level parses as DOCUMENT first and is `cancel`'s,
+    never this tool's. The docstring used to claim TEMP meant "carries no
+    job id", full stop, which the tmp/ case falsifies."""
+    in_tmp = classify(Listing(
+        Verdict.CLEAN, (),
+        (TempFile(name="d00086-001", size=9, head="%PDF-1.7"),),
+    ))
+    check("a job-named file in tmp/ is TEMP, by content alone",
+          in_tmp.others[0].kind, Kind.TEMP)
+    check("and IS in the delete set",
+          [e.name for e in spool_audit.purgeable(in_tmp)], ["tmp/d00086-001"])
+
+    at_top = classify(spool(["d00086-001"]))
+    check("the same name at the top level is DOCUMENT",
+          at_top.others[0].kind, Kind.DOCUMENT)
+    check("and is never purgeable", spool_audit.purgeable(at_top), ())
+
+
+def test_purge_refuses_a_path_that_steps_outside() -> None:
+    """'..' is a real directory, not a symlink, so O_NOFOLLOW is no defence
+    against it -- the component check is the one path decision left in code,
+    and this proves it fires. No listing can produce such a name (iterdir
+    cannot return one), so an entry carrying it did not come from the audit."""
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        (root / "spool").mkdir()
+        target = root / "outside.ps"
+        target.write_bytes(b"%!PS\n")
+
+        res = spool_audit.delete_residue(
+            str(root / "spool"),
+            (Entry(name="../outside.ps", kind=Kind.TEMP),),
+        )
+        removed, failed = res.removed, res.failed
+        check("nothing removed", removed, ())
+        check("one refusal", len(failed), 1)
+        check_true("the refusal says the name is not the audit's",
+                   "refused" in first_note(failed))
+        check_true("the file outside the spool survives", target.exists())
+
+
+def test_purge_never_traverses_a_symlinked_directory() -> None:
+    """The bug that killed the first --purge: a symlinked TempDir took the
+    delete out of the audited directory and printed SCOPE CLEAN. Here the
+    escape is the kernel's ELOOP -- and this drives the deleter directly with
+    the hostile entry, so the guard is proven independent of the audit ever
+    refusing to produce one."""
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        outside = root / "outside"
+        outside.mkdir()
+        secret = outside / "secret.ps"
+        secret.write_bytes(b"%!PS\nSECRET\n")
+        spool = root / "spool"
+        spool.mkdir()
+        os.symlink(outside, spool / "tmp")
+
+        res = spool_audit.delete_residue(
+            str(spool), (Entry(name="tmp/secret.ps", kind=Kind.TEMP, in_temp=True),),
+        )
+        removed, failed = res.removed, res.failed
+        check("nothing removed", removed, ())
+        check("one refusal", len(failed), 1)
+        check_true(f"named as a symlink, NOT followed (got: {first_note(failed)!r})",
+                   "NOT followed" in first_note(failed))
+        check_true("the file on the other side survives", secret.exists())
+
+
+def test_purge_refuses_a_leaf_symlink_instead_of_claiming_destruction() -> None:
+    """Unlinking a symlink removes the link and leaves the content readable,
+    so 'removed' over one is a false assurance of destruction -- the worst
+    failure this tool can have, and exactly what the pre-cut purge did."""
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        real = root / "real.ps"
+        real.write_bytes(b"%!PS\n")
+        spool = root / "spool"
+        spool.mkdir()
+        link = spool / "leak.ps"
+        os.symlink(real, link)
+
+        res = spool_audit.delete_residue(
+            str(spool), (Entry(name="leak.ps", kind=Kind.TEMP),),
+        )
+        removed, failed = res.removed, res.failed
+        check("nothing reported removed", removed, ())
+        check("one refusal", len(failed), 1)
+        check_true("says it is a symlink", "symlink" in first_note(failed))
+        check_true("the target survives", real.exists())
+        # The link too: removing it would be the same false claim one step
+        # removed, since the report line would still read as content destroyed.
+        check_true("the link itself is untouched", link.is_symlink())
+
+
+def test_purge_refuses_what_is_not_a_regular_file() -> None:
+    """The device-node analogue, testable without root: a fifo occupying a
+    victim's name. Two guards must both fire -- O_NONBLOCK so the open does
+    not hang waiting for a writer (a hang in a security tool reads as 'still
+    checking'), and S_ISREG so the unlink is refused by type."""
+    if not hasattr(os, "mkfifo") or not hasattr(signal, "SIGALRM"):
+        print("  note: no os.mkfifo/SIGALRM on this platform, fifo purge case skipped")
+        return
+
+    def _too_slow(signum: int, frame: object) -> None:
+        raise _Blocked("blocked opening a fifo victim")
+
+    previous = signal.signal(signal.SIGALRM, _too_slow)
+    signal.alarm(5)
+    try:
+        with tempfile.TemporaryDirectory() as raw:
+            spool = pathlib.Path(raw)
+            fifo = spool / "leak.ps"
+            os.mkfifo(fifo)
+
+            res = spool_audit.delete_residue(
+                str(spool), (Entry(name="leak.ps", kind=Kind.TEMP),),
+            )
+            removed, failed = res.removed, res.failed
+            check("nothing removed", removed, ())
+            check("one refusal", len(failed), 1)
+            check_true("refused by type", "not a regular file" in first_note(failed))
+            check_true("the fifo still exists", fifo.exists() or fifo.is_fifo())
+    except _Blocked:
+        FAILURES.append(
+            "delete_residue BLOCKED opening a fifo instead of refusing it; "
+            "the O_NONBLOCK guard is not firing, and in the real tool this is "
+            "a hang with no output"
+        )
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def test_purge_counts_an_already_gone_file_as_removed() -> None:
+    """The goal state is 'no file at that path', however reached. A live
+    spool deletes its own temp files; racing one is not a failure, and the
+    old delete() already knew this (FileNotFoundError counted as deleted)."""
+    with tempfile.TemporaryDirectory() as raw:
+        spool = pathlib.Path(raw)
+        res = spool_audit.delete_residue(
+            str(spool),
+            (
+                Entry(name="gone.ps", kind=Kind.TEMP),
+                Entry(name="tmp/also-gone.ps", kind=Kind.TEMP, in_temp=True),
+            ),
+        )
+        check("both count as removed", sorted(res.removed),
+              ["gone.ps", "tmp/also-gone.ps"])
+        check("no failures", res.failed, ())
+
+
+def test_purge_removes_only_its_victims() -> None:
+    """The one positive case, with a bystander: the victim goes, the
+    neighbour survives byte-identical."""
+    with tempfile.TemporaryDirectory() as raw:
+        spool = pathlib.Path(raw)
+        (spool / "tmp").mkdir()
+        victim = spool / "tmp" / "leak.ps"
+        victim.write_bytes(b"%!PS-Adobe-3.0\n")
+        bystander = spool / "tmp" / "ppd"
+        bystander.write_bytes(b'*PPD-Adobe: "4.3"\n')
+
+        res = spool_audit.delete_residue(
+            str(spool), (Entry(name="tmp/leak.ps", kind=Kind.TEMP, in_temp=True),),
+        )
+        check("the victim is reported removed", res.removed, ("tmp/leak.ps",))
+        check("no failures", res.failed, ())
+        # A single-link file is destroyed by its unlink, so it must NOT be
+        # flagged removed-but-not-destroyed: a mutant that always raises the
+        # flag would turn every clean purge into a false alarm and exit 1.
+        check("nothing merely unlinked", res.undestroyed, ())
+        check_true("and is actually gone", not victim.exists())
+        check("the bystander is byte-identical",
+              bystander.read_bytes(), b'*PPD-Adobe: "4.3"\n')
+
+
+def test_purge_reports_a_hard_linked_victim_as_removed_but_not_destroyed() -> None:
+    """Unlinking one link of a multiply-linked file removes the entry and
+    destroys nothing: identical readable content survives at every other
+    link. The old outcome was `removed:` plus `VERDICT: spool is clean` plus
+    exit 0 -- a false assurance of destruction. The remedy is NOT to refuse
+    (that leaves the spool copy in place too, two copies instead of one, and
+    CUPS itself cannot create a hard link so false refusal is not a risk):
+    keep unlinking, say removed-but-not-destroyed, and raise the exit code.
+    st_nlink comes from the fstat already taken for the S_ISREG check."""
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        spool = root / "spool"
+        (spool / "tmp").mkdir(parents=True)
+        victim = spool / "tmp" / "leak.ps"
+        victim.write_bytes(b"%!PS-Adobe-3.0\nSECRET\n")
+        other = root / "other-link.ps"   # outside the spool, same inode
+        os.link(victim, other)
+
+        res = spool_audit.delete_residue(
+            str(spool), (Entry(name="tmp/leak.ps", kind=Kind.TEMP, in_temp=True),),
+        )
+        check_true("the spool's entry IS still unlinked", not victim.exists())
+        check("but it is not counted as destroyed", res.removed, ())
+        check("and it is not a failure either", res.failed, ())
+        check("it is removed-but-not-destroyed, with the surviving link count",
+              res.undestroyed, (("tmp/leak.ps", 1),))
+        check("the content survives byte-identical at the other link",
+              other.read_bytes(), b"%!PS-Adobe-3.0\nSECRET\n")
+
+        after = classify(spool_audit.read_spool(str(spool)))
+        lines, code = spool_audit.purge_outcome(res, after, None)
+        check("the exit code is raised even over a clean re-read", code, 1)
+        check_true("the report says removed but NOT destroyed",
+                   any(ln.startswith("removed but NOT destroyed: tmp/leak.ps")
+                       for ln in lines))
+        check_true("with the surviving links named",
+                   any("1 other hard link(s)" in ln for ln in lines))
+        check_true("and never a bare 'removed:' claim for it",
+                   not any(ln == "removed: tmp/leak.ps" for ln in lines))
+
+
+def test_purge_refuses_when_it_cannot_anchor() -> None:
+    """The platform seam is the ONE injectable thing, because a test on Linux
+    cannot make openat unavailable -- and a guard nothing can make fire is
+    the vacuous-check failure this repo keeps meeting. Refusal, not fallback:
+    path arithmetic is the raceable thing the anchor replaced."""
+    with tempfile.TemporaryDirectory() as raw:
+        spool = pathlib.Path(raw)
+        victim = spool / "leak.ps"
+        victim.write_bytes(b"%!PS\n")
+
+        res = spool_audit.delete_residue(
+            str(spool), (Entry(name="leak.ps", kind=Kind.TEMP),), can_anchor=False,
+        )
+        removed, failed = res.removed, res.failed
+        check("the refused entry is named for the renderer too",
+              res.failed_names, ("leak.ps",))
+        check("nothing removed", removed, ())
+        check("every entry refused", len(failed), 1)
+        check_true("and the note says why", "cannot be anchored" in first_note(failed))
+        check_true("the file survives", victim.exists())
+
+
+def test_purge_reports_a_failed_unlink_as_still_there() -> None:
+    """A denied unlink must read as a failed removal, not as respawning files
+    -- bug 5 in this suite's header, now on the purge path. Root bypasses the
+    permission bit, so this is skipped there like the acceptance suite's
+    chmod cases, and the class name is asserted so the note cannot drift into
+    naming a cause it does not know."""
+    if getattr(os, "geteuid", lambda: 1)() == 0:
+        print("  note: running as root, failed-unlink purge case skipped")
+        return
+    with tempfile.TemporaryDirectory() as raw:
+        spool = pathlib.Path(raw)
+        (spool / "tmp").mkdir()
+        victim = spool / "tmp" / "leak.ps"
+        victim.write_bytes(b"%!PS\n")
+        os.chmod(spool / "tmp", 0o555)
+        try:
+            res = spool_audit.delete_residue(
+                str(spool),
+                (Entry(name="tmp/leak.ps", kind=Kind.TEMP, in_temp=True),),
+            )
+        finally:
+            os.chmod(spool / "tmp", 0o755)
+        removed, failed = res.removed, res.failed
+        check("nothing removed", removed, ())
+        check("one failure", len(failed), 1)
+        check("and its raw name is carried for the renderer",
+              res.failed_names, ("tmp/leak.ps",))
+        check_true("named as a failed delete", "delete FAILED" in first_note(failed))
+        check_true("with the error class", "PermissionError" in first_note(failed))
+        check_true("the file is indeed still there", victim.exists())
+
+
+def test_purge_outcome_never_forgets_a_failure() -> None:
+    """The exit code may rise but never fall: a clean-looking re-read must
+    not erase a removal that failed, or `--purge && echo SAFE` fires over a
+    file the tool just said it could not remove."""
+    clean_after = classify(spool([]))
+    lines, code = spool_audit.purge_outcome(
+        spool_audit.Removal(
+            removed=("a.ps",),
+            failed=("b.ps (delete FAILED: PermissionError; it is still there)",),
+            failed_names=("b.ps",),
+        ),
+        clean_after, None,
+    )
+    check("a failure keeps exit at 1 over a clean re-read", code, 1)
+    check_true("the failure is printed", any("NOT removed" in ln for ln in lines))
+    check_true("the removal is printed", any(ln == "removed: a.ps" for ln in lines))
+
+    _, ok_code = spool_audit.purge_outcome(
+        spool_audit.Removal(removed=("a.ps",)), clean_after, False)
+    check("no failures over a clean spool is 0", ok_code, 0)
+
+    dirty_after = classify(spool(["d00077-001"]))
+    _, dirty_code = spool_audit.purge_outcome(
+        spool_audit.Removal(), dirty_after, None)
+    check("what remains drives the code", dirty_code, 1)
+
+    denied_after = classify(Listing(Verdict.DENIED))
+    lines4, code4 = spool_audit.purge_outcome(
+        spool_audit.Removal(removed=("a.ps",)), denied_after, None)
+    check("an unreadable re-read is 2, not a success", code4, 2)
+    check_true("and says nothing is proven",
+               any("NOT a clean result" in ln for ln in lines4))
+
+
+def test_the_report_does_not_promise_what_the_purge_just_failed() -> None:
+    """render()'s identified paragraph was written for a pre-purge spool and
+    purge_outcome feeds it a post-purge one: with a mode-500 directory one
+    run printed `NOT removed: ... delete FAILED` and, four lines under it,
+    `--purge removes exactly these files and nothing else.`, then a VERDICT
+    advising --purge for the very entry it had just failed on. A run with
+    failures promises nothing and advises what it just failed elsewhere."""
+    failed_entry = TempFile(name="leak.ps", size=5, head="%!PS")
+
+    # The pure renderer, told what failed.
+    audit = classify(Listing(Verdict.CLEAN, (), (failed_entry,)))
+    text = "\n".join(render(audit, frozenset(), None,
+                            purge_failed=frozenset({"tmp/leak.ps"})))
+    check_true("no capability sentence over a failure",
+               "--purge removes exactly these files" not in text)
+    check_true("no delete-set mark on the failed entry",
+               "<- --purge removes this" not in text)
+    v = next(ln for ln in text.splitlines() if ln.startswith("VERDICT:"))
+    check_true("the verdict does not advise --purge", "Clear them with" not in v)
+    check_true("it points at the failure instead", "just FAILED" in v)
+
+    # Mixed spool: cancel is still advised for the job file, --purge is not
+    # advised for the entry it failed on, and the failure is pointed at.
+    mixed = classify(Listing(Verdict.CLEAN, ("d00077-001",), (failed_entry,)))
+    vm = next(ln for ln in render(mixed, frozenset(), None,
+                                  purge_failed=frozenset({"tmp/leak.ps"}))
+              if ln.startswith("VERDICT:"))
+    check_true("cancel is still advised", "cancel -a -x" in vm)
+    check_true("but not --purge", ", then --purge" not in vm)
+    check_true("and the failure is named", "already FAILED" in vm)
+
+    # End to end through purge_outcome: the after-render inherits the
+    # failure, so the two halves of the same report cannot contradict.
+    lines, code = spool_audit.purge_outcome(
+        spool_audit.Removal(
+            failed=(
+                ("tmp/leak.ps (delete FAILED: PermissionError; "
+                 "it is still there)"),
+            ),
+            failed_names=("tmp/leak.ps",),
+        ),
+        audit, None,
+    )
+    body = "\n".join(lines)
+    check("the failure keeps the exit code up", code, 1)
+    check_true("the failure is printed", "NOT removed: tmp/leak.ps" in body)
+    check_true("and no capability sentence follows it",
+               "--purge removes exactly these files" not in body)
+    check_true("and the verdict does not advise --purge",
+               "Clear them with: --purge" not in body)
+
+
+def test_purge_output_escapes_hostile_names() -> None:
+    """Removal lines are report lines, so a filename must not be able to
+    forge one -- same rule as the listing, at the new site."""
+    forged = "x.ps\nremoved: everything-is-fine"
+    lines, _ = spool_audit.purge_outcome(
+        spool_audit.Removal(removed=(forged,), undestroyed=((forged, 1),)),
+        classify(spool([])), None)
+    check_true("no raw newline survives into the removal line",
+               all("\n" not in ln for ln in lines))
+
+
+def test_verdict_names_the_remover_that_fits() -> None:
+    """`cancel -a -x` clears job files and nothing else; --purge clears the
+    content-proven residue and nothing else; nothing clears the unidentified.
+    A verdict naming the wrong one sends the operator to a command that will
+    report success and change nothing."""
+    def verdict_line(audit: Any) -> str:
+        # `Audit` here is a module attribute loaded via importlib, so mypy
+        # sees it as a variable, not a type -- annotating the parameter with
+        # it trades no-any-return for valid-type. render() is the Any (same
+        # dynamic load), so the declared list is what pins the return type.
+        lines: list[str] = render(audit, frozenset())
+        return next(ln for ln in lines if ln.startswith("VERDICT:"))
+
+    job_files = classify(spool(["d00077-001"]))
+    v = verdict_line(job_files)
+    check_true("job files -> cancel", "cancel -a -x" in v)
+    check_true("and not --purge", "--purge" not in v)
+
+    residue = classify(Listing(
+        Verdict.CLEAN, (), (TempFile(name="leak.ps", size=5, head="%!PS"),),
+    ))
+    v = verdict_line(residue)
+    check_true("residue -> --purge", "--purge" in v)
+    check_true("and not cancel", "cancel" not in v)
+
+    both = classify(Listing(
+        Verdict.CLEAN, ("d00077-001",),
+        (TempFile(name="leak.ps", size=5, head="%!PS"),),
+    ))
+    v = verdict_line(both)
+    check_true("both -> cancel first", "cancel -a -x, then --purge" in v)
+
+    unrec = classify(Listing(
+        Verdict.CLEAN, (), (TempFile(name="mystery", size=9, head="???"),),
+    ))
+    v = verdict_line(unrec)
+    check_true("unidentified -> no command at all",
+               "Nothing removes what could not be identified" in v)
+    check_true("so no cancel", "cancel" not in v)
+    check_true("and no --purge", "--purge" not in v)
 
 
 

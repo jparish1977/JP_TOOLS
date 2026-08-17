@@ -122,3 +122,17 @@ Every round of this branch treated the exempt region as something to test, seam,
 or justify. Deleting the feature underneath it removed the exemption, the seams
 it needed, and the bugs, in one commit. A pragma is a claim that code cannot be
 tested; sometimes the honest answer is that it did not need to exist.
+
+## The return, on different terms
+
+On 2026-08-17 a narrow `--purge` came back: removal of files that are
+content-proven print data with no job id, the one clearing job `cancel -a -x`
+cannot do. `--fix` stayed deleted. The new destructive code carries **no
+pragmas and no injectable seams** -- the old delete() made `unlink` and
+`resolve` injectable, and the safety property then lived in defaults the tests
+bypassed. The safety property now IS the syscall pattern (O_NOFOLLOW at every
+component, unlink anchored to a directory descriptor), so the suites drive
+real fixture filesystems instead, none of which need root, and each guard was
+verified by mutation: five deliberate breaks (component O_NOFOLLOW, leaf
+O_NOFOLLOW, the S_ISREG refusal, the `..` refusal, the Kind.TEMP-only delete
+set), each caught by named assertions before the code was committed.

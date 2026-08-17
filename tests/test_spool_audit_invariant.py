@@ -4,17 +4,24 @@ JP_TOOLS/tests/test_spool_audit_invariant.py
 Two properties, checked across every path spool-audit.py can take.
 
     EXIT 0 MUST MEAN: no file this tool would call print data is still there.
-    AND THE SPOOL MUST BE BYTE-IDENTICAL AFTERWARDS.
+    AND THE SPOOL MUST BE BYTE-IDENTICAL AFTERWARDS -- except, under --purge,
+    for EXACTLY the files the fixture names as removed, with every survivor
+    still byte-identical and only the parents of removed files allowed to
+    move their timestamps.
 
 The first is the only promise the tool makes that matters: `spool-audit.py 85
 && echo SAFE` firing while a readable copy of job 85's document sits on disk is
 the failure, and everything else is detail.
 
-The second is new, and it is the whole point of the 2026-08-14 cut. This tool
-reports and does not act. That is not a claim to make in a docstring and leave
+The second dates from the 2026-08-14 cut, when this tool stopped acting at
+all, and it survives the return of --purge in sharpened form: a report run
+must change nothing, and a purge run must change precisely its declared
+victims and nothing else. That is not a claim to make in a docstring and leave
 unchecked, so every fixture below snapshots the tree before the run and
 compares it after: names, modes, sizes, content hashes, symlink targets, mtime
-and ctime. A tool that says it only reads is one edit away from not being one.
+and ctime. "Removed exactly X" is asserted in both directions -- X gone, and
+nothing outside X so much as touched -- because the pre-cut purge failed in
+both: it deleted bystanders, and it reported removals that had not happened.
 
 WHY THIS EXISTS
     The exit-0 property broke in review rounds 4, 7, 8 and 9, in a different
@@ -119,7 +126,10 @@ def run(spool: pathlib.Path, *args: str) -> tuple[int, str]:
     return proc.returncode, proc.stdout + proc.stderr
 
 
-def assert_invariant(label: str, spool: pathlib.Path, *args: str, expect: int) -> None:
+def assert_invariant(
+    label: str, spool: pathlib.Path, *args: str, expect: int,
+    removed: tuple[str, ...] = (),
+) -> None:
     """Check both properties, and pin the exit code.
 
     The first version returned early whenever the exit code was non-zero, so
@@ -131,8 +141,27 @@ def assert_invariant(label: str, spool: pathlib.Path, *args: str, expect: int) -
 
     So: `expect` pins the exit code, and the contrapositive is asserted too.
     Every fixture now fails if the tool drifts, whichever way it drifts.
+
+    `removed` names what a --purge fixture expects gone, and it is exact in
+    both directions: each named path must be absent afterwards, everything
+    else must be untouched, and only the PARENT directories of removed files
+    may move their mtime/ctime -- an unlink updates them, and that is the
+    kernel's doing, not the tool exceeding its scope. Their type and mode
+    still may not change. A fixture naming a path it never planted is a
+    fixture bug and fails as one, rather than passing vacuously.
     """
+    gone = set(removed)
+    parents: set[str] = set()
+    for r in gone:
+        parents.update(
+            str(q) for q in pathlib.PurePosixPath(r).parents if str(q) != "."
+        )
+
     before = snapshot(spool)
+    for r in sorted(gone - set(before)):
+        FAILURES.append(
+            f"{label}: FIXTURE BUG: expects {r!r} removed but never planted it"
+        )
     code, out = run(spool, *args)
     after = snapshot(spool)
     left = oracle(spool)
@@ -146,12 +175,25 @@ def assert_invariant(label: str, spool: pathlib.Path, *args: str, expect: int) -
             f"{label}: exited 0 with print data still present: {left}\n"
             f"    output: {out.strip()[:300]}"
         )
-    if before != after:
-        changed = sorted(set(before) ^ set(after)) or sorted(
-            k for k in before if before[k] != after.get(k)
-        )
+
+    problems = []
+    for k in sorted(set(before) | set(after)):
+        if k in gone:
+            if k in after:
+                problems.append(f"{k} should have been removed and was not")
+            continue
+        if k not in before:
+            problems.append(f"{k} appeared")
+        elif k not in after:
+            problems.append(f"{k} was removed and should not have been")
+        elif before[k] != after[k]:
+            b, a = before[k], after[k]
+            if k in parents and b[0] == "D" and a[0] == "D" and b[1] == a[1]:
+                continue  # a parent of a removed file: timestamps only
+            problems.append(f"{k} was modified")
+    if problems:
         FAILURES.append(
-            f"{label}: THE TOOL MODIFIED THE SPOOL. Changed: {changed}\n"
+            f"{label}: THE TOOL TOUCHED WHAT IT SHOULD NOT: {problems}\n"
             f"    output: {out.strip()[:300]}"
         )
 
@@ -282,6 +324,139 @@ def main() -> int:
         # alone would be advice the caller cannot act on -- the exact split
         # between message and status that broke this property four times.
         assert_invariant("control counted", s, "--include-control", expect=1)
+
+        # --- the returned --purge, held to the same oracle -----------------
+
+        # 10. Residue only: the content-proven file goes, the driver cache
+        #     and the lockfile survive byte-identical, and the spool then
+        #     comes clean -- exit 0 earned, not asserted.
+        s = build(tmp, "purge-residue")
+        (s / "tmp" / "leak.ps").write_bytes(b"%!PS-Adobe-3.0\n")
+        (s / "tmp" / "ppd").write_bytes(b'*PPD-Adobe: "4.3"\n')
+        (s / "tmp" / "cups-dbus-notifier-lockfile").write_bytes(b"")
+        assert_invariant("purge removes the residue and only the residue", s,
+                         "--purge", expect=0, removed=("tmp/leak.ps",))
+
+        # 11. Job files and an unidentified file present too: both survive a
+        #     purge -- job files are CUPS' own (`cancel`), the unidentified is
+        #     never destroyed -- and the run must not exit 0 over them.
+        s = build(tmp, "purge-mixed")
+        (s / "d00085-001").write_bytes(b"%PDF-1.7\n")
+        (s / "README-do-not-delete").write_bytes(b"do not delete me\n")
+        (s / "tmp" / "leak.ps").write_bytes(b"%!PS\n")
+        assert_invariant("purge leaves job files and the unidentified", s,
+                         "--purge", expect=1, removed=("tmp/leak.ps",))
+
+        # 12. The d00085-001.bak case: a content-proven copy at the TOP level
+        #     is residue too -- no job id, unreachable by cancel. This exact
+        #     file is what fired `85 && echo SAFE` four times pre-cut.
+        s = build(tmp, "purge-bak")
+        (s / "d00085-001.bak").write_bytes(b"%PDF-1.7\n")
+        assert_invariant("purge removes a content-proven stray", s, "--purge",
+                         expect=0, removed=("d00085-001.bak",))
+
+        # 13. Unidentified only: nothing is removed and the spool is not
+        #     called clean. The settled over-report-never-destroy rule, held
+        #     under the destructive flag where it used to break.
+        s = build(tmp, "purge-unrecognised")
+        (s / "README-do-not-delete").write_bytes(b"do not delete me\n")
+        assert_invariant("purge never removes the unidentified", s, "--purge",
+                         expect=1)
+
+        # 14. A symlinked TempDir under --purge: the listing already refuses
+        #     to look through it, so nothing inside can become a victim, and
+        #     the file on the far side must survive. This is THE bug that
+        #     killed the first --purge, refuted end-to-end.
+        outside = tmp / "outside-tempdir"
+        outside.mkdir()
+        (outside / "out.ps").write_bytes(b"%!PS\nOUT\n")
+        s = tmp / "purge-escape"
+        s.mkdir()
+        os.symlink(outside, s / "tmp")
+        assert_invariant("purge does not follow a symlinked TempDir", s,
+                         "--purge", expect=2)
+        if not (outside / "out.ps").exists():
+            FAILURES.append(
+                "purge-escape: the file OUTSIDE the spool is gone -- the "
+                "purge escaped the audited directory"
+            )
+
+        # 14b. Incomplete audit WITH removable residue: what was positively
+        #      seen is removed, the unexamined area keeps the verdict at 2,
+        #      and the file beyond the symlink still survives. Removing only
+        #      what was seen is safe regardless of what was not.
+        s = tmp / "purge-escape-partial"
+        s.mkdir()
+        os.symlink(outside, s / "tmp")
+        (s / "d00085-001.bak").write_bytes(b"%PDF-1.7\n")
+        assert_invariant("purge removes what it saw, stays INCOMPLETE", s,
+                         "--purge", expect=2, removed=("d00085-001.bak",))
+        if not (outside / "out.ps").exists():
+            FAILURES.append(
+                "purge-escape-partial: the file OUTSIDE the spool is gone"
+            )
+
+        # 15. A symlink where residue might be: unexamined, never a victim,
+        #     never unlinked -- removing the link would print 'removed' over
+        #     content that survives, the false assurance of destruction.
+        s = build(tmp, "purge-symlink")
+        os.symlink(vault / "real.ps", s / "leak.ps")
+        assert_invariant("purge does not unlink a symlink", s, "--purge",
+                         expect=2)
+        if not (vault / "real.ps").exists():
+            FAILURES.append("purge-symlink: the symlink's target is gone")
+
+        # 16. Evidence decides, location does not: under tmp/.cache the
+        #     fontconfig cache survives and the planted document goes. The
+        #     pre-cut purge got this exactly backwards -- it deleted 24
+        #     fontconfig caches and would have spared a document it had
+        #     dismissed by location.
+        s = build(tmp, "purge-cache")
+        (s / "tmp" / ".cache").mkdir()
+        (s / "tmp" / ".cache" / "fc.cache-9").write_bytes(b"\x02\x00bin")
+        (s / "tmp" / ".cache" / "planted.ps").write_bytes(b"%!PS-Adobe-3.0\n")
+        assert_invariant("purge under .cache is evidence-driven", s, "--purge",
+                         expect=0, removed=("tmp/.cache/planted.ps",))
+
+        # 17. A hostile name is unlinked raw: the report escapes it, the
+        #     unlink must not, and neither may derail the run.
+        s = build(tmp, "purge-hostile")
+        (s / "evil\nd00099-001").write_bytes(b"%!PS\n")
+        assert_invariant("purge handles a hostile name", s, "--purge",
+                         expect=0, removed=("evil\nd00099-001",))
+
+        # 18. Control files under --purge: excluded by type, whether or not
+        #     they are being counted. Counting changes the exit code, never
+        #     the delete set.
+        s = build(tmp, "purge-control")
+        (s / "c00085").write_bytes(b"job-name gpg-key\n")
+        assert_invariant("purge ignores control files", s, "--purge", expect=0)
+        assert_invariant("counting control files widens no delete set", s,
+                         "--include-control", "--purge", expect=1)
+
+        # 19. A hard-linked victim: the spool's entry is unlinked (refusing
+        #     would leave TWO copies of the document), but identical content
+        #     survives at the other link, so the run must not read as
+        #     success. The pre-fix behaviour was `removed:` plus `VERDICT:
+        #     spool is clean` plus exit 0 over readable content -- the false
+        #     assurance of destruction, arriving through st_nlink instead of
+        #     a symlink. The second link lives OUTSIDE the spool: an in-spool
+        #     link would itself be content-proven and enter the delete set,
+        #     and the after-audit would keep the exit up on its own.
+        linkvault = tmp / "hardlink-vault"
+        linkvault.mkdir()
+        s = build(tmp, "purge-hardlink")
+        (s / "tmp" / "leak.ps").write_bytes(b"%!PS-Adobe-3.0\nSECRET\n")
+        os.link(s / "tmp" / "leak.ps", linkvault / "other-link.ps")
+        assert_invariant("purge of a hard-linked file never reads as success",
+                         s, "--purge", expect=1, removed=("tmp/leak.ps",))
+        if not (linkvault / "other-link.ps").exists():
+            FAILURES.append(
+                "purge-hardlink: the OTHER link is gone, which unlinking "
+                "inside the spool cannot do -- read the diff before anything else"
+            )
+        elif (linkvault / "other-link.ps").read_bytes() != b"%!PS-Adobe-3.0\nSECRET\n":
+            FAILURES.append("purge-hardlink: the surviving link's content changed")
 
     if FAILURES:
         print(f"INVARIANT VIOLATED ({len(FAILURES)})")
