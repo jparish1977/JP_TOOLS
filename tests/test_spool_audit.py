@@ -1488,6 +1488,52 @@ def test_purge_outcome_never_forgets_a_failure() -> None:
                any("NOT a clean result" in ln for ln in lines4))
 
 
+def test_the_verdict_does_not_call_a_spool_clean_over_surviving_content() -> None:
+    """"spool is clean" is this tool's most-repeated lie -- six paths before
+    this one, listed in the incident comments at the head of spool-audit.py.
+    The seventh was created by the fix for the sixth: the 2026-08-17 round
+    added the honest per-entry line for a multiply-linked file and raised the
+    exit code, and left the VERDICT reading off audit.total, which is
+    correctly zero because the spool IS empty. So a hard-linked document
+    printed `removed but NOT destroyed`, then `0 retained`, then `VERDICT:
+    spool is clean.` -- the line meant to be read last and believed -- while
+    head -c 8 on the other link still returned %PDF.
+
+    Reproduced against a real fixture before this test was written: one %PDF
+    in tmp/, one `ln` outside the spool, exit 1 and a clean verdict."""
+    clean_after = classify(spool([]))
+
+    lines, code = spool_audit.purge_outcome(
+        spool_audit.Removal(undestroyed=(("tmp/doc", 1),)),
+        clean_after, None,
+    )
+    verdict = [ln for ln in lines if ln.startswith("VERDICT:")]
+    check("exactly one verdict", len(verdict), 1)
+    check_true("the verdict does NOT say clean", "clean" not in verdict[0])
+    check_true("the verdict names the surviving document",
+               "NOT destroyed" in verdict[0])
+    check_true("and points at the detail line rather than restating it",
+               "above" in verdict[0])
+    check("an undestroyed entry is not a success", code, 1)
+
+    # Plural, because "1 documents" in the line an operator reads last is the
+    # kind of wrongness that makes a reader doubt the rest of the report.
+    lines2, _ = spool_audit.purge_outcome(
+        spool_audit.Removal(undestroyed=(("tmp/a", 1), ("tmp/b", 2))),
+        clean_after, None,
+    )
+    v2 = [ln for ln in lines2 if ln.startswith("VERDICT:")][0]
+    check_true("two survivors count as two", "2 documents" in v2)
+
+    # The unaffected path must stay unaffected: a genuinely empty spool after
+    # a genuinely complete purge still gets the clean verdict and exit 0.
+    lines3, code3 = spool_audit.purge_outcome(
+        spool_audit.Removal(removed=("tmp/gone",)), clean_after, False)
+    v3 = [ln for ln in lines3 if ln.startswith("VERDICT:")][0]
+    check("a real clean spool is still 0", code3, 0)
+    check_true("and is still called clean", "spool is clean" in v3)
+
+
 def test_the_report_does_not_promise_what_the_purge_just_failed() -> None:
     """render()'s identified paragraph was written for a pre-purge spool and
     purge_outcome feeds it a post-purge one: with a mode-500 directory one

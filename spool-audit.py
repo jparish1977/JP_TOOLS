@@ -542,6 +542,7 @@ def render(
     jobs: frozenset[int],
     retention: bool | None = None,
     purge_failed: frozenset[str] = frozenset(),
+    undestroyed: int = 0,
 ) -> list[str]:
     """Format an Audit for a human. Returns lines; printing is the caller's job.
 
@@ -759,6 +760,27 @@ def render(
             advice = ("Nothing removes what could not be identified; "
                       "look at the listing above.")
         lines.append(f"VERDICT: {audit.total} retained file(s) still on disk. {advice}")
+    elif undestroyed:
+        # The spool IS empty and the documents are NOT gone: --purge unlinked
+        # the spool's entry while st_nlink said other hard links to the same
+        # content survive. audit.total counts what is in the spool, so it is
+        # correctly zero here, and "clean" read off that zero is a claim about
+        # the DOCUMENTS that nothing measured.
+        #
+        # This is the seventh path to print "spool is clean" over readable
+        # content -- see the incident comments at the head of this file for the
+        # other six -- and the first one created by a fix. The 2026-08-17 round
+        # added the honest per-entry line and raised the exit code, and stopped
+        # short of the verdict, which is the line meant to be read last and
+        # believed. A script could tell B from A by the exit code; a human read
+        # four lines of clean bill of health after the warning.
+        #
+        # Same shape as the failed-purge branch above: name the condition, then
+        # point at the detail line rather than restating it.
+        noun = "document" if undestroyed == 1 else "documents"
+        lines.append(
+            f"VERDICT: spool is EMPTY but {undestroyed} {noun} NOT destroyed; "
+            'see the "removed but NOT destroyed" line(s) above.')
     else:
         lines.append("VERDICT: spool is clean.")
     return lines
@@ -818,7 +840,8 @@ def purge_outcome(
     lines.append("")
     lines.append("The spool as it stands now:")
     lines += render(after, frozenset(), retention,
-                    purge_failed=frozenset(result.failed_names))
+                    purge_failed=frozenset(result.failed_names),
+                    undestroyed=len(result.undestroyed))
     # A failed removal means the file is demonstrably still there (or, for a
     # refusal, was never touched), and an undestroyed one means the content
     # is -- just not at this path -- so the exit code may rise but never
