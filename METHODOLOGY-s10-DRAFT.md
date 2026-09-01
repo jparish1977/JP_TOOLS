@@ -483,6 +483,27 @@ argument for the section existing.
     of instances of the shape it can see, which is the reading item 14 asks for and
     the reading nobody applies to a tool they just installed.
 
+    **And closing a detector's blind spot can RAISE the risk it feeds, which is not
+    an argument against closing it.** Within the hour, claude-config's rule was
+    widened to cover stderr as a result channel, and it went from flagging nine of
+    check.py's ten defective sites to flagging all ten -- cppcheck :672 included,
+    with the channel named in the finding text. Detection complete, and better than
+    before.
+
+    But the correct repair still differs for two of the ten, and the ten findings
+    now read *identically*. Before the widening, cppcheck's absence was at least a
+    ragged edge someone might have wondered about. After it, the output is a clean
+    uniform list, and **a uniform list of findings is an invitation to a uniform
+    fix.** Nine of these want `result.returncode` handed to a function that already
+    exists. Two want a per-tool refusal predicate, and applying the first repair to
+    them changes nothing while looking identical in the diff.
+
+    So the rule that generalises: **a detector establishes that instances share a
+    SHAPE. It never establishes that they share a FIX**, and the more consistent its
+    output looks the more confidently that gap gets crossed. This is item 14 once
+    more, from the other end -- ten findings phrased the same way are read as ten
+    instances of one problem, because nothing in the phrasing says otherwise.
+
 16. **An absence encoded as a number gets arithmetic done to it, and comes out
     plausible.** Item 3 is about absence encoded in a value. This is what happens
     next, and it is worse than a confident nothing, because a confident nothing at
