@@ -1,0 +1,432 @@
+## 10. Reading an instrument
+
+§8 is about verifying claims on code you wrote. This is about the tools you point
+at something else to find out what is true: a driver, a running service, another
+machine, a message spool, your own archive. The code under test may not be yours,
+may not be readable, and may not be changeable. The instrument is the only thing
+you control, and it is the thing that will be wrong.
+
+Written from 2026-08-16/17, when five sessions across two machines produced these
+faster than anyone could count them: the running tallies on that thread reached
+"the fifth instance today" in four separate domains, and one session reported
+twelve in its own day, all caught, none reaching an artefact. The domains were a
+wireless driver, a PowerShell launcher, `argparse`, `git`, a coverage baseline, a
+security validator and a message spool. They have nothing in common, which is the
+argument for the section existing.
+
+1. **Ask whether the instrument can return a confident nothing.** An empty list, a
+   zero count, an absent file, no output, exit 0. This is the single best predictor
+   of whether you will catch your own error, and it is a property of the tool that
+   you can check before running it.
+
+   `iw dev wlp3s0 station dump` exits 0 and prints nothing on a BCM4360, because
+   `wl` implements `get_station` and not `dump_station`. `iw dev wlp3s0 station get
+   <bssid>` returns `signal: -54 dBm` on the same card, the same second. An entire
+   night's central finding — *this hardware cannot report per-association
+   telemetry* — rested on the first command, was called airtight in writing, and
+   was wrong. Nothing in an empty list looks wrong. An empty list is a completely
+   reasonable thing for a healthy system to return.
+
+   The classification held across every instance anyone could attribute that night:
+   instruments returning a wrong *something* were caught by the person who ran them,
+   instruments returning a confident *nothing* were not.
+
+2. **Before running one that can return nothing, write down what a non-nothing
+   would look like.** This is the positive control, stated as a prediction, and it
+   is the only thing that made a confident nothing self-catchable.
+
+   Two were caught alone that night. In both the observer had already staked a
+   specific claim: one had told Joe an install would buy channel utilisation, so an
+   empty `survey dump` contradicted something they were on record for; one knew the
+   archive held 411 rows, so `NO ROWS IN WINDOW` contradicted a number already in
+   hand. Neither read the output harder. The output was still uncheckable from the
+   inside. **The prediction was what got checked.**
+
+   The same rule arrived independently thirty-four hours earlier, from a watcher
+   throttle with no hardware in it: *failing state and expected state were both
+   silence, and only a positive control separates them.*
+
+   **And the control has to run the instrument's configuration, or its non-nothing
+   answers a different question.** camhelp-docs, 2026-09-01, checking three files
+   the JP_TOOLS gate had just called clean: `ruff check --isolated --select F,E`
+   over the same files returned **19 errors** against the gate's 0. That is the
+   positive control this item asks for, it fired, and filing it would still have
+   been a false finding -- all nineteen were E501 under isolated defaults, which
+   ignore the project's configured line length. Zero and nineteen were both correct
+   answers to different questions.
+
+   Worth its own paragraph because it was a false finding built on a REAL defect:
+   the gate genuinely does mask a refused tool (item 3), so the number looked like
+   confirmation of something already known to be true. A control that diverges from
+   the instrument in ANY setting is measuring a second instrument, and the closer
+   its answer sits to the one you expect, the less you will check it.
+
+3. **When you build the instrument, make absence countable — never encode it in a
+   value.** Everything above is about reading someone else's tool. This is the one
+   move that stops you from writing the next one, and it is the only constructive
+   item here.
+
+   A wrapper printing `key=value` pairs emitted `beacon_loss=` for a counter the
+   card does not implement. It emitted exactly the same thing for a counter reading
+   zero. **Zero and absent, one encoding** — inside the tool built to investigate a
+   fault whose entire character is silence. It was caught only because the two boxes
+   disagreed; on the healthy card all eight fields are populated and the collision
+   never appears.
+
+   The fix was not a better sentinel. `tx_retries=unavailable` puts a string where a
+   consumer expects a number, and the next parser either crashes on it or coerces it
+   — which recreates the overloaded encoding one layer up, in the consumer. The fix
+   was to **omit the field and print a count**: `fields=2/8`. Omission cannot be
+   misread as a value, the count is stable per card so a change in it is itself a
+   signal, and absence became something a consumer can see rather than something it
+   has to infer.
+
+   The rule that generalises: emit the same field set on every call, and publish the
+   count. If a reader has to distinguish "no data" from "data is zero" by looking at
+   an empty string, you have built the confident nothing from item 1 with your own
+   hands.
+
+   **JP_TOOLS' own gate does exactly this, which is why the item is here rather
+   than in a footnote.** `check.py:60 run_ruff` shells out to ruff, discards
+   `returncode`, and parses stdout. Ruff writes a config-load failure to stderr and
+   exits **2** with empty stdout, so the wrapper reads `[]` and publishes
+   `"status": "pass"`, `"total": 0`, exit 0. `run_mypy` at :146 has the identical
+   shape. Reproduced 2026-09-01 in three lines, with a positive control proving the
+   sample dirty:
+
+       echo 'extend = "./does-not-exist.toml"' > ruff.toml
+       printf 'import os\nx=1;y=2\n' > sample.py
+
+       ruff check --isolated --select F,E .  ->  Found 2 errors   (control)
+       ruff check .                          ->  exit 2
+       check.py . --lang python              ->  ruff pass, total 0, exit 0
+
+   `check=False` is not the bug, and swapping it for `check=True` is not the fix:
+   ruff exits **1** for "I found violations" and **2** for "I could not run", so
+   the wrapper needs both codes rather than an exception. Discarding the code
+   collapses those two into the one value a reader trusts most. **"The tool found
+   nothing" and "the tool never ran" arrive here as the same empty list, and the
+   wrapper publishes the more flattering reading.**
+
+   The uncomfortable half is that this is the program which ENFORCES this document.
+   A methodology whose gate cannot tell a refusal from a pass certifies compliance
+   it never measured, once per adopting project. Scope, from camhelp-docs the same
+   morning and it narrows the claim: no config means no trigger, proven by a fresh
+   `.ruff_cache` rather than asserted, so the defect needs a config that fails to
+   LOAD. Not universal -- and it fires precisely where a project has configured its
+   own rules, which is to say on the projects that took the methodology seriously
+   enough to write a config at all.
+
+4. **Prefer the instrument that returns a quantity to the one that returns a
+   verdict.** A number, a name or a unit is partly self-checking; a verdict is not.
+   `443071.182s` in a column headed milliseconds is five days, and the units made it
+   absurd on sight. A boot-history scan for "ended without a shutdown record"
+   returned six candidates, and three of them said `PM: hibernation entry` — the
+   output named the event, and the name was not the event being looked for. Both
+   were caught in seconds, by the person who made the error, with nobody else
+   involved.
+
+   **A quantity also carries a moment, and a report can move it.** A stress harness
+   counted its open sockets, slept five seconds to hold the burst, then wrote
+   `SURVIVED n=254 opened=254`. The count was taken *before* the sleep and printed
+   *after* it, on a line whose plain reading is "254 were held for five seconds."
+   Measured separately: sockets to addresses that answer no ARP are failed by the
+   kernel with `EHOSTUNREACH` somewhere between three and five seconds, and vanish
+   from `/proc/net/tcp` **while their file descriptors stay open and countable.** So
+   `opened=` counts retained descriptors, not live connections, and the true
+   concurrency at the moment of the SURVIVED line was near zero.
+
+   The burst was real — 247 sustained 2.9 seconds — and shorter than the harness
+   believed. Nothing was wrong with the number. What was wrong was the instant it
+   described versus the instant it was printed beside.
+
+5. **Ask what question the tool actually answers, not what you asked it.** This is
+   the general form of everything above and it is worth stating separately, because
+   the failing case is a tool that *succeeds*. `station dump` did not error. It
+   answered "does this driver implement enumeration" perfectly, having been asked
+   "does this card publish statistics." Nothing anywhere says *you asked for
+   enumeration and this driver only does lookup.*
+
+   §8's through-line — a check that did not run looks exactly like a check that
+   passed — is one case of this. So is a green CI badge on a file no job touches.
+
+   **The sharpest version is querying the wrong artefact and reporting the absence
+   as a property of the thing.** A driver blob was searched for channel-congestion
+   support by grepping its *header*, which declares numbered ioctls — and the answer
+   came back "no chanim, no CCA, no survey counters, nothing", which went into the
+   thread as a fact about the silicon. The capability is there. It is reached as
+   *named iovars* through one generic ioctl, and those names live only in the blob's
+   string table: `cca_get_stats`, `cca_stats`, `chanim_enab`, `interference`,
+   `obss_coex`. One `strings` run — which the human asked for "for grins" — found
+   them in minutes.
+
+   The session that made the error tabulated it against its own two earlier ones,
+   and the table is the best statement of this section anyone produced:
+
+   | queried | actual source | what was concluded |
+   |---|---|---|
+   | `station dump` | `station get` | empty list read as *no data* |
+   | `/sys/fs/pstore` | the archived record | cleared mountpoint read as *no crashes* |
+   | `wlioctl.h` | the iovar namespace | numbered ioctls read as *the whole API* |
+
+   Its own summary: *the data existed and my query could not see it — and every one
+   of them I reported as a property of the hardware.* Three times, three artefacts,
+   one shape. **Before concluding a system cannot do something, establish that you
+   queried the place where the answer would live.**
+
+6. **Your own output truncation manufactures silent failures.** Three sessions in
+   one night each produced or nearly produced a confident wrong conclusion from a
+   reading path, not from a measurement: a 100-character watcher excerpt that
+   invented a disagreement which did not exist; a `tail -30` that turned a crash
+   into a partial read looking complete; a `head` that dropped rows and reported a
+   clean count. Two more read `$?` immediately after a pipe and got `head`'s status
+   rather than the command's — twice, independently, hours apart, in different
+   sessions on different boxes.
+
+   The same session logged three of these inside a single install: `sudo -n` that
+   "proved" nothing was whitelisted while reading a cached credential timestamp; an
+   exit 1 that belonged to `sudo` refusing rather than to the guard under test; and
+   the pipe. **Every one produced a plausible number.** The guard's real behaviour
+   was established only on the third attempt, with no pipe and a live credential.
+
+   Truncated output is indistinguishable from complete output, which makes this
+   worse than mangling the input: a bad fixture at least produces a wrong answer.
+   Measure exit status without a pipe, and never conclude from an excerpt you did
+   not choose the boundaries of.
+
+7. **The adequate sampling window is a function of a period you do not know yet.**
+   Two machines, same room, same AP, same SSID, same band, same channel, the same
+   `iw` query. On one the cache refreshes from received beacons every ~100 ms; on
+   the other it refreshes only on explicit scans, roughly every 300 s. **The
+   adequate window differs by three orders of magnitude between them.** Fourteen
+   seconds was 140 cycles on the fast box and settled its cadence completely. Sixty
+   seconds on the slow one was a fifth of a single cycle, and produced "it never
+   refreshed once in sixty seconds of healthy connected operation" — the wrong
+   conclusion, arrived at honestly, from a run four times longer than the one that
+   worked.
+
+   So *sample for longer* is weak advice. Measure the period first, or state the
+   window as a fraction of a period you are declaring you do not know.
+
+8. **A control that varies many variables at once feels stronger than a
+   single-machine comparison and is usually weaker.** Two machines, a table of
+   differences, real measurements from both sides — it reads as rigour, and the
+   reason it reads that way is that **it produces an artefact**. Columns and units
+   are not evidence of isolation.
+
+   The only elimination that survived that night was one box varying one thing
+   across its own history: four kernels, same card, same driver, the fault present
+   on every one. It excluded kernel version on identical hardware and it needed
+   `journalctl --list-boots`. An evening was spent reaching for a second machine
+   while the answer sat in the first one's own log.
+
+   State what a control is worth on each axis separately. The second box was a real
+   co-located RF and AP control and near-worthless as evidence about the driver, and
+   both halves needed saying.
+
+   **The artefact whose shape implies a comparison it cannot support is the specific
+   trap.** Once the same wrapper ran on both machines, the readable overlap was two
+   fields of eight. A field-for-field table would have looked like the most rigorous
+   thing anyone produced, and two thirds of its rows would have been columns with a
+   number on one side only. Both sessions agreed in advance never to present one.
+   Agreeing *before* the artefact exists is the only time that agreement is cheap.
+
+   **This paragraph originally said those counters "have no counterpart on the
+   degraded card and never will," and that was wrong.** Forty minutes later the
+   session that supplied it retracted: the blob's own header carries `txfail`,
+   `txretry`, `rxcrc`, `txnoack` and the rest, one `WLC_GET_VAR "counters"` call
+   away. **Not absent — not exposed.** The practical advice survives unchanged,
+   because a field you cannot read today is not a column you can put in a table
+   today. The *reason* was wrong, and the reason is what the next person builds on:
+   "structurally impossible" closes an avenue that "not plumbed out" leaves open.
+
+   It is left in rather than quietly corrected because it is this section's own
+   item 12 landing on this section. A peer's conclusion, repeated approvingly into a
+   durable document while the thread that produced it was still moving, hardened
+   into "never will" somewhere between their message and this paragraph. Nobody
+   added the word. Distance from the measurement added it.
+
+   **And the second machine earned its place for a reason nobody predicted.** Not as
+   a control that proved anything — as the only place a difference was *visible*. The
+   `beacon_loss=` encoding collision in item 3 could not be seen from the healthy
+   card, where every field is populated. It took the degraded box to expose a defect
+   in the tool built to measure it.
+
+9. **When two measurements disagree, suspect the instruments before the fact.**
+   Cheap, and it was right more often than not that night.
+
+   **And when two agree, ask whether the agreement was designed.** Twice in one hour
+   two sessions on the same machine independently ran the same read-only command —
+   a fleet sweep, then `dkms status` — and posted matching results inside the same
+   minute. Matching numbers from two sources read as corroboration. These were
+   collisions: nobody planned a cross-check, so the agreement carries no more
+   information than one run of the command, while *looking* like the strongest
+   evidence in the thread.
+
+   Read-only measurement feels free, which is why it duplicates: nothing is
+   contended, no claim is needed, and the second runner has no way to know. The fix
+   is not to stop duplicating. It is to **label the provenance of an agreement** —
+   *designed cross-check* or *collision* — because the reader cannot tell them apart
+   and the difference is the entire evidential value.
+
+   **And when two accurate instruments disagree, suspect the question.** A burst test
+   reported 254 sockets; a kernel-side sampler on the same machine, during the same
+   firing, peaked at 20. Both numbers were correct. One counted sockets in
+   `SYN_SENT`, the other counted `ESTABLISHED` — and the sweep targeted a /24 where
+   most addresses are empty, so nothing ever reached `ESTABLISHED` and a count of it
+   read approximately zero, *correctly*, while 247 connections were genuinely
+   pending in the driver.
+
+   Neither instrument was wrong and neither measurement was wasted. **The question
+   "how many connections" had not specified a state**, and two sessions spent
+   fifteen minutes reconciling numbers that were never in conflict. A 150 ms trace
+   settled it: 247 sustained for 2.9 seconds. Before comparing two counts of the
+   same thing, agree on which state you are counting — the ambiguity lives in the
+   noun, not in the tools.
+
+10. **A guard often holds for a different reason than its comment claims.** A
+   `switch -CaseSensitive` was inert because the conditions were scriptblocks;
+   deleting it changed no observed behaviour. A comment claimed an argument was
+   *refused, not passed through* — true in effect, wrong in mechanism. The
+   behaviour is right, the stated reason is wrong, and the next person edits against
+   the reason. Prove a guard fires; do not prove it exists.
+
+11. **The session on the box owns every fact about that box.** Three times in one
+    night a session asserted a fact about a machine it was not on — a grep, a kernel
+    version, and a package hold — and each time the other session caught it. Never
+    the speaker. Ask rather than infer, and take the answer.
+
+    **Whether you are on the box is itself a fact to check.** This section's author
+    told five recipients "I am on neither box" while sitting on the subject machine,
+    having read a peer listing whose first line said the other session was *local*.
+    The evidence was in the first thirty seconds of the session and a human had to
+    supply the correction.
+
+    **A quoted measurement becomes the quoter's measurement in one hop, and the
+    hedge does not survive the hop.** The same author re-quoted two other sessions'
+    agreement that two machines shared an SSID, BSSID and channel — approvingly,
+    inside an argument about something else. Two messages later a third session had
+    marked its own blocking objection *satisfied* on the strength of it, attributed
+    to the quoter, who had measured none of it. Two smaller attributions drifted the
+    same way in the same message. Nobody did anything wrong at any step.
+
+    So mark provenance in the text, not in your memory of where it came from: *X
+    measured this*, not *this is true*. And when a fact arrives attributed to
+    someone, check whether they measured it or repeated it — the outbound half of
+    "verify what peers tell you", which is the half nobody writes down.
+
+    **An inferred instruction is the expensive version of this, and it has no
+    defence at the receiving end.** The same author published a four-row table of
+    who-does-what under the heading *routed by Joe just now*. Three rows were what
+    Joe said. The fourth was an inference, unmarked, wearing his name — and it
+    happened to be correct, which is worse, because a wrong guess gets contradicted
+    and a right one just quietly becomes policy. Another session spent an hour
+    weighing a real instruction it had been given against that guess, unable to tell
+    them apart, and logged it as an unresolved conflict rather than resolving it.
+
+    That session named the distinction that matters, and it is not the obvious one:
+
+    - **Mis-heard** — a session takes an instruction meant for someone else as its
+      own. Catchable at the receiving end, by asking.
+    - **Mis-delivered** — an instruction meant for another session is typed into
+      *this* one, correctly addressed, with no marker of any kind. Nothing in the
+      message distinguishes it from every other instruction that session received.
+
+    This paragraph first said mis-delivery was "not catchable at the receiving end
+    by any means." **That was too strong, and it is the same error this section
+    warns about twice already** — an impossibility asserted where a mechanism
+    exists. The case *was* caught, within the hour, by one: **verbatim relay.** A
+    third party quoted the human's words rather than summarising them, the receiving
+    session compared that copy against what it had been handed directly, and the
+    mismatch was visible in a single read.
+
+    So the rule is constructive rather than despairing. **Relay a human verbatim and
+    misrouting becomes detectable; paraphrase and it does not.** An addressee filter
+    cannot substitute — it faithfully delivers a wrongly-addressed instruction and
+    suppresses nothing, because the addressing is the thing that was wrong. A filter
+    reduces volume. Only a second copy of the original words detects misdelivery.
+
+    Quote a person verbatim, or say plainly that you are inferring. Never paraphrase
+    a human into a table: a table reads as settled, and the format is itself a claim.
+
+12. **A brief written before a retraction is a confident wrong brief, and it is the
+    durable artefact.** The memory file for that investigation still said
+    *per-association telemetry does not exist — THIS IS THE PART THAT IS AIRTIGHT*
+    and *the candidate detector is DEAD*, hours after both had been retracted on the
+    thread. The conversation self-corrected continuously; the file a future session
+    loads first did not.
+
+    Correct it by stating **what survives**, not by striking text. A reader who sees
+    only strikethrough concludes the whole section was wrong, and usually most of it
+    was not.
+
+    The positive form, done well the same night and worth copying: on learning from
+    driver source that six of eight counters are structurally absent on that card,
+    the session put it in the **tool's own header** — under *read this before
+    investigating a blank*, naming the two ioctls and stating plainly that
+    `fields=2/8` is the healthy reading — rather than in the thread where it was
+    discovered. Its reasoning is the rule: **a limit that exists only in a mailbox is
+    not a limit anyone will meet again.** Put the finding in the file the next reader
+    will already have open, and record the uncomfortable half there too — in that
+    case, that the three counters which would reveal a link holding association and
+    passing nothing are exactly the three that do not exist.
+
+13. **Before a destructive test, the thing at risk is whatever no session owns.**
+    A deliberate whole-machine hard-lock was authorised on a box running three
+    sessions. Each of the three could enumerate what *it* held — a draft in a temp
+    directory, a sampler's output file, a modified memory file — and each secured
+    its own. **The largest volatile thing on the machine belonged to none of them:
+    three hours of session transcripts, in no restic snapshot since 00:22, holding
+    every measurement and every retraction the night had produced.**
+
+    It was caught with minutes to spare by the session that thought to ask what the
+    *fleet* would lose rather than what it would lose. Nobody's state report covered
+    it, and no state report ever would have: the template asks each session what it
+    holds, and shared, unowned state falls precisely between the answers.
+
+    So the pre-flight for a destructive act has two halves, and only the first is
+    natural: *what do I hold* from every session on the target, **and** *what does
+    this machine hold that nobody claimed*. Backups, logs, transcripts, caches, the
+    board itself. The second half needs someone assigned to it, because it is nobody's
+    by construction — which is the same reason it is the half that gets skipped.
+
+
+14. **A denominator you printed is not a bound the reader will apply.** Item 4 says
+    prefer a quantity to a verdict. This is the failure that survives doing so: the
+    quantity is right there, and the verdict is still read wider than it.
+
+    camhelp-docs, 2026-09-01: `checkdocs` printed `checked 3 file(s), 811 lines` and
+    reported no errors. Three files, not the corpus. The scope line was accurate,
+    present, and unread, because a reader takes the verdict and skips the line under
+    it. Every other instance in this section is an instrument that stayed SILENT
+    about its scope, so this is a different failure reaching the same outcome -- and
+    it is the one that defeats an honest tool.
+
+    The fix is not a louder scope line. Put the denominator INSIDE the verdict, so
+    that no reading of the verdict is available without it (`PASS (3 of 47 files)`,
+    not `PASS` above a census), or refuse to emit a verdict at all when the scope is
+    narrower than the target the caller named. A tool that cannot say how much it
+    covered should say INCONCLUSIVE, which is the one word no reader rounds up to
+    good news.
+
+15. **A standing detector for this family is itself an instrument, and it returns a
+    confident nothing about everything it has no rule for.** The last place anyone
+    thinks to apply item 1 is the guard written to enforce item 1.
+
+    Measured by claude-config-advisor, 2026-09-01, pointing this fleet's
+    overloaded-empty lint at the `check.py` defect above: it **ran**, parsed the
+    file, and reported three findings at other lines, with a positive control
+    proving it fires. None of the three was `run_ruff` ignoring an exit status. It
+    carries two Python rules -- an except handler returning a falsy value, and
+    `.get()` with no default in an f-string -- and neither can see "ran a
+    subprocess, never read its exit status, treated empty stdout as clean."
+
+    Note what a CLEAN run of that lint would have licensed: a claim that the file
+    holds no overloaded empties, over the file carrying the worst one in the
+    toolkit. **A detector's coverage is its rule list, and its output is a verdict**
+    -- item 14, arriving through the door marked "we already have a lint for this".
+
+The through-line, and it is §8's one layer out: **an instrument reports on itself,
+not on the world.** Exit 0 means the tool ran. An empty list means the tool had
+nothing to say. Neither is a statement about the thing you were pointing it at, and
+the gap between those two readings is where a night's work goes.

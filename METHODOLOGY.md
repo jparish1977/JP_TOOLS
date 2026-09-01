@@ -264,6 +264,51 @@ Checklist for greenfield work that should inherit this discipline:
 
 8. **Composition root is a single file.** Service provider in Laravel, `main()` in Python, app entry in JS. One place where "this project uses these adapters" is declared.
 
+### The first from-inception adoption, and what it bought on day one
+
+Everything above was written as a prescription and applied, until 2026-09-01, only
+as a retrofit -- which is section 9, a different and more forgiving problem. A
+retrofit gets a baseline and an exemption list, so the discipline is measured
+against where the code already was. `romtools` is the first project to take this
+from inception, with no baseline to hide behind, and the checklist stopped being
+theory the same day.
+
+It paid before the first review round, on item 6 and on the rule under it. The
+project's `ruff.toml` records the decision it nearly made instead:
+
+> NOTHING IS IGNORED HERE ON PURPOSE. The first draft of this file was going to
+> silence UP031 (113 hits) and E701/E702 (126), on the grounds that percent format
+> and one-line statements are style rather than substance. Joe, the same day:
+> "poor style hides bugs"
+
+And the repo had already proved it, in `prior-art/scan.py`:
+
+    except Exception as e: return ('unreadable',[])    # E701
+    ...
+    e = head[root+i*32:root+i*32+32]                   # `e` reused as a loop var
+
+mypy flagged the reuse. It is not a crash, it is genuinely confusing, and **the
+confusion is invisible BECAUSE the except was folded onto one line.** The style
+rule and the legibility problem were one finding, so silencing the first would have
+hidden the second -- and 239 hits is exactly the volume that makes silencing feel
+like housekeeping rather than like a decision.
+
+Two things generalise from that, and they are the argument for adopting at
+inception rather than later:
+
+- **The exemption you write on day one is the one nobody ever revisits.** A
+  retrofit's exemption list is understood to be debt and gets a ticket. A
+  greenfield ignore is written as policy, reads as intent, and is invisible
+  thereafter.
+- **A high hit count is evidence about the rule's reach, not about its
+  worthlessness.** 239 findings across a young repo means the pattern is
+  load-bearing there. That is a reason to look at what it is covering, not a
+  reason to turn it off.
+
+Where the discipline is worth its cost is not evenly spread, and item 4's hook is
+what makes any of it survive contact: a gate that runs only in CI is a gate the
+author meets after they have stopped thinking about the change.
+
 ---
 
 ## 8. Before opening a PR
