@@ -499,6 +499,17 @@ argument for the section existing.
     +17, nowhere near -460, so it was latent and never fired. That measurement is
     the second half of the finding and it is the half usually skipped.
 
+    **A CORRECTION'S blast radius needs measuring too, and I skipped it on my own.**
+    Retracting the `run_mypy` claim in item 3, I told four seats they were "carrying
+    the wrong version because I sent it". romtools-helper checked rather than
+    accepting it: everything they had published named the ruff arm only, and the
+    per-arm split they had relayed came from romtools-docs' measurement, which had
+    mypy on the working side. One of the four was clean. They were careful to call
+    that luck rather than care -- they only ever had a ruff-shaped probe -- which is
+    the right way to report it and does not make the count less wrong. **An
+    apology is a claim about other people's state, and it is as assertable without
+    evidence as any other.**
+
     The fix is the shape item 3 already prescribes, and worth restating because the
     arithmetic makes it non-obvious: return None rather than a sentinel, let a
     failed BASELINE abort the table rather than print differences from nothing, and
@@ -610,6 +621,32 @@ argument for the section existing.
     Both readings agree on the move: of two incomplete lists, prefer the one whose
     gaps degrade toward None, because silence is the failure item 3 gives you a way
     to count.
+
+19. **Nobody in this section caught their own error by looking harder. Every one
+    was caught by observing differently.** Put last because it is the only item that
+    answers "so what do I actually do", and because the answer is not the one the
+    situation invites.
+
+    Four from 2026-09-01, all inside this one investigation:
+
+        the window ending at 176 when the answer was at 178
+            caught by re-reading with the window MOVED
+        a returncode check reading the wrong process's status
+            caught by pointing a POSITIVE CONTROL at it
+        item 17's seven-row exit-code table, wrong on first run
+            caught by RE-RUNNING WITHOUT THE PIPE
+        a falsifier reporting five violations that were its own
+            caught in thirty seconds by a REAL CORPUS CASE
+
+    romtools-helper's framing, on the first two: neither of us found ours by reading
+    code, and both remedies are "run the thing again differently" rather than "look
+    harder". Move the window, add a control, drop the pipe, use real input.
+
+    The reason looking harder cannot work is item 1. The error is invisible from
+    inside the reading that produced it -- that is what makes a confident nothing
+    confident -- so more attention spent on the same observation returns the same
+    answer with more conviction behind it. **Attention is not the scarce resource.
+    A second, differently-shaped observation is.**
 
 The through-line, and it is §8's one layer out: **an instrument reports on itself,
 not on the world.** Exit 0 means the tool ran. An empty list means the tool had
