@@ -86,6 +86,12 @@ At the boundary between your code and the OS, there's always a line that actuall
 
 Business logic stays at 100%. OS-level error handling is acknowledged as an integration concern, not a unit-test concern.
 
+### 2.7 The silence rule
+
+In domain code: when a field or feature is absent, let it be absent. No placeholder strings, no "no description available." Absence is part of the design. This comes from the portfolio aesthetic ("the column exists but goes quiet... no placeholder text... the silence is the content") and applies equally to APIs, CLIs, and internal data models.
+
+---
+
 ### 2.8 Parallel first
 
 **Do not run a serial test 900 times if you can run it in parallel once.**
@@ -129,11 +135,6 @@ Applies to test suites, corpus scans, fleet sweeps, and any check run over more
 than a handful of units. JP_TOOLS has no concurrency in any tool as of
 2026-09-01, and every scan-shaped script in it loops serially, so this is a
 forward rule rather than a description of the code.
-### 2.7 The silence rule
-
-In domain code: when a field or feature is absent, let it be absent. No placeholder strings, no "no description available." Absence is part of the design. This comes from the portfolio aesthetic ("the column exists but goes quiet... no placeholder text... the silence is the content") and applies equally to APIs, CLIs, and internal data models.
-
----
 
 ## 3. The canonical exemplar: FileScanner
 
