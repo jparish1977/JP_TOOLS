@@ -547,6 +547,38 @@ argument for the section existing.
     code": rc=2 is the refusal and must never be a pass, while 0 and 1 both still
     require parsing stdout.
 
+    **Then the same measurement on a second tool inverted the convention, which is
+    the whole reason this item is not "check the exit code".** cppcheck, measured
+    2026-09-01 with check.py's own argument list:
+
+        file with defects             rc=0   6 findings on STDERR
+        clean file                    rc=0   0 findings
+        target does not exist         rc=1   stderr COMPLETELY EMPTY
+        unknown flag                  rc=1   stderr COMPLETELY EMPTY
+
+    Backwards from ruff in both halves. Findings exit 0, and rc=1 is the REFUSAL.
+    So `check.py`'s existing `_status` rule -- error when the code is not in (0, 1)
+    -- returns **"pass"** for a cppcheck that never ran, and there is no second
+    signal to fall back on, because the refusal prints nothing at all.
+
+    **The trap this sets is the point.** The obvious fix for the ten runners that
+    discard their exit status is to pass `result.returncode` into the function that
+    already handles it. For nine of them that is correct and complete. On cppcheck
+    it changes nothing, silently, while looking exactly like the other nine in the
+    diff -- a fix that closes the review and leaves the defect. That is
+    sunblade2000-publish's curl warning arriving on a different tool, and the reason
+    to take a caution as a named test is that the test finds the case the caution
+    did not predict.
+
+    **Two independent instruments failed at the same site.** claude-config's lint
+    flags nine of the ten and misses cppcheck, because it parses stderr rather than
+    stdout. The `(0, 1)` convention covers nine of the ten and misses cppcheck,
+    because its codes are inverted. Neither miss caused the other, and a reader
+    trusting either one would have shipped the same hole. **When two unrelated
+    checks agree on which case to skip, that case is not rare, it is
+    unrepresentative of the model both were built from** -- and it is the one to
+    measure by hand.
+
     The table is kept whole rather than compressed to its conclusion. The
     conclusion is one line and cheap to restate; the seven rows are what a later
     reader cannot re-derive without a temp directory and an afternoon, and a
