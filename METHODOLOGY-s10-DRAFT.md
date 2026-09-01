@@ -509,6 +509,25 @@ argument for the section existing.
     code": rc=2 is the refusal and must never be a pass, while 0 and 1 both still
     require parsing stdout.
 
+    The table is kept whole rather than compressed to its conclusion. The
+    conclusion is one line and cheap to restate; the seven rows are what a later
+    reader cannot re-derive without a temp directory and an afternoon, and a
+    conclusion outlives the method that produced it far too easily. For the same
+    reason it lives in exactly one file. sunblade2000-publish declined to copy
+    these numbers into their own notes on the grounds that two copies is how a
+    measurement drifts from its method, which is the right call and the opposite
+    of the instinct to spread a useful finding around.
+
+    **And a caution can be wrong about its direction and still be the reason you
+    got the answer.** The warning here was that rc=0 might hide a FAILURE. What the
+    table found was rc=0 hiding a FINDING, which is the same defect in the proxy
+    with the sign flipped, and the more dangerous of the two: `rc == 0 -> pass`
+    would have turned every syntax error in the fleet into a clean bill of health,
+    shipped under a commit message about making failures loud. The prediction
+    missed. The test it prescribed did not. **Treat a peer's caution as a named
+    test rather than as a claim to be graded** -- the version of it that turns out
+    wrong is still the version that gets run, and running it is the whole value.
+
 The through-line, and it is §8's one layer out: **an instrument reports on itself,
 not on the world.** Exit 0 means the tool ran. An empty list means the tool had
 nothing to say. Neither is a statement about the thing you were pointing it at, and
