@@ -20,6 +20,16 @@ Domain logic belongs in a framework-zero core. Everything that touches the outsi
 
 This isn't new theory. It's hexagonal architecture / ports-and-adapters, applied strictly enough that the separation actually survives contact with deadlines.
 
+### This document is expected to be tested
+
+Joe's rule, 2026-09-01: **like everything else we do, the methodology is expected to be tested.** Everything above is stated with more confidence than any of it has earned permanently, and that is deliberate -- a rule hedged into vagueness cannot be checked. The confidence is a claim, not a status.
+
+So a conflict with this document is **a test, not a verdict.** When a proposal clashes with something written here, that encounter has two possible outcomes and nobody gets to assume which: either the proposal is wrong, or this is. Saying no therefore carries two burdens -- demonstrate that the conflict is real, and demonstrate *which side of it fails*. "It goes against the methodology" is an appeal to authority wearing a rule's clothes, and on its own it is not an answer.
+
+It is proven by use and disproven the same way. That is not a slogan; it is the only test this document has ever passed. §2.8 exists because Joe stated it and this file's author argued it down three times before measuring anything -- the measurement then agreed with him. The fleet's verification ledger was refused by roughly a dozen sessions on reasoning, force-fed once, and adopted so hard it needed a brake threat. In both cases the argument lost to a trial, and in both cases the losing argument was the careful one.
+
+Which is why an unproven rule here says so. A claim with no measured instance is written as a claim with no measured instance, and stays in that state until someone produces one or kills it. A document that only ever wins its arguments is not being tested by them.
+
 ---
 
 ## 2. Principles
@@ -86,9 +96,102 @@ At the boundary between your code and the OS, there's always a line that actuall
 
 Business logic stays at 100%. OS-level error handling is acknowledged as an integration concern, not a unit-test concern.
 
+**And the exemption is a CLAIM, not a permission -- which is §1's rule applied to the smallest thing in this document.** It claims the function is a thin wrapper with nothing in it worth testing. Nothing rechecks that claim, so it goes stale silently as the function grows and the exempt region becomes the region nobody looks at. Measured on `spool-audit.py`, 2026-08-13: `# pragma: no cover` covered **430 lines of 1350 -- 32% of the file, holding 51 branch, loop and try statements.** A thin wrapper has none. Every serious defect on that branch came from inside that region, and ruff and mypy together caught 0 of 112 findings.
+
+The rule is therefore not "no exemptions". It is that **an exemption must say why, so the claim is visible and can be disagreed with**:
+
+    def _unlink(p): ...    # pragma: no cover
+    def restart():  ...    # pragma: no cover -- reason: runs systemctl
+
+A pragma on a function with no branches needs no reason: it is self-evidently a wrapper. One with branches is making a decision, and decisions are testable. `check.py` has enforced exactly this since 2026-08-13 and `list-exemptions.py` enumerates them; this paragraph exists because the rule lived only in that tool's source, so a reader following §2.6 wrote a bare pragma and was then failed by a gate whose reasoning they could not see.
+
 ### 2.7 The silence rule
 
 In domain code: when a field or feature is absent, let it be absent. No placeholder strings, no "no description available." Absence is part of the design. This comes from the portfolio aesthetic ("the column exists but goes quiet... no placeholder text... the silence is the content") and applies equally to APIs, CLIs, and internal data models.
+
+---
+
+### 2.8 Parallel first
+
+**Do not run a serial test 900 times if you can run it in parallel once.**
+
+Joe's rule, 2026-09-01. It is not "make everything concurrent", and it is not a
+performance principle wearing a correctness hat. It is a claim about the SHAPE of
+an investigation, in two phases that a serial loop collapses into one:
+
+1. **Sweep in parallel, over everything, cheap and uniform.** Its job is
+   CLASSIFICATION, not analysis: which units are interesting.
+2. **Triage what it found, in an order you choose.** Severity, or cheapness, or
+   likelihood. That ordering is only available because you hold the complete set.
+
+The argument that this replaces: if 20 of 900 files are bad, nobody hand-tests
+900 to find 20. And a serial scan does not merely cost more, it makes you
+investigate in ARRIVAL ORDER and calls that a priority -- stopping at the first
+bug found rather than at the worst one.
+
+**Worked instance, and it is this methodology's own author getting it wrong.**
+The nine-runner exit-code table in §10 was measured serially, one tool at a time.
+The result was three successive corrections to the same conclusion over two hours
+-- "9 of 10", then "2 of 10 defeat the standard fix", then "3 of 10" -- each sent
+out as a revision. A parallel sweep of all twelve runners would have produced the
+distribution in one pass and one report. The first-bug-first pathology landed
+too: the design implication was declared at cppcheck, before phpcs was measured,
+and phpcs turned out to be the worst of the three.
+
+**The precondition, and it is the whole cost of the rule: THREE OUTCOMES PER
+UNIT, NEVER TWO.** Clean, finding, and *could not determine*. A worker that
+crashed is not a clean unit. With two buckets, a 900-to-20 sieve quietly becomes
+900-to-20-plus-3-nobody-looked-at, and the sweep has manufactured the exact defect
+§10 is about -- an absence encoded as a pass. With three, it has not, and the
+aggregate is trustworthy at any width.
+
+That precondition is not overhead added by parallelism. It is §2.7 and the
+denominator rule, which were already required; parallelism only removes your
+ability to survive without them, because a serial run shows you each failure as it
+happens and an aggregate does not.
+
+Applies to test suites, corpus scans, fleet sweeps, and any check run over more
+than a handful of units. JP_TOOLS has no concurrency in any tool as of
+2026-09-01, and every scan-shaped script in it loops serially, so this is a
+forward rule rather than a description of the code.
+
+### 2.9 Keep the tool, and make it carry its own evidence
+
+Good tools take work, and the default outcome is that the work is thrown away. A review round, an incident, an afternoon of measurement -- each produces apparatus that answered a real question, and all of it sits in a scratch directory that dies with the session. Joe's rule, 2026-09-01: **"good tools take work, i hate to see work wasted."**
+
+**A landing zone with NO BAR AT ALL.** `claude-config/tools/lab/` is the working example, 16 files. Nothing is required to put something there. That matters more than it looks: the failure mode is work being LOST, so any bar at entry costs you tools. **Dusty is fine, lost is not.** A scruffy script somebody hesitates to write up is a script that gets deleted.
+
+**A DEPENDENCY IS THE SIGNAL TO PROMOTE, and the reason is not seniority.** `tools/forgejo.py` states it, on being promoted 2026-08-24: *"the wrapper exists to be whitelisted, and whitelisting a wrapper over an untested tool whitelists the untested tool."* Dependency is the moment the untestedness stops being yours and starts being inherited by something else. Promotion cost a test file that pins the three lessons the tool was built from -- invariants, not coverage, and explicitly not the happy path.
+
+**Promotion is where the bar lives, so a lab tool must still say what it IS.** A directory is a blanket claim -- "lesser tested" -- with no per-tool justification, which is §2.6's defect at directory scale: an exemption that does not say why cannot be disagreed with. So the header carries three things, and nothing else is required:
+
+- what question it answers
+- what it was tested against, including the positive control
+- **what it was NOT tested against**
+
+**The third line is the one that earns its place, and it is also the only one nobody volunteers.** That is not an argument against it. It may be the most valuable of the three precisely BECAUSE nobody writes it unasked.
+
+Measured on 2026-09-01, two seats, two tools. Fields one and two were written **before anyone specified a format**: *what it answers*, and *what it was tested against* with real numbers in it (`"took #207 from 23.30% to 2.56%"`, `"found 12 where grep found 10"`). The third field has a different history, and it is the useful one.
+
+**One seat volunteered it.** A containment harness whose docstring records *"unprivileged, scratch dir, no live cupsd"*, by an author who self-tested it end to end **and then broke it on purpose** to confirm it went red: *"a harness that has only ever passed is not evidence."*
+
+**The second seat received it as a rule and applied it within the hour, in a different repo.** That is not a seat failing to volunteer. It is the relay below running one more hop, with the RULE as the thing being carried instead of a trap: one seat wrote the caveat unasked, this document generalised it into three fields, the fields were handed to a second seat, and that seat put them on two tools in `claude-config` the same afternoon.
+
+**So the claim here is transmission, not universality**, and that is the stronger one. "Descriptive" would say people already do this, so writing it down costs nothing. What the evidence actually supports is that one person did it, it was worth generalising, and the generalisation propagated the same day to a seat that had not thought of it. **The relay is doing real work precisely where the description was false.**
+
+An earlier draft claimed both seats volunteered the third field, and cited a commit made *in response to being asked* as proof the format was natural. The seat concerned caught it: a format was requested, supplied, and the supply then offered as evidence no request was needed. Recorded rather than quietly fixed, because it is the failure this section's own question exists to catch.
+
+**THE EXAMPLE IS A RELAY, NOT A CONFESSION, and that is the whole argument.** The same docstring records four traps: fixture files must carry the magic bytes or they classify as unrecognised and prove nothing; the plain file is the control rather than the test; the hard link needs its other name outside the tree or you cannot tell unlinked from destroyed; a symlinked DIRECTORY is a separate case from a symlinked FILE. **Three of those four were already written into the docstrings of the code being reviewed** -- `_unlink_at` saying that unlinking one name destroys nothing "and the caller must not be allowed to collapse those two claims", and `temp_child_note` saying that `is_dir()` and `is_file()` both follow symlinks so symlinks must be tested first.
+
+So the chain is: the tool's author wrote the traps into docstrings, a reviewer READ them and turned them into cases that fail on demand, and the header now carries them to whoever runs it next. Each step is cheap only because the previous one happened. **That is a stronger argument for headers than self-sourced scar tissue, because it does not require the writer to have suffered, only to have read.**
+
+**The bound, from the same seat:** the relay only works when the code under review is documented like that one is. Against an undocumented tool their harness would have been thinner and they would not have known it -- which is the failure their own docstring names.
+
+This passage was wrong twice before it was right, both times in the direction of flattering the example. The first draft said "three wrong attempts, named", implying the third field is earned through failure -- which quietly raises the bar this section spends its length lowering, because somebody with no failures to confess concludes they have nothing to write. The second said the traps were identified by reading the classifier, which was still too generous: most were sitting in docstrings already. Recorded because a section arguing for honest headers cannot carry a slightly-too-good example, and it will be quoted at people.
+
+**PROPOSED, NOT SETTLED:** that writing the evidence down should ALSO be a promotion trigger, not only a dependency. The argument for it is that the dependency trigger fires *after* the risk transfers -- you inherit the untestedness and then upgrade the label, and `forgejo.py` was caught because somebody noticed rather than because anything made noticing reliable. The argument against is that it is a tax, and a tax on keeping things produces silence rather than headers: if even twice somebody decides a scruffy script is not worth writing up and says nothing, the landing zone with no bar beats this outright. Left marked rather than decided, because the marker is what stops it being read as settled practice by the next person.
+
+**And the principle AS A WHOLE is untested. Joe's verdict on it is the one to record: "it should work, guess we see."** It is written from a single day -- one review round, five tools, two seats -- and has not been through a cycle. Per §1 that makes it a claim rather than a status, and it will be proven by use or disproven the same way.
 
 ---
 
@@ -264,6 +367,100 @@ Checklist for greenfield work that should inherit this discipline:
 
 8. **Composition root is a single file.** Service provider in Laravel, `main()` in Python, app entry in JS. One place where "this project uses these adapters" is declared.
 
+9. **Declare the tools the GATE itself runs, in a manifest, pinned.** Not in a CI `pip install` line, not in a README, not in a wiki. A manifest a person can read, install from, and diff. Then add the check that every declared pin is actually installed at that version, because a manifest nobody verifies is a second thing that can be quietly wrong.
+
+### Declare the instrument's own dependencies
+
+Joe's call, 2026-09-01: guessing at dependencies is a PITA nobody wants to deal
+with. It earns a checklist item because JP_TOOLS itself got two of the three
+languages right and the third had nothing at all, which is the shape this fails
+in -- not total neglect, but one arm nobody noticed was undeclared.
+
+    composer.json    declares phpstan, phpcs, rector          DECLARED
+    package.json     declares eslint, prettier, stylelint     DECLARED
+    python runners   ruff, mypy, pip-audit                    NOWHERE
+
+The Python pins existed only inside a `pip install` line in a CI workflow, which
+is not a declaration: you cannot install from it locally, and it does not diff
+against anything. **Two copies of that line had already drifted.** JP_TOOLS' own
+`check.yml` pins `ruff`, `mypy` and `coverage`; the template `init-ci.py` ships
+to every adopting project pins `ruff`, `mypy` and `pip-audit`. Neither is a
+superset of the other, and the divergence is visible only by opening both files.
+
+**The cost is silent, and it is the denominator problem from §10.** A runner
+whose tool is missing returns `"unavailable"`, which contributes no issues, and
+`_summarize` counts only issues. So a run where an arm never executed is
+indistinguishable -- in the summary, and in the exit code -- from a run where
+everything passed. The gate does not lie about it. It simply never mentions it,
+and nobody reads a per-tool block when the total says zero.
+
+**Declaring is not enough on its own: the declaration and the resolution have to
+agree.** JP_TOOLS gets this right for PHP, where `_php_bin` prefers
+`vendor/bin/<tool>` and falls back to `PATH`, so `composer install` is sufficient
+and the error message even says so. It gets it wrong for JS, where
+`package.json` declares prettier and stylelint while `run_prettier` resolves
+through `shutil.which` alone and never looks in `node_modules/.bin`. **Running
+`npm install` therefore satisfies the manifest and leaves the gate reporting the
+tool as unavailable** -- the worst of both, because the manifest now says the
+dependency is handled.
+
+**Over-declaring is the mirror error and it is easier to commit.** The first
+draft of `requirements-dev.txt` pinned `coverage==7.15.4`, copied from CI. It is
+not installed on a working dev box, and `check.py`'s own comment says nothing in
+the repo measures coverage at all -- so the manifest would have asserted a
+dependency nothing consumes. A manifest that over-claims is not safer than one
+that under-claims; it is the same defect pointed the other way, and harder to
+notice later because installing more than you need always succeeds.
+
+The check that catches both directions costs about fifteen lines: walk the
+manifest, run each tool's `--version`, and assert the pin matches. It caught the
+phantom `coverage` entry within a minute of the file being written, which is the
+only reason it is described here as an error rather than as a rule.
+### The first from-inception adoption, and what it bought on day one
+
+Everything above was written as a prescription and applied, until 2026-09-01, only
+as a retrofit -- which is section 9, a different and more forgiving problem. A
+retrofit gets a baseline and an exemption list, so the discipline is measured
+against where the code already was. `romtools` is the first project to take this
+from inception, with no baseline to hide behind, and the checklist stopped being
+theory the same day.
+
+It paid before the first review round, on item 6 and on the rule under it. The
+project's `ruff.toml` records the decision it nearly made instead:
+
+> NOTHING IS IGNORED HERE ON PURPOSE. The first draft of this file was going to
+> silence UP031 (113 hits) and E701/E702 (126), on the grounds that percent format
+> and one-line statements are style rather than substance. Joe, the same day:
+> "poor style hides bugs"
+
+And the repo had already proved it, in `prior-art/scan.py`:
+
+    except Exception as e: return ('unreadable',[])    # E701
+    ...
+    e = head[root+i*32:root+i*32+32]                   # `e` reused as a loop var
+
+mypy flagged the reuse. It is not a crash, it is genuinely confusing, and **the
+confusion is invisible BECAUSE the except was folded onto one line.** The style
+rule and the legibility problem were one finding, so silencing the first would have
+hidden the second -- and 239 hits is exactly the volume that makes silencing feel
+like housekeeping rather than like a decision.
+
+Two things generalise from that, and they are the argument for adopting at
+inception rather than later:
+
+- **The exemption you write on day one is the one nobody ever revisits.** A
+  retrofit's exemption list is understood to be debt and gets a ticket. A
+  greenfield ignore is written as policy, reads as intent, and is invisible
+  thereafter.
+- **A high hit count is evidence about the rule's reach, not about its
+  worthlessness.** 239 findings across a young repo means the pattern is
+  load-bearing there. That is a reason to look at what it is covering, not a
+  reason to turn it off.
+
+Where the discipline is worth its cost is not evenly spread, and item 4's hook is
+what makes any of it survive contact: a gate that runs only in CI is a gate the
+author meets after they have stopped thinking about the change.
+
 ---
 
 ## 8. Before opening a PR
@@ -367,7 +564,7 @@ of them because they treated adoption as an event rather than a rate.
 
 2. **Record the baseline the same way the gate measures, and hold the line at
    "no worse".** Ratcheting needs a number to ratchet against. Commit a
-   **per-file** run — `check.py --record-baseline` — and have the gate compare
+   **per-file** run (`check.py --record-baseline`) and have the gate compare
    against it rather than against zero. Without that stored number, a file that
    got worse and a file that was always bad are indistinguishable, so no one
    can tell progress from noise and the effort stops being visible to anyone
@@ -382,9 +579,9 @@ of them because they treated adoption as an event rather than a rate.
    nobody had touched since the baseline was taken.
 
    The signature is worth knowing, because it will happen again to someone.
-   Only the tools that **resolve across files** move between the two modes —
-   `mypy` and `phpstan`. The ones that judge a file in isolation — `ruff`,
-   `phpcs`, `rector` — were byte-identical on every file. If a baseline
+   Only the tools that **resolve across files** move between the two modes:
+   `mypy` and `phpstan`. The ones that judge a file in isolation, `ruff`,
+   `phpcs` and `rector`, were byte-identical on every file. If a baseline
    disagrees with a fresh run on exactly the import-sensitive tools and on
    nothing else, suspect scope before you suspect versions.
 
@@ -395,7 +592,7 @@ of them because they treated adoption as an event rather than a rate.
    nothing downstream contradicts them. Say per-file, and say why, or it gets
    helpfully "improved" back.
 
-   A per-file baseline is the **worse** measurement for `mypy` and `phpstan` —
+   A per-file baseline is the **worse** measurement for `mypy` and `phpstan`:
    in isolation they cannot resolve imports and report more. That is the right
    trade anyway: the gate can only compare against what it can reproduce, and
    the excess is real findings rather than noise. On `audit_roms.py` the extra
