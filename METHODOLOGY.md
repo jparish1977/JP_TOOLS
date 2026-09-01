@@ -86,6 +86,49 @@ At the boundary between your code and the OS, there's always a line that actuall
 
 Business logic stays at 100%. OS-level error handling is acknowledged as an integration concern, not a unit-test concern.
 
+### 2.8 Parallel first
+
+**Do not run a serial test 900 times if you can run it in parallel once.**
+
+Joe's rule, 2026-09-01. It is not "make everything concurrent", and it is not a
+performance principle wearing a correctness hat. It is a claim about the SHAPE of
+an investigation, in two phases that a serial loop collapses into one:
+
+1. **Sweep in parallel, over everything, cheap and uniform.** Its job is
+   CLASSIFICATION, not analysis: which units are interesting.
+2. **Triage what it found, in an order you choose.** Severity, or cheapness, or
+   likelihood. That ordering is only available because you hold the complete set.
+
+The argument that this replaces: if 20 of 900 files are bad, nobody hand-tests
+900 to find 20. And a serial scan does not merely cost more, it makes you
+investigate in ARRIVAL ORDER and calls that a priority -- stopping at the first
+bug found rather than at the worst one.
+
+**Worked instance, and it is this methodology's own author getting it wrong.**
+The nine-runner exit-code table in §10 was measured serially, one tool at a time.
+The result was three successive corrections to the same conclusion over two hours
+-- "9 of 10", then "2 of 10 defeat the standard fix", then "3 of 10" -- each sent
+out as a revision. A parallel sweep of all twelve runners would have produced the
+distribution in one pass and one report. The first-bug-first pathology landed
+too: the design implication was declared at cppcheck, before phpcs was measured,
+and phpcs turned out to be the worst of the three.
+
+**The precondition, and it is the whole cost of the rule: THREE OUTCOMES PER
+UNIT, NEVER TWO.** Clean, finding, and *could not determine*. A worker that
+crashed is not a clean unit. With two buckets, a 900-to-20 sieve quietly becomes
+900-to-20-plus-3-nobody-looked-at, and the sweep has manufactured the exact defect
+§10 is about -- an absence encoded as a pass. With three, it has not, and the
+aggregate is trustworthy at any width.
+
+That precondition is not overhead added by parallelism. It is §2.7 and the
+denominator rule, which were already required; parallelism only removes your
+ability to survive without them, because a serial run shows you each failure as it
+happens and an aggregate does not.
+
+Applies to test suites, corpus scans, fleet sweeps, and any check run over more
+than a handful of units. JP_TOOLS has no concurrency in any tool as of
+2026-09-01, and every scan-shaped script in it loops serially, so this is a
+forward rule rather than a description of the code.
 ### 2.7 The silence rule
 
 In domain code: when a field or feature is absent, let it be absent. No placeholder strings, no "no description available." Absence is part of the design. This comes from the portfolio aesthetic ("the column exists but goes quiet... no placeholder text... the silence is the content") and applies equally to APIs, CLIs, and internal data models.
