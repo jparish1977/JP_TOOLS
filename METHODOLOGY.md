@@ -155,6 +155,26 @@ than a handful of units. JP_TOOLS has no concurrency in any tool as of
 2026-09-01, and every scan-shaped script in it loops serially, so this is a
 forward rule rather than a description of the code.
 
+### 2.9 Keep the tool, and make it carry its own evidence
+
+Good tools take work, and the default outcome is that the work is thrown away. A review round, an incident, an afternoon of measurement -- each produces apparatus that answered a real question, and all of it sits in a scratch directory that dies with the session. Joe's rule, 2026-09-01: **"good tools take work, i hate to see work wasted."**
+
+**A landing zone with NO BAR AT ALL.** `claude-config/tools/lab/` is the working example, 16 files. Nothing is required to put something there. That matters more than it looks: the failure mode is work being LOST, so any bar at entry costs you tools. **Dusty is fine, lost is not.** A scruffy script somebody hesitates to write up is a script that gets deleted.
+
+**A DEPENDENCY IS THE SIGNAL TO PROMOTE, and the reason is not seniority.** `tools/forgejo.py` states it, on being promoted 2026-08-24: *"the wrapper exists to be whitelisted, and whitelisting a wrapper over an untested tool whitelists the untested tool."* Dependency is the moment the untestedness stops being yours and starts being inherited by something else. Promotion cost a test file that pins the three lessons the tool was built from -- invariants, not coverage, and explicitly not the happy path.
+
+**Promotion is where the bar lives, so a lab tool must still say what it IS.** A directory is a blanket claim -- "lesser tested" -- with no per-tool justification, which is §2.6's defect at directory scale: an exemption that does not say why cannot be disagreed with. So the header carries three things, and nothing else is required:
+
+- what question it answers
+- what it was tested against, including the positive control
+- **what it was NOT tested against**
+
+That third line is the one that earns its place, and it is written naturally rather than under duress. Two seats produced apparatus on 2026-09-01 and both volunteered it unprompted: a containment harness whose docstring records *"unprivileged, scratch dir, no live cupsd"*, and whose author self-tested it end to end **and then broke it on purpose** to confirm it went red -- *"a harness that has only ever passed is not evidence."* The same docstring carries what the tool COST rather than what it does: three wrong attempts, named, so nobody repeats them.
+
+**PROPOSED, NOT SETTLED:** that writing the evidence down should ALSO be a promotion trigger, not only a dependency. The argument is that the dependency trigger fires *after* the risk transfers -- you inherit the untestedness and then upgrade the label, and `forgejo.py` was caught because somebody noticed rather than because anything made noticing reliable. The argument against is that this is a tax, and a tax on keeping things produces silence rather than headers. Recorded as an open question because it changes practice, and this document's own §1 says a rule here is a claim rather than a status.
+
+---
+
 ## 3. The canonical exemplar: FileScanner
 
 `FileScanner` is the reference implementation, and everything in iteration8-utilities and the quality-tooling scripts follows this pattern. It's in PHP, but the pattern translates directly to any language.
