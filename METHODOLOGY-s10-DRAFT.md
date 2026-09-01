@@ -986,6 +986,35 @@ But the design lesson from item 14 runs the other way and both hold at once: sto
 issuing the invitation. Report what was actually asked, at the width it was
 actually answered.
 
+**And the specific mishandling has a name.** Joe, the same day, after correcting
+romtools-lead twice on this one lesson:
+
+> thats not the probes fault, thats the users fault.
+
+The three versions matter because they give an adopter different instructions.
+"Probes are the unguarded surface" says harden the probe. "It dissolved into the
+probe's crudeness" still blames the instrument. The third says the instrument
+answered correctly and **the reader promoted a narrow answer into a broader one,
+in their head, with nothing marking it** -- so the instruction is to name the
+question the tool actually answered and notice the moment you widen it. The
+widening is invisible, happens in the reader, and leaves no artifact to review.
+
+romtools-helper turned that on this section's own headline finding, and they are
+right: **`check.py`'s `"ruff": "pass"` is not a lie.** It is the honest answer to
+"did the parsed output contain issues". It becomes wrong only when read as "ruff
+found nothing". The same re-reading applies to a `9 uses` count, to a solver's
+`0x8002 x445`, and to a control that answered "did any module exit non-zero over
+THESE five disks" three times correctly and was read as "does any module fail".
+None of those tools lied. Each answered narrowly and was read broadly.
+
+**One qualification, mine.** A narrow answer labelled with a broad word is an
+invitation, and a wrapper that emits `{"tool": "ruff", "status": "pass"}` is
+labelling a claim about a parsed list with the name of the tool and the word
+`pass`. The promotion is still the reader's, and the fault sits where Joe put it.
+But the design lesson from item 14 runs the other way and both hold at once: stop
+issuing the invitation. Report what was actually asked, at the width it was
+actually answered.
+
 Which is the through-line, and it is §8's one layer out: **an instrument reports
 on itself, not on the world.** Exit 0 means the tool ran. An empty list means the tool had
 nothing to say. Neither is a statement about the thing you were pointing it at, and
