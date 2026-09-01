@@ -96,6 +96,15 @@ At the boundary between your code and the OS, there's always a line that actuall
 
 Business logic stays at 100%. OS-level error handling is acknowledged as an integration concern, not a unit-test concern.
 
+**And the exemption is a CLAIM, not a permission -- which is §1's rule applied to the smallest thing in this document.** It claims the function is a thin wrapper with nothing in it worth testing. Nothing rechecks that claim, so it goes stale silently as the function grows and the exempt region becomes the region nobody looks at. Measured on `spool-audit.py`, 2026-08-13: `# pragma: no cover` covered **430 lines of 1350 -- 32% of the file, holding 51 branch, loop and try statements.** A thin wrapper has none. Every serious defect on that branch came from inside that region, and ruff and mypy together caught 0 of 112 findings.
+
+The rule is therefore not "no exemptions". It is that **an exemption must say why, so the claim is visible and can be disagreed with**:
+
+    def _unlink(p): ...    # pragma: no cover
+    def restart():  ...    # pragma: no cover -- reason: runs systemctl
+
+A pragma on a function with no branches needs no reason: it is self-evidently a wrapper. One with branches is making a decision, and decisions are testable. `check.py` has enforced exactly this since 2026-08-13 and `list-exemptions.py` enumerates them; this paragraph exists because the rule lived only in that tool's source, so a reader following §2.6 wrote a bare pragma and was then failed by a gate whose reasoning they could not see.
+
 ### 2.7 The silence rule
 
 In domain code: when a field or feature is absent, let it be absent. No placeholder strings, no "no description available." Absence is part of the design. This comes from the portfolio aesthetic ("the column exists but goes quiet... no placeholder text... the silence is the content") and applies equally to APIs, CLIs, and internal data models.
