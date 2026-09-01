@@ -191,10 +191,18 @@ printf '%%PDF-1.7\n' > "$W/purge/d00085-001"
 run_tool 1 "the report names the delete set before anything is destroyed" \
   --spool "$W/purge" --conf /dev/null
 has "the purgeable entry is marked in the listing" "tmp/leak.ps  <- --purge removes this" "$OUT"
+# The forbidden-string check needs the REQUIRED string in the same output, or
+# an empty report satisfies it: "nothing else is marked" is trivially true of a
+# tool that marked nothing. Reported by tests/test_acceptance_canary.py as
+# passing against every stub.
 case "$OUT" in
-  *"README  <- --purge"*|*"d00085-001  <- --purge"*)
-    no "only the delete set carries the mark";;
-  *) ok "only the delete set carries the mark";;
+  *"tmp/leak.ps  <- --purge removes this"*)
+    case "$OUT" in
+      *"README  <- --purge"*|*"d00085-001  <- --purge"*)
+        no "only the delete set carries the mark";;
+      *) ok "only the delete set carries the mark";;
+    esac;;
+  *) no "only the delete set carries the mark (output lacked the delete-set mark entirely, so nothing else carrying it proves nothing)";;
 esac
 run_tool 1 "purge leaves the job file for cancel, so the spool is not clean" \
   --spool "$W/purge" --conf /dev/null --purge
@@ -244,9 +252,15 @@ has "and is reported as removed but NOT destroyed" \
 [ ! -e "$W/hard/tmp/leak.ps" ] \
   && ok "the spool's entry is still unlinked" \
   || no "the spool's entry is still unlinked"
-grep -q SECRET "$W/hardvault/other-link.ps" 2>/dev/null \
-  && ok "the content survives at the other link, as the report says" \
-  || no "the content survives at the other link, as the report says"
+# Survival at the other link is only evidence if the spool entry was actually
+# removed -- otherwise it is the state BEFORE the tool ran, and a tool that does
+# nothing passes. Both halves in one check so a do-nothing stub fails it.
+if [ ! -e "$W/hard/tmp/leak.ps" ] \
+   && grep -q SECRET "$W/hardvault/other-link.ps" 2>/dev/null; then
+  ok "the content survives at the other link, as the report says"
+else
+  no "the content survives at the other link, as the report says"
+fi
 
 echo "FLAW 8: the report must not promise what the purge just failed to do"
 # With the containing directory at mode 500 the unlink fails EACCES; the old
@@ -263,16 +277,29 @@ else
   chmod 500 "$W/stuck/tmp"
   run_tool 1 "a failed unlink exits 1" --spool "$W/stuck" --conf /dev/null --purge
   has "the failure is reported" "delete FAILED" "$OUT"
+  # Same pairing: "no capability claim" is trivially true of an empty report,
+  # so require the failure to have been reported in the same output first.
   case "$OUT" in
-    *"--purge removes exactly these files"*)
-      no "no capability claim over a failure";;
-    *) ok "no capability claim over a failure";;
+    *"delete FAILED"*)
+      case "$OUT" in
+        *"--purge removes exactly these files"*)
+          no "no capability claim over a failure";;
+        *) ok "no capability claim over a failure";;
+      esac;;
+    *) no "no capability claim over a failure (output lacked 'delete FAILED', so making no claim over it proves nothing)";;
   esac
   v=$(printf '%s\n' "$OUT" | grep '^VERDICT:')
-  case "$v" in
-    *"Clear them with:"*) no "the verdict does not advise what just failed";;
-    *) ok "the verdict does not advise what just failed";;
-  esac
+  # An ABSENT verdict line satisfied this: $v was empty and the case fell
+  # through to ok. A tool that prints no verdict cannot be said to have
+  # withdrawn its advice, so require the line to exist first.
+  if [ -z "$v" ]; then
+    no "the verdict does not advise what just failed (output lacked a VERDICT: line entirely)"
+  else
+    case "$v" in
+      *"Clear them with:"*) no "the verdict does not advise what just failed";;
+      *) ok "the verdict does not advise what just failed";;
+    esac
+  fi
   has "and it points at the failure instead" "just FAILED" "$v"
   chmod 755 "$W/stuck/tmp"
 fi
