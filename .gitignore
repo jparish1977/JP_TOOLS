@@ -10,3 +10,4 @@ __pycache__/
 htmlcov/
 .venv/
 venv/
+.claude/settings.local.json
