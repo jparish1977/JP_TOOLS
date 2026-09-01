@@ -264,6 +264,55 @@ Checklist for greenfield work that should inherit this discipline:
 
 8. **Composition root is a single file.** Service provider in Laravel, `main()` in Python, app entry in JS. One place where "this project uses these adapters" is declared.
 
+9. **Declare the tools the GATE itself runs, in a manifest, pinned.** Not in a CI `pip install` line, not in a README, not in a wiki. A manifest a person can read, install from, and diff. Then add the check that every declared pin is actually installed at that version, because a manifest nobody verifies is a second thing that can be quietly wrong.
+
+### Declare the instrument's own dependencies
+
+Joe's call, 2026-09-01: guessing at dependencies is a PITA nobody wants to deal
+with. It earns a checklist item because JP_TOOLS itself got two of the three
+languages right and the third had nothing at all, which is the shape this fails
+in -- not total neglect, but one arm nobody noticed was undeclared.
+
+    composer.json    declares phpstan, phpcs, rector          DECLARED
+    package.json     declares eslint, prettier, stylelint     DECLARED
+    python runners   ruff, mypy, pip-audit                    NOWHERE
+
+The Python pins existed only inside a `pip install` line in a CI workflow, which
+is not a declaration: you cannot install from it locally, and it does not diff
+against anything. **Two copies of that line had already drifted.** JP_TOOLS' own
+`check.yml` pins `ruff`, `mypy` and `coverage`; the template `init-ci.py` ships
+to every adopting project pins `ruff`, `mypy` and `pip-audit`. Neither is a
+superset of the other, and the divergence is visible only by opening both files.
+
+**The cost is silent, and it is the denominator problem from §10.** A runner
+whose tool is missing returns `"unavailable"`, which contributes no issues, and
+`_summarize` counts only issues. So a run where an arm never executed is
+indistinguishable -- in the summary, and in the exit code -- from a run where
+everything passed. The gate does not lie about it. It simply never mentions it,
+and nobody reads a per-tool block when the total says zero.
+
+**Declaring is not enough on its own: the declaration and the resolution have to
+agree.** JP_TOOLS gets this right for PHP, where `_php_bin` prefers
+`vendor/bin/<tool>` and falls back to `PATH`, so `composer install` is sufficient
+and the error message even says so. It gets it wrong for JS, where
+`package.json` declares prettier and stylelint while `run_prettier` resolves
+through `shutil.which` alone and never looks in `node_modules/.bin`. **Running
+`npm install` therefore satisfies the manifest and leaves the gate reporting the
+tool as unavailable** -- the worst of both, because the manifest now says the
+dependency is handled.
+
+**Over-declaring is the mirror error and it is easier to commit.** The first
+draft of `requirements-dev.txt` pinned `coverage==7.15.4`, copied from CI. It is
+not installed on a working dev box, and `check.py`'s own comment says nothing in
+the repo measures coverage at all -- so the manifest would have asserted a
+dependency nothing consumes. A manifest that over-claims is not safer than one
+that under-claims; it is the same defect pointed the other way, and harder to
+notice later because installing more than you need always succeeds.
+
+The check that catches both directions costs about fifteen lines: walk the
+manifest, run each tool's `--version`, and assert the pin matches. It caught the
+phantom `coverage` entry within a minute of the file being written, which is the
+only reason it is described here as an error rather than as a rule.
 ### The first from-inception adoption, and what it bought on day one
 
 Everything above was written as a prescription and applied, until 2026-09-01, only

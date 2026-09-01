@@ -1,0 +1,30 @@
+# The Python tools check.py shells out to, and the versions the gate expects.
+#
+# WRITTEN 2026-09-01 BECAUSE THEY WERE NOWHERE. composer.json declares the PHP
+# runners and package.json declares the JS ones; the Python runners were
+# declared in no manifest at all, and their only pins lived inside a `pip
+# install` line in a CI workflow. That is not a declaration a person can read,
+# install from, or diff -- and two copies of that line had already drifted:
+# JP_TOOLS' own check.yml pins ruff/mypy/coverage, while the template
+# init-ci.py ships to adopters pins ruff/mypy/pip-audit. Neither is a superset.
+#
+# The cost of the gap is silent. A missing runner is reported as
+# "unavailable", which contributes no issues, and _summarize counts only
+# issues -- so a run with an arm that never executed is indistinguishable in
+# the summary and the exit code from a run where everything passed.
+#
+# Pins are deliberate. Unpinned linters turn a green build red months later in
+# whichever PR happens to be open, with no code change.
+
+ruff==0.16.1
+mypy==2.3.0
+pip-audit==2.10.1
+
+# NOT DECLARED, DELIBERATELY: coverage.
+# JP_TOOLS' own check.yml pins coverage==7.15.4, so CI installs it on every
+# run. It is not importable on a working dev box, and check.py's own comment
+# at :704 says "nothing in this repo measures coverage at all". Declaring it
+# here would make a manifest assert a dependency nothing consumes, which is
+# the same defect as omitting one and harder to notice later. The CI pin and
+# the missing measurement are a real discrepancy and belong in an issue, not
+# in this file.
