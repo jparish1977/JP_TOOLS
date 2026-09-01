@@ -742,10 +742,25 @@ operand. And `check.py` labels a claim about a parsed list `{"tool": "ruff",
 it reads as the broader claim. These are defects. Handling them better is worth
 doing and is not the whole answer, because the next person meets the same edge.
 
-The practical discriminator is cheap: **ask whether the surprising behaviour is
-documented.** If the vendor wrote it down, you are holding a knife and the fix is
-in your grip. If nobody ever specified it, you are holding broken glass and
-somebody should sweep it up.
+**The discriminator is intent**, which Joe supplied in five words when the draft
+had reached for "is it documented" instead:
+
+> its just not meant to be
+
+Documentation is the usual EVIDENCE of intent and it is not the same thing, and
+the gap matters in both directions. A behaviour can be intended and
+underdocumented -- cppcheck's exit codes were a knife before anyone here read the
+manual, and they did not become one by being read. And **documenting a defect
+does not convert it into a knife**: a known-issues entry is a warning, not a
+specification, so "it is in the release notes" does not move stylelint-on-old-Node
+from glass to blade. It only moves it from unexpected to expected, which is a
+statement about you.
+
+So the question is what the edge is FOR. A knife's edge has a purpose and the
+whole tool is built around it. Broken glass's edge is what is left over when
+something else failed, and nobody chose its shape. If you cannot name what the
+behaviour is for, you are not holding a tool you have misunderstood -- you are
+holding a fragment, and the answer is a dustpan rather than a better grip.
 
 **And the specific mishandling has a name.** Joe, the same day, after correcting
 romtools-lead twice on this one lesson:
