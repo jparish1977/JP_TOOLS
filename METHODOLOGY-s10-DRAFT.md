@@ -14,6 +14,27 @@ wireless driver, a PowerShell launcher, `argparse`, `git`, a coverage baseline, 
 security validator and a message spool. They have nothing in common, which is the
 argument for the section existing.
 
+**WHEN THE RECEIPTS ARE SPLIT OUT OF THIS FILE, LABEL EACH ONE.** Joe's call,
+2026-09-01, and it is a labelling rule rather than another item, because the
+difference is learned from examples and not from a definition. Two kinds are
+mixed in here now and read alike:
+
+    HYPOTHESIS   asserted, tested, refuted. The procedure SUCCEEDING.
+    ERROR        acted on or reported BEFORE testing.
+
+The discriminator is only ever whether the test came before the claim left your
+hands. From this one day: predicting the exemption gap would be populated and
+then measuring it at 1 of 1 is a hypothesis; publishing that `run_mypy` had no
+returncode check, from a window that ended two lines above the returncode check,
+is an error. Both feel identical while you are inside them, and both end with
+"I was wrong", which is exactly why the label has to be written down rather than
+inferred by a later reader.
+
+**Filing them alike is not merely untidy.** Every instance below is currently
+presented as a defect, and a good share of them are the method working. A
+document that files a refuted hypothesis as a failure teaches the reader to stop
+forming them, and then nothing gets tested at all.
+
 1. **Ask whether the instrument can return a confident nothing.** An empty list, a
    zero count, an absent file, no output, exit 0. This is the single best predictor
    of whether you will catch your own error, and it is a property of the tool that
