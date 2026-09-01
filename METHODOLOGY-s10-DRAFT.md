@@ -111,8 +111,7 @@ argument for the section existing.
    than in a footnote.** `check.py:60 run_ruff` shells out to ruff, discards
    `returncode`, and parses stdout. Ruff writes a config-load failure to stderr and
    exits **2** with empty stdout, so the wrapper reads `[]` and publishes
-   `"status": "pass"`, `"total": 0`, exit 0. `run_mypy` at :146 has the identical
-   shape. Reproduced 2026-09-01 in three lines, with a positive control proving the
+   `"status": "pass"`, `"total": 0`, exit 0. Reproduced 2026-09-01 in three lines, with a positive control proving the
    sample dirty:
 
        echo 'extend = "./does-not-exist.toml"' > ruff.toml
@@ -137,6 +136,34 @@ argument for the section existing.
    LOAD. Not universal -- and it fires precisely where a project has configured its
    own rules, which is to say on the projects that took the methodology seriously
    enough to write a config at all.
+
+   **CORRECTION, and it is the sharpest instance in this section because it is
+   mine.** This item first said `run_mypy` "has the identical shape", and it does
+   not. `run_mypy` passes `result.returncode` to `_status`, which returns `"error"`
+   when the code is not in (0, 1). It was already correct, and so is `run_prettier`.
+   I read the function in a window that ended at line 176 and the returncode use is
+   at line 178, then reported absence from a view that stopped two lines short. That
+   is item 6 below, committed to a file, by the person writing the file about it.
+
+   The measured picture, which is better than the one I published:
+
+       13 _status call sites, 12 of them subprocess-backed
+        2 pass returncode and are correct      mypy :178, prettier :434
+       10 do not, so the error path cannot fire for them
+        9 of those 10 are caught by claude-config's lint
+        1 is not: cppcheck :672, which parses result.STDERR
+
+   **The mechanism was never missing. `_status` already implements exactly the rule
+   the seven-row table in item 17 arrives at independently** -- not in (0, 1) is a
+   refusal, 0 and 1 both still need stdout parsed. Eleven callers just never hand it
+   the argument. So the fix is ten one-line changes rather than a redesign, and the
+   report that called for a redesign was wrong in the direction that makes the
+   author look more thorough. That is the direction to distrust in your own work.
+
+   It also re-scopes the lint's blind spot, which I had guessed at and had wrong.
+   It does not miss "wrapped stdout" reads: it skipped mypy and prettier because
+   they are CORRECT, which is the rule working. It misses the runner that parses
+   stderr instead.
 
 4. **Prefer the instrument that returns a quantity to the one that returns a
    verdict.** A number, a name or a unit is partly self-checking; a verdict is not.
