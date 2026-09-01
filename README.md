@@ -88,6 +88,81 @@ files are fine and only the filesystem metadata is damaged. Inventory first,
 size what you might want, then copy. Comparing that inventory against drives you
 already own is usually what shrinks the job most.
 
+### System Hygiene (Python)
+
+| Script | Purpose |
+|---|---|
+| `spool-audit.py` | Report documents CUPS keeps after printing, including its TempDir, and remove (`--purge`) the content-proven leftovers `cancel` cannot reach. Never touches config, daemon, job files, or anything it could not identify — it names the CUPS commands that clear those |
+
+Printing sends the whole document through CUPS, and CUPS may keep a copy after
+the job finishes. Print a password, a recovery sheet or a private key and that
+copy outlives the paper, on a machine that may not be yours. Written after
+exactly that happened on a shared household printer.
+
+It exists as a tool rather than a one-liner because the obvious one-liner
+reports danger as safety: `sudo ls /var/spool/cups | grep -E 'd0*85' || echo
+CLEAN` prints CLEAN when sudo fails, making a check that never ran
+indistinguishable from a clean result.
+
+**Why the problem exists:** CUPS documents `PreserveJobFiles` as defaulting to
+`No`, so completed jobs should leave nothing behind. Measured in a clean Ubuntu
+24.04 container, stock config with no such directive, the document file was
+still present 60 seconds after the job finished. Writing `PreserveJobFiles No`
+explicitly stops it. An unset directive and an explicit `No` behave differently,
+which matches [apple/cups#6083](https://github.com/apple/cups/issues/6083)
+(open, no root cause, repo archived March 2026 -- reported there on macOS, and
+this reproduces it on Linux). The explicit `No` is the fix, and the report
+says so rather than writing it for you.
+
+It audits `tmp/` as well as the top level. CUPS `TempDir` holds document
+content during filtering, so a top-level-only check reports clean while
+readable data sits one directory down. Passing job ids highlights those jobs in
+the report; the exit code still answers the wider question, because "the job
+you asked about is gone" and "the spool is empty" are different claims.
+
+A file it cannot identify is reported and blocks a clean verdict. Over-reporting
+is the safe direction for a report -- and it was the wrong direction for the
+delete set this tool used to have, which shared the same predicate and destroyed
+a plain-text README. Both halves lived here until 2026-08-14.
+
+**What CUPS can clear, CUPS clears.** The first destructive half was cut
+entirely on 2026-08-14: `--fix` was "set `PreserveJobFiles No`, restart cupsd,
+delete the leftovers", which is `cancel -a -x` and one config line -- work CUPS
+already does correctly -- and it was where every dangerous bug lived: a `--fix`
+that could destroy a device node, one that truncated `cupsd.conf` to zero
+bytes, a `--purge` that followed a symlinked `TempDir` out of the directory it
+was told to audit. `--fix` is not coming back; the report names the commands
+and leaves them to you:
+
+```
+cancel -a -x                      # cancel every job and its documents
+PreserveJobFiles No               # in /etc/cups/cupsd.conf, then restart cups
+```
+
+**`--purge` is back, for the one job those commands cannot do.** Files whose
+own first bytes prove they are print data but which carry no job id -- TempDir
+leftovers, a document copied to `d00085-001.bak` -- are unreachable by
+`cancel`, and without this flag the report can only tell you to remove them by
+hand, with filenames that may contain newlines and terminal escapes. `--purge`
+removes exactly those files and nothing else. The delete set is the
+classifier's evidence Kind, so job files, unidentified files and runtime
+artifacts are excluded by type rather than by a check; it refuses job ids
+(nothing it removes has one); it writes no file and touches no daemon, so the
+two `--fix` bugs have no code to live in; and it cannot traverse a symlink --
+every path component is opened `O_NOFOLLOW` against a directory descriptor, so
+the escape that killed the old purge is the kernel's ELOOP rather than a path
+comparison that can be raced. Unidentified files stay yours to judge:
+over-reporting is the safe direction for a report, and it was the wrong
+direction for the old delete set, which destroyed a plain-text README on
+exactly that confusion.
+
+It reads directly and has no privilege-escalation path, so run it under `sudo`
+for the real spool. That is deliberate: an internal sudo fallback was a second
+implementation of the same listing, the two disagreed repeatedly about depth
+limits, directories and unreadable files, and that divergence caused a large
+share of the tool's bug history. One code path with one set of rules is worth
+more than the convenience.
+
 ### Archive Management (Python)
 
 | Script | Purpose |
