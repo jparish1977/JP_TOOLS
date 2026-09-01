@@ -61,6 +61,27 @@ argument for the section existing.
    the instrument in ANY setting is measuring a second instrument, and the closer
    its answer sits to the one you expect, the less you will check it.
 
+   **And a control that can only be run where the bug is absent is not a control.**
+   romtools-helper, 2026-09-01, on a positive control pinned for the gate defect in
+   item 3: it ran inside a project where `../JP_TOOLS` is a sibling, so the config
+   resolved, ruff ran, and the control passed. It will pass forever, including in
+   the world where the defect fires, because the environment that triggers the
+   defect is the one environment the control never enters. Their words: a green
+   light with extra steps.
+
+   So pin the ENVIRONMENT alongside the violation. The matrix has three rows and
+   the middle one is the one that never gets written:
+
+       sibling present, file dirty  ->  fail, issue count > 0
+       sibling ABSENT,  file dirty  ->  ERROR. never pass, never skip
+       sibling present, file clean  ->  pass, 0 issues
+
+   The last row is the guard proving it can stay quiet. The middle row is the only
+   one that reproduces the defect, it costs a temp directory, and every suite that
+   has ever tested this has had the outer two and not the middle. This is item 14
+   one level up: a verdict without its denominator, and a control without its
+   environment.
+
 3. **When you build the instrument, make absence countable — never encode it in a
    value.** Everything above is about reading someone else's tool. This is the one
    move that stops you from writing the next one, and it is the only constructive
@@ -425,6 +446,68 @@ argument for the section existing.
     holds no overloaded empties, over the file carrying the worst one in the
     toolkit. **A detector's coverage is its rule list, and its output is a verdict**
     -- item 14, arriving through the door marked "we already have a lint for this".
+
+    **A clean run of that detector is still not evidence of absence, by its own
+    design.** The rule skips a result that ESCAPES the enclosing scope, because the
+    caller might check it and the lint cannot see that. Correct, and the cost is
+    exact: sunblade2000-publish ran it over their own files, got CLEAN, and had the
+    defect anyway -- their result escaped and no caller checked it. **The lint was
+    right and the bug was real at the same time.** Any count it produces is a count
+    of instances of the shape it can see, which is the reading item 14 asks for and
+    the reading nobody applies to a tool they just installed.
+
+16. **An absence encoded as a number gets arithmetic done to it, and comes out
+    plausible.** Item 3 is about absence encoded in a value. This is what happens
+    next, and it is worse than a confident nothing, because a confident nothing at
+    least looks like nothing.
+
+    romtools-helper, 2026-09-01, in `coverage_gate._measure_one`: it parsed a
+    subprocess's stdout, never read returncode, and returned **-1** on a failed
+    parse. That -1 was then SUBTRACTED from a baseline, so a crashed measurement
+    would have been published as a coverage delta of about **-460**. Not an error,
+    not a blank, not a zero. A number, in range for a bad day, in the column people
+    read. In the file whose entire subject is instruments that misreport.
+
+    Blast radius, measured rather than assumed: the published deltas ran -164 to
+    +17, nowhere near -460, so it was latent and never fired. That measurement is
+    the second half of the finding and it is the half usually skipped.
+
+    The fix is the shape item 3 already prescribes, and worth restating because the
+    arithmetic makes it non-obvious: return None rather than a sentinel, let a
+    failed BASELINE abort the table rather than print differences from nothing, and
+    count unmeasurable rows separately instead of letting them read as a delta of
+    zero. **A sentinel that is a number will be treated as a number by the next line
+    of code, and that line is usually a subtraction.**
+
+17. **`returncode != 0` is a proxy for "the tool failed", and its strength is a
+    property of the tool. Measure it before you build on it.**
+
+    sunblade2000-publish, 2026-09-01, having just made this exact fix badly: they
+    had the item 3 shape, fixed it by checking returncode, then ran a negative
+    control against deliberately bad input and the fix did **nothing** -- because
+    `curl -s` exits 0 on a 404 and hands back the server's HTML error page. The
+    failure was never an empty stdout with a nonzero exit. It was a plausible file
+    with a clean exit. `curl -fsS` was the actual fix.
+
+    Taking that caution seriously is what produced the numbers below, and they came
+    out the other way for ruff, which is the point: the answer is per tool and you
+    do not get to assume either result. Measured 2026-09-01, ruff 0.16.1:
+
+        clean config, dirty file      rc=1   2 issues on stdout
+        unresolvable extend           rc=2   stdout EMPTY
+        malformed TOML                rc=2   stdout EMPTY
+        invalid rule code in select   rc=2   stdout EMPTY
+        unknown top-level key         rc=2   stdout EMPTY
+        target does not exist         rc=1   1 issue on stdout (E902 io-error)
+        file with a syntax error      rc=0   1 issue on stdout (invalid-syntax)
+
+    Every config failure is rc=2 with empty stdout, so for THIS tool returncode is a
+    strong discriminator and the fix is sound. But the naive version of that fix is
+    still wrong in both directions: **rc=0 does not mean "nothing found"** (a syntax
+    error reports at rc=0) and **rc=1 does not only mean "violations"** (a missing
+    path reports there too). The rule that survives is narrower than "check the exit
+    code": rc=2 is the refusal and must never be a pass, while 0 and 1 both still
+    require parsing stdout.
 
 The through-line, and it is §8's one layer out: **an instrument reports on itself,
 not on the world.** Exit 0 means the tool ran. An empty list means the tool had
