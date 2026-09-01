@@ -10,9 +10,35 @@ Usage:
 
 import argparse
 import sys
+import subprocess
 from pathlib import Path
 
-TOOLS_DIR = Path(__file__).resolve().parent
+def _tools_dir() -> Path:
+    """Where to record as the install-time fallback.
+
+    If this file lives in a git WORKTREE, record the MAIN checkout instead. A
+    worktree path is transient -- `git worktree remove` deletes it -- and a hook
+    pointing at one breaks on the very machine it was installed on. Measured
+    2026-09-01: batocera-watch's hook pointed at JP_TOOLS.worktrees/master. #40.
+    """
+    here = Path(__file__).resolve().parent
+    try:
+        out = subprocess.run(["git", "-C", str(here), "rev-parse",
+                              "--path-format=absolute", "--git-dir", "--git-common-dir"],
+                             capture_output=True, text=True, check=False)
+        if out.returncode == 0:
+            lines = out.stdout.split()
+            if len(lines) == 2 and lines[0] != lines[1]:
+                # In a worktree: the main checkout is the parent of the common dir.
+                main = Path(lines[1]).parent
+                if (main / "check.py").exists():
+                    return main
+    except OSError:
+        pass
+    return here
+
+
+TOOLS_DIR = _tools_dir()
 CHECK_PY  = TOOLS_DIR / "check.py"
 METHODOLOGY_DOC = TOOLS_DIR / "METHODOLOGY.md"
 
@@ -37,7 +63,40 @@ HOOK_TEMPLATE = r"""#!/bin/sh
 #   - The file list is split on newlines, so a filename containing a literal
 #     newline is not handled. Spaces are.
 
-TOOLS_DIR="{tools_dir}"
+# WHERE JP_TOOLS LIVES IS A PROPERTY OF THE MACHINE, NOT OF THIS REPO, so it is
+# resolved when the hook RUNS, not baked in when it was installed. The install
+# path is kept as a last-resort candidate and nothing more.
+#
+# It used to be a single hardcoded absolute path. That made every hook work on
+# exactly one machine, and a hook installed from a git WORKTREE broke on the
+# machine it was installed on the moment that worktree was removed. See #40.
+for cand in "$JP_TOOLS_DIR" "$HOME/projects/JP_TOOLS" "$HOME/JP_TOOLS" "{tools_dir}"; do
+    if [ -n "$cand" ] && [ -f "$cand/check.py" ]; then
+        TOOLS_DIR="$cand"
+        break
+    fi
+done
+
+# A MISSING CHECKER IS NOT A FAILING CHECK, and saying so is the whole point of
+# this branch. Previously check.py's absence made python3 exit non-zero, which
+# the loop below counted as a finding, and the hook printed "Pre-commit check
+# FAILED -- fix the issues above" over code nothing had looked at.
+if [ -z "$TOOLS_DIR" ]; then
+    echo ""
+    echo "====================================="
+    echo " JP_TOOLS hook is MISINSTALLED: cannot find check.py."
+    echo " NOTHING WAS CHECKED. This is not a problem with your changes."
+    echo " Searched, in order:"
+    echo "   \$JP_TOOLS_DIR    (currently: ${{JP_TOOLS_DIR:-unset}})"
+    echo "   $HOME/projects/JP_TOOLS"
+    echo "   $HOME/JP_TOOLS"
+    echo "   {tools_dir}   (recorded at install time)"
+    echo " Fix: export JP_TOOLS_DIR=/path/to/JP_TOOLS"
+    echo "      or re-run install-hooks.py on this machine."
+    echo " To commit without the gate: git commit --no-verify"
+    echo "====================================="
+    exit 1
+fi
 CHECK_PY="$TOOLS_DIR/check.py"
 
 # python3 everywhere it exists; several Linux boxes ship no bare `python`,
