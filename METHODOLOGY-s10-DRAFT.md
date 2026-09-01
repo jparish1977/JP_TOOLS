@@ -762,8 +762,33 @@ argument for the section existing.
     here asks someone to misread a silence. This one would hand them a sentence
     saying the work was done.
 
-    **NO VERIFIED INSTANCE. The shape is stated because it is worth watching for;
-    the example this item was built on was false and is retracted.** It said
+    **VERIFIED, but not by the example this item was first built on.** That one was
+    false and is retracted below; the real instance is `msg.py` and it is in this
+    seat's own lane. Measured 2026-09-01, three sends to one recipient:
+
+        body of 46 chars   ->  sent to ... (1 recipient)   rc=0
+        empty string       ->  sent to ... (1 recipient)   rc=0
+        $(cat $UNSET/x)    ->  sent to ... (1 recipient)   rc=0
+
+    Identical success line, identical exit code, for a send that carried nothing.
+    **And the receiving end corroborates the lie**: reading the thread back renders
+    the empty sends as ordinary messages with blank bodies, so a reader sees a
+    message that appears to say nothing rather than a delivery that failed.
+
+    First found 2026-08-31 by the `jp-tools` seat, which sent a 3.8 KB finding to
+    eight recipients and was told `sent to ... (8 recipients)` over a `len=0`
+    spool record; `sunblade2000-lead` detected it independently from the receiving
+    end in the same minute, and it is claude-config **#189**. The cause there was a
+    heredoc keyed off an unset `$SCRATCH`, and their line is the one worth keeping:
+    **"the rule I was following did not protect me."** `CLAUDE.md` says to write a
+    long payload to a file and pass it as one argument, which they did. A COMPUTED
+    path that fails produces the identical empty body while you believe you have
+    complied. The file was never the protection. This is:
+
+        BODY="$(cat /abs/path/file)"
+        [ ${#BODY} -gt 100 ] || { echo REFUSING; exit 1; }
+
+    **The retracted example**, kept because the retraction is instructive: it said
     `coord.py claim --note` on a resource you already hold prints `claimed
     <resource>` and discards the note. Measured, unpiped:
 
@@ -780,10 +805,10 @@ argument for the section existing.
     claude-config-advisor failed to reproduce it and challenged it rather than
     letting it stand.
 
-    An item with a named shape and an honest "nobody has measured one" is worth
-    more than an item resting on an anecdote. claude-config-advisor's #209 is a
-    candidate if it ever fires, since a failed metadata write there does print
-    `__OK__`.
+    So the shape stood correctly for three hours with NO verified instance while a
+    verified one sat in this seat's own session report from the previous day,
+    unread. An honest "nobody has measured one" was the right call on the evidence
+    in hand and was still wrong about the world.
 
     **The second half of this item IS measured and is unaffected, and it is a
     COUPLING.** There is no update verb, so the only way to correct a note is
