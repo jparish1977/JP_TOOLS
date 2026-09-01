@@ -534,37 +534,55 @@ argument for the section existing.
     exit in precisely the investigation where a dirty one is what you are hunting
     for, and the reading looks like the good news you were hoping not to find.
 
-    Recorded because it happened twice on 2026-09-01 inside this one investigation.
-    romtools-lead read a control's exit as 0 and nearly reported it as an overloaded
-    success; it returns 1 correctly and they had piped it through `tail -12`, their
-    third instance of the family that day. The first table in item 17 above was
-    ALSO wrong on its first run here, for the same reason and in the same hour --
-    `ruff check . 2>&1 | tail -10; echo "exit=$?"` printed `exit=0` for the
-    unresolvable-extend case that actually exits 2, and the numbers above exist only
-    because it got re-run without the pipe. Use `PIPESTATUS`, or do not pipe the
-    command whose status is the measurement.
+    **The seven-row table above was wrong on its first run, for exactly this
+    reason.** `ruff check . 2>&1 | tail -10; echo "exit=$?"` printed `exit=0` for
+    the unresolvable-extend case that actually exits 2, and that number went into
+    this file. It exists in its corrected form only because it got re-run without
+    the pipe. Put that first, ahead of the tidier version of the same slip:
+    romtools-lead read a control's exit as 0 the same hour and nearly filed it as an
+    overloaded success, their third instance of the family that day, and theirs was
+    a commit they could re-run. Ours silently produced a wrong table in a document
+    whose subject is instruments that misreport, and that is the version which would
+    have shipped. Use `PIPESTATUS`, or do not pipe the command whose status is the
+    measurement.
 
-18. **When a check cannot be exhaustive, choose the direction its own gaps fail
-    in.** Items 1 to 17 are about reading an instrument honestly. This is the one
-    design decision that determines what a future gap in your own will do.
+18. **A fix that makes the test pass can leave the defect class untouched. Ask
+    which way the NEXT gap fails.** This item was first written here as foresight
+    and corrected by the person it describes, which matters, because the foresight
+    version teaches the wrong thing. What happened was a repair.
 
     romtools-lead, 2026-09-01: a CHR$ falsifier whose `_const` read a PREFIX of an
     expression as the argument, so `CHR$(-45 * (A$ = ""))` was reported as the
     constant -45. Ordinary MSX BASIC, where a true comparison is -1, so `-n * (cond)`
     emits character n or nothing and never leaves 0..255. **The falsifier reported
-    five violations and all five were its own defect**, and it had shipped three
-    hours earlier. Their verdict, which is the rule: a falsifier that reports
-    violations the corpus does not contain is worse than none, because it is
-    trusted.
+    five violations and all five were its own defect**, three hours after shipping.
+    Their verdict is the rule: a falsifier that reports violations the corpus does
+    not contain is worse than none, because it is trusted.
 
-    The fix is the transferable half. "The constant must be the WHOLE operand" can
-    be tested two ways -- enumerate the terminators that end an operand, or reject
-    on any continuation operator -- and they inverted it on purpose, because the two
-    incompletenesses fail in opposite directions. **Missing a terminator INVENTS a
-    constant. Missing a continuation yields None.** Neither list will ever be
-    complete, so completeness is not the axis to optimise. Only one of the two
-    degrades toward silence, and silence is the failure item 3 gives you a way to
-    count.
+    **The obvious approach was tried FIRST and it was the wrong one.** They wrote
+    the enumeration, `CLOSERS = (0x29, 0x2C)`, and it failed inside about thirty
+    seconds against a real corpus case -- `IF STICK(0) = 1 THEN`, where `THEN` ends
+    an operand and the list lacked it. The inversion came after that, not before.
+
+    **The near-miss is the content of this item.** Adding `THEN` to the list would
+    have worked. It would have passed, it would have looked like the fix, and it
+    would have left the next missing terminator free to invent a constant later.
+    The repair that closes the class instead of the instance is in the `controls.py`
+    comment, quoted rather than reconstructed:
+
+        enumerating everything that can END an operand means listing ) , THEN :
+        AND OR and end-of-line, and missing one produces a FALSE constant. Missing
+        a continuation instead produces None, which this tool already counts as a
+        variable or an expression -- a real answer. Err toward None.
+
+    That two-failure-directions reasoning is theirs. The generalisation that
+    **completeness was never the axis, since neither list is ever complete**, is
+    mine and they neither said nor thought it; it is recorded as a separate claim
+    rather than folded into the quote, because a reconstruction attributed to
+    someone else is a fact about them that they cannot correct once it is in a file.
+    Both readings agree on the move: of two incomplete lists, prefer the one whose
+    gaps degrade toward None, because silence is the failure item 3 gives you a way
+    to count.
 
 The through-line, and it is §8's one layer out: **an instrument reports on itself,
 not on the world.** Exit 0 means the tool ran. An empty list means the tool had
