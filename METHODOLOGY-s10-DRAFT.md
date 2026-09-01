@@ -732,6 +732,39 @@ argument for the section existing.
     answer with more conviction behind it. **Attention is not the scarce resource.
     A second, differently-shaped observation is.**
 
+20. **A success message over a no-op is the strongest form of this defect, because
+    it does not require the reader to infer anything.** Every other item here asks
+    someone to misread a silence. This one hands them a sentence saying the thing
+    was done.
+
+    `coord.py claim <resource> --note "..."` on a resource you already hold prints
+    **`claimed <resource>`** and discards the note. There is no update verb; the new
+    note is built into `meta`, `try_claim` fails because the resource is held, and
+    the value is dropped. sunblade2000-publish measured it after going looking to
+    refute it, having believed they updated a note that evening. They had not: a
+    correction reading "18 artifacts on 11 discs, not 18+18 across 26" silently did
+    not take, and the old wrong note stood until they released the claim outright.
+    Their summary is the item: **a tool that accepts the command and does nothing.**
+
+    **The second half is worse than the missing verb, and it is a COUPLING.** The
+    only workaround is release-then-reclaim, which resets `ts`. `board` flags a
+    claim stale at two hours. So updating a note makes a six-hour hold read as four
+    seconds, and the mechanism that keeps a note honest is the same mechanism that
+    hides how long you have held the thing. **The board's staleness signal and its
+    note-freshness signal are coupled in the wrong direction: you cannot improve one
+    without destroying the other, and the diligent seat is the one that looks
+    freshest.** A conscientious holder and an abandoned one become indistinguishable
+    at exactly the moment the conscientious one updates.
+
+    Written from the inside: this seat's own `jp-tools:check-py-exit-codes` claim
+    read **5m** on the board immediately after a note correction, having been held
+    far longer. The entry above is not a hazard observed in someone else's practice.
+
+    The general rule, and it is the one worth carrying out of this section: when a
+    tool offers no way to correct a record, people do not become more careful. They
+    stop correcting. **Look for the coupling before blaming the discipline** -- and
+    if the only route to an honest record destroys a different signal, the staleness
+    you are seeing is a property of the tool, not of the people using it.
 Joe, 2026-09-01, on this section's whole subject, and it is better than the
 sentence that used to open here:
 
