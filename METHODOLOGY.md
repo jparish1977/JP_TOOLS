@@ -20,6 +20,16 @@ Domain logic belongs in a framework-zero core. Everything that touches the outsi
 
 This isn't new theory. It's hexagonal architecture / ports-and-adapters, applied strictly enough that the separation actually survives contact with deadlines.
 
+### This document is expected to be tested
+
+Joe's rule, 2026-09-01: **like everything else we do, the methodology is expected to be tested.** Everything above is stated with more confidence than any of it has earned permanently, and that is deliberate -- a rule hedged into vagueness cannot be checked. The confidence is a claim, not a status.
+
+So a conflict with this document is **a test, not a verdict.** When a proposal clashes with something written here, that encounter has two possible outcomes and nobody gets to assume which: either the proposal is wrong, or this is. Saying no therefore carries two burdens -- demonstrate that the conflict is real, and demonstrate *which side of it fails*. "It goes against the methodology" is an appeal to authority wearing a rule's clothes, and on its own it is not an answer.
+
+It is proven by use and disproven the same way. That is not a slogan; it is the only test this document has ever passed. §2.8 exists because Joe stated it and this file's author argued it down three times before measuring anything -- the measurement then agreed with him. The fleet's verification ledger was refused by roughly a dozen sessions on reasoning, force-fed once, and adopted so hard it needed a brake threat. In both cases the argument lost to a trial, and in both cases the losing argument was the careful one.
+
+Which is why an unproven rule here says so. A claim with no measured instance is written as a claim with no measured instance, and stays in that state until someone produces one or kills it. A document that only ever wins its arguments is not being tested by them.
+
 ---
 
 ## 2. Principles
