@@ -49,21 +49,42 @@ def load(name: str, path: Path):
     return module
 
 
+class EnvironmentUnavailable(RuntimeError):
+    """The tools are installed but this machine cannot build the fixture."""
+
+
 def build_image(directory: Path) -> Path:
     """A 20MB NTFS volume holding an empty file and a normal one."""
     image = directory / "test.ntfs"
     with open(image, "wb") as handle:
         handle.truncate(20 * 1024 * 1024)
-    subprocess.run(["mkntfs", "-F", "-q", "-L", "jptest", str(image)],
-                   check=True, capture_output=True)
+    # check=False plus an explicit raise: on a machine where the tools exist
+    # but the environment cannot build an image, check=True raised an uncaught
+    # CalledProcessError and turned CI red for a reason unrelated to any diff.
+    # A missing capability is a SKIP, not a failure.
+    made = subprocess.run(["mkntfs", "-F", "-q", "-L", "jptest", str(image)],
+                          check=False, capture_output=True)
+    if made.returncode != 0:
+        raise EnvironmentUnavailable(
+            f"mkntfs failed: {made.stderr.decode('utf-8', 'replace').strip()[:200]}")
 
     empty = directory / "empty.bin"
     empty.touch()
     small = directory / "small.bin"
     small.write_text("hello world")
+    # ntfscp is version-sensitive and fails on some ntfs-3g builds. check=True
+    # here made the skip-don't-fail fix half-applied: mkntfs was converted and
+    # this loop was not, so a runner where the tools exist but ntfscp fails
+    # turns CI red for a reason unrelated to any diff -- exactly what the
+    # mkntfs change was written to prevent.
     for source, name in ((empty, "/empty.bin"), (small, "/small.bin")):
-        subprocess.run(["ntfscp", "-f", str(image), str(source), name],
-                       check=True, capture_output=True)
+        copied = subprocess.run(["ntfscp", "-f", str(image), str(source), name],
+                                check=False, capture_output=True)
+        if copied.returncode != 0:
+            raise EnvironmentUnavailable(
+                f"ntfscp failed on {name}: "
+                f"{copied.stderr.decode('utf-8', 'replace').strip()[:200]}"
+            )
     return image
 
 
@@ -76,9 +97,17 @@ def add_directories(image: Path, mountpoint: Path) -> bool:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
     try:
+        # Guarded like the mount itself: a loop image that mounts read-only or
+        # degraded raises here, and an escaping OSError turns CI red for an
+        # environment problem -- the failure the mkntfs and ntfscp conversions
+        # in this same diff were written to prevent, one function further on.
         (mountpoint / "realdir" / "deeper").mkdir(parents=True, exist_ok=True)
         (mountpoint / "realdir" / "inner.bin").touch()
         (mountpoint / "realdir" / "deeper" / "deep.bin").touch()
+    except OSError:
+        # A read-only or degraded mount lands here. The caller treats False as
+        # "directory cases not exercised" and carries on, which is a SKIP.
+        return False
     finally:
         subprocess.run(["umount", str(mountpoint)], check=False, capture_output=True)
     return True
@@ -102,7 +131,11 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         directory = Path(tmp)
-        image = build_image(directory)
+        try:
+            image = build_image(directory)
+        except EnvironmentUnavailable as exc:
+            print(f"SKIP: cannot build an NTFS fixture here ({exc})")
+            return 0
         have_dirs = add_directories(image, directory / "mnt")
 
         rows = extract.listdir(str(image), "/", 30)

@@ -5,3 +5,8 @@ composer.lock
 __pycache__/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/

@@ -1,0 +1,29 @@
+# Coverage config for JP_TOOLS.
+#
+# branch: a statement-only number counts an `if` as covered when only one side
+# ever ran, and one-sided branches are where this repo's bugs live.
+#
+# parallel: the invariant and acceptance suites drive the tool as a SUBPROCESS,
+# which is not traced without this plus COVERAGE_PROCESS_START and the .pth CI
+# installs. Measured 2026-08-13: without it spool-audit.py read 71%, with it
+# 82%. Eleven points of real testing looked like a gap, and the obvious fix for
+# a gap is to add a pragma, which is how code stops being looked at.
+[run]
+branch = True
+parallel = True
+
+[report]
+# Deliberately empty of the default `pragma: no cover` rule. Honouring it would
+# hide exactly the region this repo got burned by: on 2026-08-13 the exemptions
+# covered 430 lines of 1350 holding 51 branches, and every serious defect on
+# that branch came from inside them. Excluding them scored spool-audit.py at
+# 81% while the honest number was 71%.
+#
+# So the pragma no longer buys a better number. It is a documented claim,
+# policed by check.py's `no-cover` check and read with list-exemptions.py, and
+# coverage measures the code regardless. `(?!)` is a lookahead that can never
+# match, which is how you say "exclude nothing".
+exclude_lines =
+    (?!)
+show_missing = True
+skip_covered = False
