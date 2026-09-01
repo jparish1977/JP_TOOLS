@@ -334,15 +334,15 @@ def temp_child_note(
     """
     if is_symlink:
         return (
-            f"{label}/{name} -> {target} (symlink, NOT followed; "
+            f"{label}/{safe_name(name)} -> {safe_name(target)} (symlink, NOT followed; "
             "not examined, and deleting the link would not remove the target)"
         )
     if is_dir:
         # Callers recurse into real directories. This branch remains for a
         # directory that cannot be read, and for callers that do not descend.
-        return f"{label}/{name}/ (subdirectory, not examined)"
+        return f"{label}/{safe_name(name)}/ (subdirectory, not examined)"
     if not is_regular:
-        return f"{label}/{name} (not a regular file, not examined)"
+        return f"{label}/{safe_name(name)} (not a regular file, not examined)"
     return None
 
 
@@ -886,13 +886,13 @@ def _walk_temp(
     """
     if depth >= MAX_TEMP_DEPTH:
         unexamined.append(
-            f"{label}/{prefix} (nested deeper than {MAX_TEMP_DEPTH}, not examined)"
+            f"{label}/{safe_name(prefix)} (nested deeper than {MAX_TEMP_DEPTH}, not examined)"
         )
         return
     try:
         children = sorted(directory.iterdir())
     except OSError as exc:
-        unexamined.append(f"{label}/{prefix} (unreadable: {exc.__class__.__name__})")
+        unexamined.append(f"{label}/{safe_name(prefix)} (unreadable: {exc.__class__.__name__})")
         return
 
     for f in children:
@@ -907,10 +907,10 @@ def _walk_temp(
             # Not a race. A directory readable but not traversable lands here,
             # and calling it "vanished" sends the user hunting a busy spool
             # instead of running sudo.
-            unexamined.append(f"{label}/{name} (permission denied on stat)")
+            unexamined.append(f"{label}/{safe_name(name)} (permission denied on stat)")
             continue
         except OSError:
-            unexamined.append(f"{label}/{name} (vanished while reading)")
+            unexamined.append(f"{label}/{safe_name(name)} (vanished while reading)")
             continue
 
         link = stat.S_ISLNK(st.st_mode)
@@ -1052,7 +1052,7 @@ def read_spool(
     try:
         if default_tmp.is_symlink():
             unexamined.append(
-                f"{TEMP_SUBDIR} -> {os.readlink(default_tmp)} "
+                f"{TEMP_SUBDIR} -> {safe_name(os.readlink(default_tmp))} "
                 "(TempDir is a symlink, NOT followed)"
             )
             tdir = None
@@ -1109,11 +1109,11 @@ def read_spool(
         try:
             st = f.lstat()
         except PermissionError:
-            unexamined.append(f"{n} (permission denied on stat)")
+            unexamined.append(f"{safe_name(n)} (permission denied on stat)")
             suspect.append(n)
             continue
         except OSError:
-            unexamined.append(f"{n} (vanished while reading)")
+            unexamined.append(f"{safe_name(n)} (vanished while reading)")
             suspect.append(n)
             continue
         tgt = "?"
@@ -1137,7 +1137,7 @@ def read_spool(
             try:
                 extra.append(TempFile(name=n, size=st.st_size, head=_head(f)))
             except OSError:
-                unexamined.append(f"{n} (vanished while reading)")
+                unexamined.append(f"{safe_name(n)} (vanished while reading)")
 
     return Listing(
         verdict,

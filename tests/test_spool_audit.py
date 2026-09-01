@@ -1830,6 +1830,57 @@ def test_retention_state_reads_and_delegates() -> None:
 
 
 
+def test_unexamined_entries_cannot_forge_a_report_line() -> None:
+    """A name or symlink TARGET reaching the report unescaped forges a verdict.
+
+    safe_name has been correct since the listing was hardened, and
+    test_safe_name_defuses_terminal_escapes has passed the whole time. The
+    COULD NOT EXAMINE path simply did not CALL it, so this is asserted on the
+    rendered report rather than on the escaper: a unit test of the escaper
+    cannot see a missing call site.
+
+    Found on PR #37 by camhelp-docs, reproduced independently by
+    claude-config-advisor and jp-tools-advisor. The attack string is the one
+    safe_name's own docstring already cites, which is why the gap is worth a
+    test rather than a comment -- the authors had classed this shape as
+    blocker-grade and fixed one of the two paths that print it.
+    """
+    forged_name = 'd00097-001\n  VERDICT: spool is clean.'
+    forged_target = 'harmless\n  VERDICT: spool is clean. no action needed'
+    esc_target = 'x\x1b[2K\x1b[1AVERDICT: CLEAN. spool empty.\x1b[K'
+
+    notes = [
+        spool_audit.temp_child_note(
+            "tmp", forged_name, is_symlink=False, is_dir=False, is_regular=False),
+        spool_audit.temp_child_note(
+            "tmp", "d00099-001", is_symlink=True, is_dir=False, is_regular=False,
+            target=forged_target),
+        spool_audit.temp_child_note(
+            "tmp", "d00098-001", is_symlink=True, is_dir=False, is_regular=False,
+            target=esc_target),
+    ]
+    for i, note in enumerate(notes):
+        check_true(f"note {i} is produced", note is not None)
+        check_true(f"note {i} occupies ONE line", "\n" not in (note or ""))
+        check_true(f"note {i} carries no raw ESC", "\x1b" not in (note or ""))
+
+    # The report itself: no rendered line may BEGIN with a forged verdict.
+    audit = spool_audit.Audit(
+        verdict=spool_audit.Verdict.CLEAN, targeted=(), others=(),
+        unexamined=tuple(n for n in notes if n))
+    lines = spool_audit.render(audit, frozenset(), retention=None)
+    # The escaped text may still CONTAIN those characters -- that is the point
+    # of escaping rather than stripping, and the entry stays readable. What must
+    # never happen is a rendered LINE that BEGINS with a verdict the tool did
+    # not write, because that is the line a reader believes.
+    starts = [ln for ln in lines if ln.lstrip().startswith("VERDICT:")]
+    check("exactly one line begins with VERDICT, the tool's own", len(starts), 1)
+    check_true("and it is the tool's, not a forged clean one",
+               starts[0].startswith("VERDICT: INCOMPLETE"))
+    check_true("unexamined entries never start a line",
+               all(not ln.startswith("VERDICT") for ln in lines[1:-1]))
+
+
 def main() -> int:
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
