@@ -546,7 +546,7 @@ of them because they treated adoption as an event rather than a rate.
 
 2. **Record the baseline the same way the gate measures, and hold the line at
    "no worse".** Ratcheting needs a number to ratchet against. Commit a
-   **per-file** run — `check.py --record-baseline` — and have the gate compare
+   **per-file** run (`check.py --record-baseline`) and have the gate compare
    against it rather than against zero. Without that stored number, a file that
    got worse and a file that was always bad are indistinguishable, so no one
    can tell progress from noise and the effort stops being visible to anyone
@@ -561,9 +561,9 @@ of them because they treated adoption as an event rather than a rate.
    nobody had touched since the baseline was taken.
 
    The signature is worth knowing, because it will happen again to someone.
-   Only the tools that **resolve across files** move between the two modes —
-   `mypy` and `phpstan`. The ones that judge a file in isolation — `ruff`,
-   `phpcs`, `rector` — were byte-identical on every file. If a baseline
+   Only the tools that **resolve across files** move between the two modes:
+   `mypy` and `phpstan`. The ones that judge a file in isolation, `ruff`,
+   `phpcs` and `rector`, were byte-identical on every file. If a baseline
    disagrees with a fresh run on exactly the import-sensitive tools and on
    nothing else, suspect scope before you suspect versions.
 
@@ -574,7 +574,7 @@ of them because they treated adoption as an event rather than a rate.
    nothing downstream contradicts them. Say per-file, and say why, or it gets
    helpfully "improved" back.
 
-   A per-file baseline is the **worse** measurement for `mypy` and `phpstan` —
+   A per-file baseline is the **worse** measurement for `mypy` and `phpstan`:
    in isolation they cannot resolve imports and report more. That is the right
    trade anyway: the gate can only compare against what it can reproduce, and
    the excess is real findings rather than noise. On `audit_roms.py` the extra
