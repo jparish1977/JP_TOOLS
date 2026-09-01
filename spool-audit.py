@@ -985,7 +985,7 @@ def classify_top(e: TopEntry) -> TopDecision:
         # document. A name matching neither pattern is ignored by classify()
         # anyway, so it is left alone rather than given a second meaning here.
         return TopDecision(
-            note=(note or f"{e.name} (not examined)").replace("./", "", 1),
+            note=(note or f"{safe_name(e.name)} (not examined)").replace("./", "", 1),
             suspect=named,
         )
     if named:
