@@ -528,6 +528,44 @@ argument for the section existing.
     test rather than as a claim to be graded** -- the version of it that turns out
     wrong is still the version that gets run, and running it is the whole value.
 
+    **None of which you can do if your shell hands you the wrong number.** `$?`
+    after a pipeline is the LAST command's status, so `tool ... | tail -12; echo $?`
+    reports on `tail`, which essentially always succeeds. It manufactures a clean
+    exit in precisely the investigation where a dirty one is what you are hunting
+    for, and the reading looks like the good news you were hoping not to find.
+
+    Recorded because it happened twice on 2026-09-01 inside this one investigation.
+    romtools-lead read a control's exit as 0 and nearly reported it as an overloaded
+    success; it returns 1 correctly and they had piped it through `tail -12`, their
+    third instance of the family that day. The first table in item 17 above was
+    ALSO wrong on its first run here, for the same reason and in the same hour --
+    `ruff check . 2>&1 | tail -10; echo "exit=$?"` printed `exit=0` for the
+    unresolvable-extend case that actually exits 2, and the numbers above exist only
+    because it got re-run without the pipe. Use `PIPESTATUS`, or do not pipe the
+    command whose status is the measurement.
+
+18. **When a check cannot be exhaustive, choose the direction its own gaps fail
+    in.** Items 1 to 17 are about reading an instrument honestly. This is the one
+    design decision that determines what a future gap in your own will do.
+
+    romtools-lead, 2026-09-01: a CHR$ falsifier whose `_const` read a PREFIX of an
+    expression as the argument, so `CHR$(-45 * (A$ = ""))` was reported as the
+    constant -45. Ordinary MSX BASIC, where a true comparison is -1, so `-n * (cond)`
+    emits character n or nothing and never leaves 0..255. **The falsifier reported
+    five violations and all five were its own defect**, and it had shipped three
+    hours earlier. Their verdict, which is the rule: a falsifier that reports
+    violations the corpus does not contain is worse than none, because it is
+    trusted.
+
+    The fix is the transferable half. "The constant must be the WHOLE operand" can
+    be tested two ways -- enumerate the terminators that end an operand, or reject
+    on any continuation operator -- and they inverted it on purpose, because the two
+    incompletenesses fail in opposite directions. **Missing a terminator INVENTS a
+    constant. Missing a continuation yields None.** Neither list will ever be
+    complete, so completeness is not the axis to optimise. Only one of the two
+    degrades toward silence, and silence is the failure item 3 gives you a way to
+    count.
+
 The through-line, and it is §8's one layer out: **an instrument reports on itself,
 not on the world.** Exit 0 means the tool ran. An empty list means the tool had
 nothing to say. Neither is a statement about the thing you were pointing it at, and
