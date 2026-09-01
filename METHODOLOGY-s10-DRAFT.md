@@ -711,7 +711,31 @@ argument for the section existing.
     answer with more conviction behind it. **Attention is not the scarce resource.
     A second, differently-shaped observation is.**
 
-The through-line, and it is §8's one layer out: **an instrument reports on itself,
-not on the world.** Exit 0 means the tool ran. An empty list means the tool had
+Joe, 2026-09-01, on this section's whole subject, and it is better than the
+sentence that used to open here:
+
+> a knife is meant to be sharp, if it cuts you then you have mishandled it
+
+**Nothing in this section is a broken instrument.** `iw station dump` exits 0 and
+prints nothing because the driver implements `get_station` and not
+`dump_station`. ruff exits 2 on a config it cannot load. cppcheck exits 0 whether
+it finds defects or not, and 1 when it refuses, which is its documented design.
+The overloaded-empty lint skips results that escape their scope on purpose, as a
+false-positive budget. Every one of those is a sharp knife. Every failure here was
+handling.
+
+That holds for the items about instruments you BUILT too, once you see where the
+blade is. The knife in `coverage_gate` was the subprocess API and the mishandling
+was encoding a failed parse as -1; the knife in the CHR$ falsifier was the parser
+and the mishandling was reading a prefix as the whole operand.
+
+**The one thing it does not license** is treating "the tool is fine, you handled
+it wrong" as a way to wave off a real incompatibility. stylelint 17 on Node
+v18.19.1 genuinely cannot start, and that is a defect in somebody's version
+matrix, not a handling error. What handling turned it into was a **`"pass"`**, and
+that half is ours. Both are true, and only the second one is in our gift.
+
+Which is the through-line, and it is §8's one layer out: **an instrument reports
+on itself, not on the world.** Exit 0 means the tool ran. An empty list means the tool had
 nothing to say. Neither is a statement about the thing you were pointing it at, and
 the gap between those two readings is where a night's work goes.
