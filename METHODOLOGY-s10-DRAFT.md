@@ -620,11 +620,36 @@ argument for the section existing.
     the obvious remediation -- hand `result.returncode` to the function that already
     handles it -- fails here exactly as it fails on cppcheck.
 
-    Three conventions among six runners measured:
+    **And phpcs is worse than either, because there the naive fix is not inert --
+    it BREAKS THE WORKING CASE.** Measured with check.py's own standard:
+
+        dirty file        rc=2   6 errors, 6 fixable
+        tidy file         rc=0   clean
+        target missing    rc=3   no JSON
+        bad standard      rc=3   no JSON
+
+    `rc=2` there is an ORDINARY FINDINGS RUN. Under `not in (0, 1)` it reports
+    `"error"`, so handing phpcs its returncode converts every routine lint result
+    into a tool failure. On cppcheck and stylelint the naive repair changes nothing;
+    on phpcs it actively corrupts the case that works today. **Three of the ten
+    sites, and the three fail the same repair in three different directions.**
+
+    Four conventions among nine runners measured:
 
         ruff, prettier      0 clean, 1 findings, 2 refusal   (0,1) rule CORRECT
         cppcheck            0 clean AND findings, 1 refusal   (0,1) rule WRONG
         stylelint via node  0 ran, nonzero = runner crashed    (0,1) rule WRONG
+        phpcs               0 clean, 2 findings, 3 refusal    (0,1) rule HARMFUL
+
+    **The phpcs numbers were wrong on their first four probes, and the reason is
+    item 2 above, broken by the person who wrote it.** Those probes ran raw phpcs;
+    `check.py` invokes it with `--standard=configs/phpcs.xml`. Under phpcs's PEAR
+    default a deliberately tidy file reported five errors and one warning -- the
+    same counts as the deliberately dirty one, by coincidence -- and that near-match
+    was nearly written up as an anomaly worth investigating. It was PEAR demanding
+    `@category`, `@package`, `@author`, `@license` and `@link`. A control that does
+    not run the instrument's configuration does not merely measure less; it
+    manufactures findings that look like discoveries.
 
     **The sharper half is that the lint DID flag stylelint** at :257, unlike
     cppcheck. So it named the right site and the standard fix for that site is
