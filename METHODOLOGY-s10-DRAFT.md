@@ -579,6 +579,37 @@ argument for the section existing.
     unrepresentative of the model both were built from** -- and it is the one to
     measure by hand.
 
+    **Measuring the rest found a SECOND deviation, and this one is not synthetic.**
+    Installing the five runners this box was missing made the stylelint arm
+    *appear* to work and not work. stylelint 17 uses `import ... with { type:
+    'json' }`, Node here is v18.19.1, and the runner dies on startup. Measured
+    against `a{color:#FFF;;}`, a file with several real violations:
+
+        node jp_stylelint.mjs bad.css   ->  rc=1, stdout 0 bytes, stderr 837
+        check.py bad.css --lang css     ->  stylelint status "pass", 0 issues
+
+    A manufactured pass sitting next to a genuine `fail` from prettier in the same
+    output, so the block looks healthy. No broken config, no contrived input: an
+    adopter whose Node lags a major version gets this, silently, today.
+
+    **And rc=1 is the crash.** These arms shell out to a Node script, so a nonzero
+    code means the RUNNER died, while findings come back as JSON on stdout with
+    rc=0. Under the `(0, 1)` rule that crash reads as "found violations", falls
+    through to `"fail" if issues else "pass"`, and with no issues it is a pass. So
+    the obvious remediation -- hand `result.returncode` to the function that already
+    handles it -- fails here exactly as it fails on cppcheck.
+
+    Three conventions among six runners measured:
+
+        ruff, prettier      0 clean, 1 findings, 2 refusal   (0,1) rule CORRECT
+        cppcheck            0 clean AND findings, 1 refusal   (0,1) rule WRONG
+        stylelint via node  0 ran, nonzero = runner crashed    (0,1) rule WRONG
+
+    **The sharper half is that the lint DID flag stylelint** at :257, unlike
+    cppcheck. So it named the right site and the standard fix for that site is
+    still wrong. A detector can be correct about WHERE and silent about WHETHER THE
+    OBVIOUS REPAIR WORKS, and nothing about a green lint run distinguishes the two.
+
     The table is kept whole rather than compressed to its conclusion. The
     conclusion is one line and cheap to restate; the seven rows are what a later
     reader cannot re-derive without a temp directory and an afternoon, and a
