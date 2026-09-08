@@ -213,7 +213,13 @@ Joe's rule, 2026-09-08: **"pbq and pbq-grep should be part if methodolgy in spir
 
     ~/projects/projectbook/bin/pbq-grep --phrase TERM -- <your command>
 
-Three exit codes, and the middle one is why a shell `||` cannot do this job: `0` the book has it and your pattern filters the returned rows with no file opened; `1` it looked and found nothing, so your command runs; `2` it COULD NOT LOOK. **Treating `2` as `1` converts "I could not look" into "it is not there"**, which is the same collapse §2.8 forbids in a parallel sweep and §10 forbids in a denominator. Three outcomes, never two, is not a coincidence between those sections. It is the same rule arriving at a third instrument.
+**The exit codes, measured on 2026-09-08 rather than copied from the description, because they are not what the description says.** `2` means pbq COULD NOT LOOK -- a bad root, a missing collection, a filter matching no book -- and the fallthrough command does not run. That code is the important one, and treating it as "found nothing" converts *I could not look* into *it is not there*, the same collapse §2.8 forbids in a parallel sweep and §10 forbids in a denominator.
+
+Otherwise the wrapper **passes your command's own exit status through verbatim**: a fallthrough exiting 3 yields 3, exiting 1 yields 1, exiting 0 yields 0. Verified in all three directions. It does NOT return a reserved `1` meaning "the book looked and found nothing", which is what `search-the-record-first` currently documents; that reads as true because a `grep` fallthrough returns 1 for no-match anyway, so the description and the behaviour agree on the commonest case and diverge silently everywhere else.
+
+**So `0` is ambiguous and must not be branched on.** It means either *the book answered and your command never ran*, or *your command ran and succeeded*. Those are different facts about the world and the exit code cannot tell them apart. Distinguish them by whether the fallthrough produced output, not by the status. A caller that treats `0` as "the book had it" will read its own successful grep as a corpus hit.
+
+That ambiguity is worth stating plainly, because it is the enforcement tool for this principle exhibiting the two-outcomes-where-three-are-needed shape the principle exists to catch. Reported to the tool's owners; recorded here as measured behaviour rather than as a defect ruling, which is theirs to make.
 
 **A zero is not an absence until you have checked the shelf.** `pbq scope --root <collection>` says what is staged and when it was built. A class that was never staged returns exactly the clean nothing a real absence returns, and a collection built before the thing you are asking about cannot answer at any confidence. Measured on this fleet: a seat searched one root holding 2 books, read `NOTHING MATCHED` as a fact about the world, and the four roots together held 1,011.
 
