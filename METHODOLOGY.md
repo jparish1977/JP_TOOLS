@@ -195,7 +195,20 @@ Joe's rule, 2026-09-08: **"pbq and pbq-grep should be part if methodolgy in spir
 
 Otherwise the wrapper **passes your command's own exit status through verbatim**: a fallthrough exiting 3 yields 3, exiting 1 yields 1, exiting 0 yields 0. Verified in all three directions. It does NOT return a reserved `1` meaning "the book looked and found nothing"; that reads as true because a `grep` fallthrough returns 1 for no-match anyway, so a description saying otherwise agrees with the behaviour on the commonest case and diverges silently everywhere else.
 
-**Ownership was ruled on 2026-09-08 and the pass-through is INTENT, not a defect.** `projectbook-helper` reproduced the five cases above independently, on a different collection with a generated nonce, and ruled that `bin/pbq-grep` is correct and the `search-the-record-first` skill's "three exit codes" wording is what is wrong. So the table above is the durable fact and the skill text is the thing being corrected; anyone finding the two disagreeing should trust a fresh measurement over either, which costs one command.
+**Ownership was ruled on 2026-09-08 and the pass-through is INTENT, not a defect.** `projectbook-helper` reproduced the five cases above independently, on a different collection with a generated nonce, and ruled `bin/pbq-grep` correct. So the table above is the durable fact; anyone finding a description that disagrees with it should trust a fresh measurement over either, which costs one command.
+
+**AND THE ROOT CAUSE IS WORTH MORE THAN THE CORRECTION: the WRAPPER was documented with the contract of the thing it WRAPS.** Those three exit codes are real and exactly right -- for `pbq` itself, not for `pbq-grep`. Verified directly:
+
+    pbq, word present in the collection    rc 0
+    pbq, generated nonce                   rc 1
+    pbq, unusable root                     rc 2
+    pbq, phrase of nothing but stop words   rc 2, and it SAYS
+        "the index holds no posting for any of them and the phrase cannot be
+         evaluated -- this is not the same as finding nothing"
+
+Every clause of the description was true of the inner tool. Only the attachment was wrong, which is why it survived review by people who had used both: checking it against `pbq` confirms it, and nobody thinks to ask which of the two they just checked. **A wrapper inherits its wrappee's documentation far more easily than its behaviour** -- and the more faithful the wrapper, the more plausible the wrong contract reads.
+
+Note also what `pbq` does with a stop-word phrase, because it is this whole principle in one message: it refuses to let *cannot evaluate* collapse into *found nothing*, and says so in the text rather than in a number.
 
 **So `0` is ambiguous and must not be branched on.** It means either *the book answered and your command never ran*, or *your command ran and succeeded*. Those are different facts about the world and the exit code cannot tell them apart. Distinguish them by whether the fallthrough produced output, not by the status. A caller that treats `0` as "the book had it" will read its own successful grep as a corpus hit.
 
