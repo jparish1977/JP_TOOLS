@@ -197,6 +197,30 @@ This passage was wrong twice before it was right, both times in the direction of
 
 **And the principle AS A WHOLE is untested. Joe's verdict on it is the one to record: "it should work, guess we see."** It is written from a single day -- one review round, five tools, two seats -- and has not been through a cycle. Per §1 that makes it a claim rather than a status, and it will be proven by use or disproven the same way.
 
+### 2.10 Check the record before you build
+
+Every other principle here governs code that is being written. This one fires before that, and it is the only one whose failure costs the whole piece of work rather than a review round.
+
+Joe's rule, 2026-09-08: **"pbq and pbq-grep should be part if methodolgy in spirit if not in name, they are enforment tools, check the record is the methodology."**
+
+**The failure is building something that already exists, and it never announces itself, because the thing you build works.** No gate goes red. Static analysis passes, coverage passes, the tests you wrote pass. A duplicate is not a defect in any of the properties §2.5 measures, so nothing in the mechanical half of this document can see it. It is found by another person, or not at all.
+
+**This repo's own instance, and it is the most expensive one on record here.** `spool-audit.py` grew `--fix` and `--purge` halves that set `PreserveJobFiles No`, restarted cupsd and deleted the leftovers. That is `cancel -a -x` plus one config line, and CUPS already does it correctly. Fifteen review rounds found roughly 112 things, of which ruff and mypy caught none. Joe cut the feature himself on 2026-08-14, 1,573 lines to 1,018 -- commit `d36c661`, whose subject is this principle in six words: *Cut spool-audit.py to the half that had no equivalent*. The deletion removed the exemption region, the seams it needed, and every dangerous bug at once: a `--fix` that could destroy a device node, one that truncated `cupsd.conf` to zero bytes, a `--purge` that followed a symlinked TempDir out of the audited directory.
+
+**Not one of the fifteen rounds proposed it.** A review asks whether the code is correct. It does not ask whether the code should exist, and by round fifteen nobody is asking either.
+
+**Enforcement is mechanical, on the same footing as §2.5, which is what makes this a principle here rather than advice.** `hook-book-first` refuses bare `grep`, `rg`, `ugrep` and `ack` fleet-wide, with no flag, marker or comment that lifts it -- a person edits the hook. The ladder is `~/projects/projectbook/bin/pbq-grep`, **by full path**, since it is not on `PATH` even though `pbq` is:
+
+    ~/projects/projectbook/bin/pbq-grep --phrase TERM -- <your command>
+
+Three exit codes, and the middle one is why a shell `||` cannot do this job: `0` the book has it and your pattern filters the returned rows with no file opened; `1` it looked and found nothing, so your command runs; `2` it COULD NOT LOOK. **Treating `2` as `1` converts "I could not look" into "it is not there"**, which is the same collapse §2.8 forbids in a parallel sweep and §10 forbids in a denominator. Three outcomes, never two, is not a coincidence between those sections. It is the same rule arriving at a third instrument.
+
+**A zero is not an absence until you have checked the shelf.** `pbq scope --root <collection>` says what is staged and when it was built. A class that was never staged returns exactly the clean nothing a real absence returns, and a collection built before the thing you are asking about cannot answer at any confidence. Measured on this fleet: a seat searched one root holding 2 books, read `NOTHING MATCHED` as a fact about the world, and the four roots together held 1,011.
+
+**IN SPIRIT IF NOT IN NAME is doing real work in Joe's sentence, and the spool-audit case is why.** `pbq` searches this fleet's own record. It would not have found `cancel -a -x`, because that is CUPS' manual, not ours. The principle is **find out what already exists before you build it**, and the instrument varies with the question: the fleet record for anything we have done before, the platform's own documentation for anything the platform might already do, the tracker for anything already decided and disposed of. Reaching for the wrong one of those and getting a clean nothing is the failure mode, not an exemption from the rule.
+
+**Status per §1, stated because this principle arrives with more evidence behind it than §2.9 and less than §2.5.** The mechanism is proven: the refusal is wired, unbypassable, and it fired on the author of this section while the section was being researched, naming its own fix in the refusal text. What is NOT established is a JP_TOOLS-native cycle. The spool-audit instance is this repo's and it is real, but it was caught by Joe reading his own tool rather than by any search, so it demonstrates the cost of the failure and not yet the value of the cure. The fleet instances that demonstrate the cure are session tooling, not this codebase. That gap is the test this principle has still to pass.
+
 ---
 
 ## 3. The canonical exemplar: FileScanner
@@ -354,6 +378,8 @@ Principles are language-agnostic. Tools are language-specific. `check.py` auto-d
 ## 7. Starting a new project
 
 Checklist for greenfield work that should inherit this discipline:
+
+0. **Search before you scaffold (§2.10).** Ask the fleet record, the platform's own documentation, and the tracker whether this exists already. Numbered zero because it is the only step that can make the other nine unnecessary, and because it is the step whose omission never produces a failure -- a duplicate passes every gate below. `~/projects/projectbook/bin/pbq-grep --phrase TERM -- <command>`, by full path, and `pbq scope` before believing any zero.
 
 1. **Three-or-fewer packages.** Minimum: domain. If the project has IO, add infrastructure. If the project has a UI or CLI, add delivery. Don't start with one mega-package that mixes layers.
 
@@ -742,6 +768,8 @@ Things that look like they save time but defeat the methodology:
 - **Skipping the hook.** `git commit --no-verify` is sometimes legitimate (you're mid-refactor, CI will catch it). Make it rare. If you're doing it daily, the quality gate is misconfigured or the code has accumulated debt that should be paid.
 - **One mega-package.** Mixing domain, infrastructure, and delivery in one package makes the layering invisible. The layers are the point.
 - **Placeholder content where silence would do.** The aesthetic rule from the portfolio applies to APIs too. Don't synthesize fake data to fill a slot that's meant to be optional.
+- **Reimplementing what the platform, or this fleet, already does (§2.10).** The only anti-pattern on this list that passes every gate in §2.5, because a duplicate is correct code. `spool-audit.py`'s `--fix` was `cancel -a -x` plus one config line; fifteen review rounds priced the implementation and none of them asked whether it should exist. Search first, and treat "could not look" as distinct from "not there".
+- **Reading a search result as an answer.** A hit is an address: `collection / book / nid / title / snippet`. Summarising snippets back is the same error as quoting a grep hit instead of reading the function it points at, and a pointer that no longer resolves is a finding about the pointer rather than evidence the thing is gone.
 
 ---
 
@@ -751,11 +779,13 @@ Things that look like they save time but defeat the methodology:
 - `~/projects/iteration8-utilities/CLAUDE.md`, infrastructure layer rules (30 lines), and the FileScanner reference implementation itself.
 - `~/projects/iteration8-site/CLAUDE.md`, delivery layer rules, CSS token/adapter pattern (55 lines).
 - `find-dupes.php` in this repo, the composition root that consumes FileScanner.
-- `~/portfolio_notes/iteration8-design-doc.md`, the full content-and-aesthetic model for the portfolio site, including the silence rule and the planned MBE/spoken-word convergence.
-- `~/portfolio_notes/TODO.md`, live task state across all projects.
-- `~/mandelbrotexplorer/docs/JULIA_TUNNEL_LINEAGE.md`, displacement formulas as research hypotheses (domain example from MBE).
-- `~/projects/brots-alive/CONTINUATION.md`, same-math-different-medium example (domain example from Brots Alive).
-- `~/projects/iteration8-continuation.md`, live state of the production stack applying this methodology.
+- `~/portfolio_notes/iteration8-design-doc.md`, the full content-and-aesthetic model for the portfolio site, including the silence rule and the planned MBE/spoken-word convergence. **`jap-m18` only** -- `~/portfolio_notes/` exists on no other fleet machine.
+- `~/portfolio_notes/TODO.md`, live task state across all projects. **`jap-m18` only**, same as above.
+- `~/projects/mandelbrotexplorer/`, displacement formulas as research hypotheses (domain example from MBE). **The `JULIA_TUNNEL_LINEAGE.md` this line used to name resolves nowhere**, at either the old `~/mandelbrotexplorer/` path or the real one; the tree holds `julia-tunnel.html` and a `docs/` directory that does not contain it. Left pointing at the tree rather than deleted, because the subject is real and only the address is lost.
+- `~/projects/brots-alive/CONTINUATION.md`, same-math-different-medium example (domain example from Brots Alive). Verified present.
+- `~/projects/iteration8-continuation.md`, live state of the production stack applying this methodology. **Unverified: absent from `~/projects` on `joe-MacBookAir`.**
+
+**Five of the nine pointers above did not resolve on this box when checked on 2026-09-08, and that is a finding about this section rather than about the projects.** The `~/mandelbrotexplorer/` path is the instructive one: `CLAUDE.md` had already corrected exactly that path once, on 2026-09-06, after a session looked there, found nothing, and reported the tree as m18-only when it is on two machines. The same wrong address survived here because nothing checks a link in a document. Per §2.10 a pointer that does not resolve is a finding about the pointer, so verify before quoting one, and fix it where it was read.
 
 ---
 
