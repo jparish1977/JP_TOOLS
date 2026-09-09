@@ -232,6 +232,15 @@ Every clause of the description was true of the inner tool. Only the attachment 
 
 Note also what `pbq` does with a stop-word phrase, because it is this whole principle in one message: it refuses to let *cannot evaluate* collapse into *found nothing*, and says so in the text rather than in a number.
 
+**THE CONDITION THIS TABLE WAS MEASURED UNDER, which was missing until `projectbook-helper` asked the question of their own toolchain.** `pbq` resolves its DynaText tools through `PROJECTBOOK_TOOLS`, and when that is unset -- it was, for every seat on 2026-09-08 -- it falls through to `~/projects/dynatext-tools`, whatever branch that checkout happens to be on. On the night these numbers were taken that was `block-text-index-agrees-with-reader`, not `main`, and its `dtserve.py` moved mid-evening.
+
+Split the table by what that can reach, because it does not reach all of it:
+
+- **Unaffected:** the `2` refusal (no reader involved), the generated-nonce `1`, the stop-word `2`, and every `pbq-grep` pass-through row. These are the wrapper's and `pbq`'s own control flow.
+- **Exposed:** the `rc 0` hit row, because whether a term is *found* depends on which books the reader shelves. A shelf change could turn a hit into a miss, i.e. `0` into `1`.
+
+The exposure runs one way only -- a shelf change can hide a book, not invent one -- so a hit that returned `0` is still a hit. **The claim survives; the condition should have been stated with it.** A measured fact with an unrecorded environment is a borrowed description waiting to happen, which is this section's own subject arriving one level down.
+
 **So `0` is ambiguous and must not be branched on.** It means either *the book answered and your command never ran*, or *your command ran and succeeded*. Those are different facts about the world and the exit code cannot tell them apart. Distinguish them by whether the fallthrough produced output, not by the status. A caller that treats `0` as "the book had it" will read its own successful grep as a corpus hit.
 
 That ambiguity is worth stating plainly, because it is the enforcement tool for this principle exhibiting the two-outcomes-where-three-are-needed shape the principle exists to catch. Reported to the tool's owners; recorded here as measured behaviour rather than as a defect ruling, which is theirs to make.
