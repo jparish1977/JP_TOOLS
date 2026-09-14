@@ -1,5 +1,12 @@
 ## 10. Reading an instrument
 
+> **Draft, and where it goes.** This lands as §10. master's METHODOLOGY.md
+> already cites it by that number three times (the exit-code table "in §10",
+> "the denominator problem from §10"), while master's own §10 is Anti-patterns.
+> On adoption, Anti-patterns becomes §11 and Related reading §12. Until then those
+> three citations point at this file. Every claim below about CODE is dated to
+> when it was measured; where the code has been fixed since, the item says so.
+
 §8 is about verifying claims on code you wrote. This is about the tools you point
 at something else to find out what is true: a driver, a running service, another
 machine, a message spool, your own archive. The code under test may not be yours,
@@ -128,9 +135,13 @@ forming them, and then nothing gets tested at all.
    an empty string, you have built the confident nothing from item 1 with your own
    hands.
 
-   **JP_TOOLS' own gate does exactly this, which is why the item is here rather
-   than in a footnote.** `check.py:60 run_ruff` shells out to ruff, discards
-   `returncode`, and parses stdout. Ruff writes a config-load failure to stderr and
+   **JP_TOOLS' own gate did exactly this, which is why the item is here rather
+   than in a footnote.** In `check.py` as it stood on 2026-09-01, `run_ruff` (then
+   at :60) shelled out to ruff, discarded `returncode`, and parsed stdout.
+   **Fixed since:** #59 (merged 2026-09-14) passes ruff's returncode to
+   `_status`; on master `7c902ed` that is `run_ruff` at :64, the call at :100
+   (dynatext-tools, reviewing #81). What follows is the 2026-09-01 measurement.
+   In it, ruff Ruff writes a config-load failure to stderr and
    exits **2** with empty stdout, so the wrapper reads `[]` and publishes
    `"status": "pass"`, `"total": 0`, exit 0. Reproduced 2026-09-01 in three lines, with a positive control proving the
    sample dirty:
@@ -166,13 +177,19 @@ forming them, and then nothing gets tested at all.
    at line 178, then reported absence from a view that stopped two lines short. That
    is item 6 below, committed to a file, by the person writing the file about it.
 
-   The measured picture, which is better than the one I published:
+   The measured picture on 2026-09-01, which was better than the one I published:
 
        13 _status call sites, 12 of them subprocess-backed
         2 pass returncode and are correct      mypy :178, prettier :434
        10 do not, so the error path cannot fire for them
         9 of those 10 are caught by claude-config's lint
         1 is not: cppcheck :672, which parses result.STDERR
+
+   On master `7c902ed` (dynatext-tools, reviewing #81): 14 call sites; 4 pass
+   returncode (ruff :100, mypy :188, prettier :494, shellcheck :855); 10 still do
+   not (eslint, stylelint, phpstan, phpcs, rector, pip-audit, npm-audit,
+   composer-audit, cppcheck :818, no-cover). The 2026-09-01 line numbers no
+   longer point at what they name.
 
    **The mechanism was never missing. `_status` already implements exactly the rule
    the seven-row table in item 17 arrives at independently** -- not in (0, 1) is a
@@ -562,6 +579,11 @@ forming them, and then nothing gets tested at all.
 17. **`returncode != 0` is a proxy for "the tool failed", and its strength is a
     property of the tool. Measure it before you build on it.**
 
+    (Its table and line numbers were measured on 2026-09-01. On master `7c902ed`,
+    cppcheck :818, stylelint :292 and phpcs :429 still call `_status(issues)`
+    with no returncode, per dynatext-tools reviewing #81, so the argument holds
+    while the numbers have moved.)
+
     sunblade2000-publish, 2026-09-01, having just made this exact fix badly: they
     had the item 3 shape, fixed it by checking returncode, then ran a negative
     control against deliberately bad input and the fix did **nothing** -- because
@@ -796,6 +818,11 @@ forming them, and then nothing gets tested at all.
     the empty sends as ordinary messages with blank bodies, so a reader sees a
     message that appears to say nothing rather than a delivery that failed.
 
+    **Fixed since:** msg.py has refused an empty body since claude-config
+    `6d0375a` (2026-09-08), `msg.py: refusing to send an empty body`
+    (tools/msg.py:124, per dynatext-tools reviewing #81). The table above is the
+    2026-09-01 measurement.
+
     First found 2026-08-31 by the `jp-tools` seat, which sent a 3.8 KB finding to
     eight recipients and was told `sent to ... (8 recipients)` over a `len=0`
     spool record; `sunblade2000-lead` detected it independently from the receiving
@@ -831,20 +858,26 @@ forming them, and then nothing gets tested at all.
     unread. An honest "nobody has measured one" was the right call on the evidence
     in hand and was still wrong about the world.
 
-    **The second half of this item IS measured and is unaffected, and it is a
-    COUPLING.** There is no update verb, so the only way to correct a note is
-    release-then-reclaim, which resets `ts`. `board` flags a claim stale at two
-    hours. So updating a note makes a six-hour hold read as four seconds, and the
-    mechanism that keeps a note honest is the same mechanism that hides how long
-    you have held the thing. **The board's staleness signal and its note-freshness
-    signal cannot both be improved, and the diligent seat is the one that looks
-    freshest.** Confirmed on three seats, this one included: its own
+    **The second half of this item was measured on 2026-09-01, and it was a
+    COUPLING.** There was no update verb then, so the only way to correct a note
+    was release-then-reclaim, which resets `ts`. `board` flags a claim stale at two
+    hours. So updating a note made a six-hour hold read as four seconds, and the
+    mechanism that kept a note honest was the same mechanism that hid how long you
+    had held the thing. **With that tool, the board's staleness signal and its
+    note-freshness signal could not both be improved, and the diligent seat was the
+    one that looked freshest.** Confirmed on three seats, this one included: its own
     `jp-tools:check-py-exit-codes` read **5m** immediately after a note correction,
     having been held far longer.
 
+    **Fixed since, by a tool change, which is the best evidence for the rule.**
+    `coord.py` gained a `note` verb in claude-config `2add3c3` (2026-09-01, #191).
+    It rewrites a note and prints `note updated on X (held Y, age preserved)`. So
+    "cannot both be improved" was never a law, only a property of a tool that had
+    no verb for it (dynatext-tools, reviewing #81).
+
     The rule that survives: when a tool offers no way to correct a record, people
     do not become more careful, they stop correcting. **Look for the coupling
-    before blaming the discipline.**
+    before blaming the discipline, and fix the coupling in the tool.**
 
 21. **A peer's better-phrased claim will overwrite your own measurement, and you
     will not notice the moment it happens.** This is not misreading a silence. It
