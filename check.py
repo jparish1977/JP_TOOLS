@@ -8,9 +8,12 @@ Usage:
     python check.py <path> [--lang python|js|auto] [--tools ruff,mypy] [--pretty]
 
 Exit codes:
-    0  — no errors (warnings OK)
-    1  — one or more errors found
-    2  — usage / tool-not-found error
+    0  - every check ran, and none found an error (warnings OK)
+    1  - one or more errors found
+    2  - usage or path error, OR a check that could not run: a tool that is
+         unavailable, a tool that exited abnormally, or no runner for a
+         requested tool. Each one is named on stderr. A check that did not
+         run is not a pass (#29).
 """
 
 import argparse
@@ -89,7 +92,13 @@ def run_ruff(target: str) -> dict[str, Any]:
         }
         for i in raw
     ]
-    return {"tool": "ruff", "status": _status(issues), "issues": issues}
+    # The return code is read, not discarded. ruff exits 0 clean, 1 for
+    # findings, and 2 when it could not run -- a config that fails to load
+    # writes to stderr and leaves stdout empty, so without the code this
+    # published "pass" with 0 issues. That is exactly how a ruff.toml extending
+    # ../JP_TOOLS read clean when CI cloned JP_TOOLS to /tmp instead.
+    return {"tool": "ruff", "status": _status(issues, result.returncode),
+            "issues": issues}
 
 
 # Tools honour FORCE_COLOR/CLICOLOR_FORCE even when their output is captured,
@@ -287,6 +296,23 @@ def _php_bin(name: str) -> str | None:
     return shutil.which(name) or shutil.which(f"{name}.bat")
 
 
+def _node_bin(name: str) -> str | None:
+    """Resolve an npm bin from JP_TOOLS' own node_modules, falling back to PATH.
+
+    package.json declares prettier, and `npm install` puts it in
+    node_modules/.bin, which is not on PATH. Resolving through PATH alone meant
+    the manifest was satisfied while the gate still called the tool unavailable
+    (METHODOLOGY, "Declare the instrument's own dependencies"). fix.py already
+    looks here; this is the same lookup, in the same order.
+    """
+    local_bin = Path(__file__).parent / "node_modules" / ".bin"
+    for ext in (".cmd", ""):
+        local = local_bin / f"{name}{ext}"
+        if local.exists():
+            return str(local)
+    return shutil.which(name) or shutil.which(f"{name}.cmd")
+
+
 def _php_cmd() -> str | None:
     return shutil.which("php") or shutil.which("php.exe")
 
@@ -414,7 +440,7 @@ def run_rector(target: str) -> dict[str, Any]:
 
 
 def run_prettier(target: str) -> dict[str, Any]:
-    cmd = shutil.which("prettier") or shutil.which("prettier.cmd")
+    cmd = _node_bin("prettier")
     if not cmd:
         return _tool_missing("prettier")
     result = subprocess.run([cmd, "--check", target], capture_output=True, text=True, check=False, env=_plain_env())
@@ -562,6 +588,38 @@ def _tool_missing(name: str) -> dict[str, Any]:
         "issues": [],
         "note":   f"'{name}' not found on PATH — install it to enable this check",
     }
+
+
+# Statuses that mean a check ran and reached a verdict. "skip" is a runner
+# deciding it does not apply (npm-audit with no package.json), not a failure.
+_RAN = ("pass", "fail", "skip")
+
+
+def _exit_code(summary: dict[str, Any], checks: list[dict[str, Any]]) -> int:
+    """0 clean, 1 errors found, 2 a check could not run.
+
+    This used to be `1 if errors else 0`, and errors are counted from issues,
+    so no tool status could ever fail a run: ruff and mypy off PATH on a file
+    with two real errors reported "unavailable" and exited 0 (#29). A check
+    that did not run is not a pass, so it gets its own code, and it is named
+    on stderr so a blocked commit says what to install.
+
+    Findings win over not-run: 1 is already a failure, and the not-run tools
+    are still named.
+    """
+    not_run = [c for c in checks if c.get("status") not in _RAN]
+    for c in not_run:
+        note = c.get("note", "")
+        print(f"check.py: did not run {c.get('tool', '?')} "
+              f"({c.get('status', '?')}){': ' + note if note else ''}",
+              file=sys.stderr)
+    if summary["errors"] > 0:
+        return 1
+    if not_run:
+        print("check.py: exit 2 -- a check that did not run is not a pass.",
+              file=sys.stderr)
+        return 2
+    return 0
 
 
 _EXT_TO_LANG = {
@@ -1331,7 +1389,7 @@ def main() -> None:
         # comparable here and the verdict replaces the compare-against-zero one.
         if args.baseline:
             sys.exit(compare_baseline(checks, target, args.baseline, "per-file"))
-        sys.exit(1 if summary["errors"] > 0 else 0)
+        sys.exit(_exit_code(summary, checks))
 
     # ── Directory: scan, group by language, run appropriate tools ─────────
     groups, skipped = _collect_files(target)
@@ -1358,19 +1416,30 @@ def main() -> None:
                 # Run once against the whole dir — tool handles file discovery
                 lang_checks.append(runner(target))
             else:
-                # Run per-file, merge issues into one result per tool
-                merged_issues = []
-                any_fail = False
+                # Run per-file, merge issues into one result per tool.
+                # A runner that could not run on a file did not run for this
+                # language. The merge used to keep only "fail" and fold every
+                # other status into "pass", so eslint with no node on PATH
+                # read as a clean pass -- #29 one level down.
+                merged_issues: list[dict[str, Any]] = []
+                statuses: set[str] = set()
+                note = ""
                 for fp in files:
                     result = runner(fp)
                     merged_issues.extend(result.get("issues", []))
-                    if result["status"] == "fail":
-                        any_fail = True
-                lang_checks.append({
+                    statuses.add(result["status"])
+                    if result["status"] not in _RAN:
+                        note = note or result.get("note", "")
+                not_run = sorted(statuses - set(_RAN))
+                merged: dict[str, Any] = {
                     "tool":   name,
-                    "status": "fail" if any_fail else "pass",
+                    "status": not_run[0] if not_run else
+                              ("fail" if "fail" in statuses else "pass"),
                     "issues": merged_issues,
-                })
+                }
+                if note:
+                    merged["note"] = note
+                lang_checks.append(merged)
 
         all_checks.extend(lang_checks)
         lang_sections.append({
@@ -1398,7 +1467,7 @@ def main() -> None:
     # compare_baseline refuse rather than report scope as regression.
     if args.baseline:
         sys.exit(compare_baseline(all_checks, target, args.baseline, "whole-repo"))
-    sys.exit(1 if summary["errors"] > 0 else 0)
+    sys.exit(_exit_code(summary, all_checks))
 
 
 if __name__ == "__main__":
