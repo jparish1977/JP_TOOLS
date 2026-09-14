@@ -228,32 +228,52 @@ def append_roundtrip_cases(tmp: Path) -> None:
     stray shebang (romtools went from 1 to 2). Needs no ruff.
     """
     print("Appending to a repo's own hook (#66):")
-    repo = tmp / "own-hook"
+    # projectbook-helper's four shapes from its review of #74. The last two
+    # were rewritten by remove()'s old rstrip() on master too.
+    shapes = {
+        "sh, one final newline": "#!/bin/sh\necho repo's own gate\n",
+        "bash, one final newline": "#!/usr/bin/env bash\necho repo's own gate\n",
+        "no final newline": "#!/bin/sh\necho repo's own gate",
+        "a trailing blank line": "#!/bin/sh\necho repo's own gate\n\n",
+    }
+    for i, (label, own) in enumerate(shapes.items()):
+        repo = tmp / f"own-hook-{i}"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        hook = repo / ".git" / "hooks" / "pre-commit"
+        hook.parent.mkdir(exist_ok=True)
+        hook.write_text(own, encoding="utf-8")
+        hook.chmod(0o755)
+
+        r = run_installer(repo)
+        installed = hook.read_text(encoding="utf-8")
+        check(f"[{label}] install appends, exit 0, the repo's hook still first",
+              r.returncode == 0 and installed.startswith(own), r.stdout + r.stderr)
+        check(f"[{label}] the appended section adds no second shebang",
+              installed.count("#!") == 1, installed[:400])
+        run_installer(repo, "--remove")
+        after = hook.read_text(encoding="utf-8")
+        check(f"[{label}] --remove gives the hook back byte for byte", after == own,
+              repr(after))
+        run_installer(repo)
+        run_installer(repo, "--remove")
+        after = hook.read_text(encoding="utf-8")
+        check(f"[{label}] a second cycle gives the same file", after == own, repr(after))
+
+    # A hook installed BEFORE #66: the old template, shebang and all, appended.
+    # --remove must still give back the repo's hook, without the stray shebang.
+    repo = tmp / "old-install"
     repo.mkdir()
     git(repo, "init", "-q")
     hook = repo / ".git" / "hooks" / "pre-commit"
     hook.parent.mkdir(exist_ok=True)
     own = "#!/bin/sh\necho repo's own gate\n"
-    hook.write_text(own, encoding="utf-8")
-    hook.chmod(0o755)
-
-    r = run_installer(repo)
-    installed = hook.read_text(encoding="utf-8")
-    check("install appends to the repo's own hook, exit 0", r.returncode == 0,
-          r.stdout + r.stderr)
-    check("the repo's own hook is still first", installed.startswith(own),
-          installed[:200])
-    check("the appended section adds no second shebang",
-          installed.count("#!/bin/sh") == 1, installed[:400])
-
+    hook.write_text(own + "\n#!/bin/sh\n# JP_TOOLS pre-commit hook\necho old section\n",
+                    encoding="utf-8")
     run_installer(repo, "--remove")
     after = hook.read_text(encoding="utf-8")
-    check("--remove gives the repo's hook back byte for byte", after == own, after)
-
-    run_installer(repo)
-    run_installer(repo, "--remove")
-    after = hook.read_text(encoding="utf-8")
-    check("a second install/remove cycle gives the same file", after == own, after)
+    check("[pre-#66 install] --remove strips the old stray shebang too", after == own,
+          repr(after))
     print()
 
 

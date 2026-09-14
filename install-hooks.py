@@ -302,9 +302,17 @@ def remove(repo_path: Path) -> None:
         hook_file.unlink()
         print(f"Removed JP_TOOLS pre-commit hook from {hook_file}")
     else:
-        # Our hook was appended — remove just our section
-        before = lines[:marker_idx]
-        hook_file.write_text("\n".join(before).rstrip() + "\n", encoding="utf-8")
+        # Our section was appended. install() writes exactly "\n" + the marker
+        # onward, so cut at that offset and the repo's hook comes back byte for
+        # byte, whatever its ending. Splitting into lines and rstrip()ing
+        # rewrote a hook with no final newline or a trailing blank line
+        # (projectbook-helper, reviewing #74). An install from before #66 also
+        # left its own "#!/bin/sh" just above the marker; strip that too, so
+        # older installs come back clean.
+        before = content[:content.index("\n" + HOOK_MARKER)]
+        if before.endswith("\n#!/bin/sh"):
+            before = before[:-len("\n#!/bin/sh")]
+        hook_file.write_text(before, encoding="utf-8")
         print(f"Removed JP_TOOLS section from {hook_file} (kept existing hook)")
 
 
