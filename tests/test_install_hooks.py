@@ -62,7 +62,7 @@ def check(what: str, ok: bool, detail: str = "") -> None:
             print(f"         {line}")
 
 
-def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run git in `repo` with signing and user identity pinned."""
     cmd = [
         "git",
@@ -76,7 +76,7 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
                           check=False)
 
 
-def commit_file(repo: Path, name: str, body: str) -> subprocess.CompletedProcess:
+def commit_file(repo: Path, name: str, body: str) -> subprocess.CompletedProcess[str]:
     """Write, stage and attempt to commit one file. Returns the commit result."""
     (repo / name).write_text(body, encoding="utf-8")
     add = git(repo, "add", "--", name)
@@ -111,13 +111,70 @@ def build_repo(tmp: Path) -> tuple[Path, str]:
     return repo, install.stdout
 
 
+def run_installer(repo: Path, *flags: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, str(INSTALL_HOOKS), *flags, str(repo)],
+                          capture_output=True, text=True, check=False)
+
+
+def symlinked_hook_cases(tmp: Path) -> None:
+    """#67: a hook that is a symlink into the repo is never written through.
+
+    projectbook ships hooks/pre-commit as a tracked file and links it into
+    .git/hooks. Before the fix, install appended the JP_TOOLS hook INTO that
+    tracked file and chmod'ed it; a dangling link had its target created.
+    Needs no ruff, so it runs before the ruff skip.
+    """
+    print("Symlinked hook (#67):")
+    repo = tmp / "linked"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    tracked = repo / "hooks" / "pre-commit"
+    tracked.parent.mkdir()
+    own = "#!/bin/sh\necho repo's own hook\n"
+    tracked.write_text(own, encoding="utf-8")
+    tracked.chmod(0o644)
+    link = repo / ".git" / "hooks" / "pre-commit"
+    link.parent.mkdir(exist_ok=True)
+    link.symlink_to(Path("..") / ".." / "hooks" / "pre-commit")
+
+    r = run_installer(repo)
+    check("install refuses a symlinked hook, exit 2",
+          r.returncode == 2, r.stdout + r.stderr)
+    # The target as readlink reports it. A bare "hooks/pre-commit" would also
+    # match the ordinary install message's path, so it could not fail.
+    check("the refusal names the link target",
+          "is a symlink to ../../hooks/pre-commit" in r.stdout, r.stdout)
+    check("the tracked target is byte for byte unchanged",
+          tracked.read_text(encoding="utf-8") == own)
+    check("the tracked target's mode is unchanged",
+          (tracked.stat().st_mode & 0o777) == 0o644, oct(tracked.stat().st_mode))
+    check("the link is still a link", link.is_symlink())
+
+    r = run_installer(repo, "--remove")
+    check("--remove refuses a symlinked hook, exit 2",
+          r.returncode == 2, r.stdout + r.stderr)
+    check("--remove leaves the target unchanged",
+          tracked.read_text(encoding="utf-8") == own)
+
+    link.unlink()
+    link.symlink_to(Path("..") / ".." / "hooks" / "missing-hook")
+    r = run_installer(repo)
+    check("install refuses a DANGLING symlinked hook, exit 2",
+          r.returncode == 2, r.stdout + r.stderr)
+    check("the dangling link's target is not created",
+          not (repo / "hooks" / "missing-hook").exists())
+    print()
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
         return 0
+    with tempfile.TemporaryDirectory() as td:
+        symlinked_hook_cases(Path(td))
     if not shutil.which("ruff"):
-        print("SKIP: ruff not found, check.py cannot fail a file")
-        return 0
+        print(f"SKIP the rest: ruff not found, check.py cannot fail a file ({checks - fails}/{checks} passed above)")
+        return 1 if fails else 0
 
     print("Generated hook, static:")
     hook_src = INSTALL_HOOKS.read_text(encoding="utf-8")
