@@ -25,18 +25,26 @@ books_dir = docs
 # that reimplemented `cancel -a -x`.
 code = yes
 
-# TRANSCRIPTS: NOT DECLARED, deliberately.
+# TRANSCRIPTS: DECLARED NONE, deliberately (jp-tools, 2026-09-08).
 #   Large, and the value is unclear for a repo whose reasoning already lands in
 #   METHODOLOGY.md, docs/ and the fleet's session reports. "Always scrubbed" is
 #   a property I have not verified for this repo's transcripts, and declaring an
 #   exposure on the strength of someone else's measurement is the borrowed
 #   description this project spent 2026-09-08 documenting. Revisit with a reason.
+#   The key is present and empty so the fleet's config refresh reads it as a
+#   decision rather than an omission; the fleet corpus carries this repo's
+#   transcripts from the backup regardless (projectbook, 2026-09-12).
+transcripts =
 
-# ISSUES: NOT DECLARED, AND THIS ONE IS NOT MY CHOICE.
-#   vm/issues-book.py is Forgejo-only -- 5 mentions of forgejo, 0 of github,
-#   measured 2026-09-08. JP_TOOLS' tracker is GitHub (jparish1977/JP_TOOLS), so
-#   there is nothing to point this at. The 21 open issues here are exactly the
-#   prior-art the code declaration above exists to serve, and they stay
-#   unreachable until the tracker source speaks GitHub. Filed as a finding
-#   rather than left as an empty line, because an undeclared source and an
-#   unsupported one look identical in this file.
+# ISSUES: joe/JP_TOOLS on Forgejo (jp-tools, 2026-09-14).
+#   The tracker moved to Forgejo on Joe's decision ("move jp_tools tracker to
+#   forgejo"): all 61 issues and PRs imported with their numbers and states,
+#   verified against the original item for item. vm/issues-book.py reads
+#   Forgejo, so this slug is exactly what it fetches. The open issues are the
+#   prior art the code declaration above exists to serve. It needs the network:
+#   build with FORGEJO_TOKEN set, or the book is a named skip.
+issues = joe/JP_TOOLS
+
+# What changed and when. HISTORY is `--stat`, DIFFS is `-p`.
+history = yes
+diffs = yes
