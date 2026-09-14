@@ -248,9 +248,14 @@ Skipped directories: `node_modules`, `vendor`, `__pycache__`, `.git`, `.venv`, `
 }
 ```
 
-**Exit codes:** `0` = clean, `1` = errors found, `2` = usage/path error.
+**Exit codes:** `0` = every check ran and found no errors, `1` = errors found,
+`2` = usage/path error, or a check that could not run.
 
-Tools not found on PATH are reported as `"status": "unavailable"` — the rest still run.
+A tool that is not found is reported as `"status": "unavailable"` and the rest
+still run, but the run then exits `2` and names the tool on stderr: a check that
+did not run is not a pass (#29). The same holds for a tool that exits
+abnormally, such as ruff on a config that fails to load (`"status": "error"`).
+`tests/test_check_exit_codes.py` pins this behaviour.
 
 ## Configs
 
