@@ -97,22 +97,36 @@ if [ -z "$TOOLS_DIR" ]; then
         "export JP_TOOLS_DIR=/path/to/JP_TOOLS, or re-run install-hooks.py on this machine."
 fi
 
-BRANCH=$(git -C "$TOOLS_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')
-SHORT=$(git -C "$TOOLS_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')
+# The git -C calls below read TOOLS_DIR's repository, not the committing
+# repo's: a hook runs with GIT_INDEX_FILE set (relative), and dynatext-tools
+# measured that it does not leak into `git -C OTHER` for these reads. Nothing
+# is unset, because the template's own git commands must keep the committing
+# repo's index.
+if git -C "$TOOLS_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    WHERE="on $(git -C "$TOOLS_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null) $(git -C "$TOOLS_DIR" rev-parse --short HEAD 2>/dev/null)"
+else
+    WHERE="(not a git checkout)"
+fi
 if [ ! -f "$TOOLS_DIR/hooks/pre-commit.sh" ]; then
-    broken "the JP_TOOLS at $TOOLS_DIR ($BRANCH $SHORT) is too old for this hook: it has no hooks/pre-commit.sh." \
-        "git -C \"$TOOLS_DIR\" pull --ff-only"
+    broken "the JP_TOOLS at $TOOLS_DIR ($WHERE) is too old for this hook: it has no hooks/pre-commit.sh." \
+        "git -C \"$TOOLS_DIR\" pull --ff-only, or replace a copy with a current git clone of JP_TOOLS."
 fi
 
 if [ -n "$JP_TOOLS_DIR" ]; then
     # Named on purpose, so any branch is honoured, and said out loud every
     # time: an exported variable outlives the test it was set for.
-    echo "JP_TOOLS hook: JP_TOOLS_DIR is set; running $TOOLS_DIR on $BRANCH $SHORT (not required to be master)." >&2
+    echo "JP_TOOLS hook: JP_TOOLS_DIR is set; running $TOOLS_DIR $WHERE (not required to be master)." >&2
 else
+    # A copy with no .git cannot be compared with master at all, and "checkout
+    # master" cannot fix it: say which case this is (dynatext-tools, #80).
+    if [ "$WHERE" = "(not a git checkout)" ]; then
+        broken "the JP_TOOLS at $TOOLS_DIR is not a git checkout, so the master check cannot run." \
+            "use a git clone of JP_TOOLS there, or name this tree on purpose: export JP_TOOLS_DIR=$TOOLS_DIR"
+    fi
     HEAD_SHA=$(git -C "$TOOLS_DIR" rev-parse HEAD 2>/dev/null)
     MASTER=$(git -C "$TOOLS_DIR" rev-parse -q --verify origin/master 2>/dev/null || git -C "$TOOLS_DIR" rev-parse -q --verify master 2>/dev/null)
     if [ -z "$HEAD_SHA" ] || [ "$HEAD_SHA" != "$MASTER" ]; then
-        broken "the JP_TOOLS at $TOOLS_DIR is on $BRANCH $SHORT, not at its origin/master (compared locally, no fetch)." \
+        broken "the JP_TOOLS at $TOOLS_DIR is $WHERE, not at its origin/master (compared locally, no fetch)." \
             "git -C \"$TOOLS_DIR\" checkout master && git -C \"$TOOLS_DIR\" pull --ff-only"
     fi
 fi

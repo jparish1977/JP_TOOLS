@@ -335,15 +335,18 @@ def status_cases(tmp: Path) -> None:
     print()
 
 
-def fake_jp_tools(at: Path, with_template: bool = True) -> Path:
+def fake_jp_tools(at: Path, with_template: bool = True, git_repo: bool = True) -> Path:
     """A JP_TOOLS tree from this checkout's working files: a git repo on master
-    whose origin/master is set, locally, to its first commit."""
+    whose origin/master is set, locally, to its first commit. With
+    git_repo=False, a plain copy with no .git at all."""
     at.mkdir(parents=True)
     shutil.copy2(ROOT / "check.py", at / "check.py")
     shutil.copytree(ROOT / "configs", at / "configs")
     if with_template:
         (at / "hooks").mkdir()
         shutil.copy2(ROOT / "hooks" / "pre-commit.sh", at / "hooks" / "pre-commit.sh")
+    if not git_repo:
+        return at
     git(at, "init", "-q", "-b", "master")
     git(at, "add", "-A")
     git(at, "commit", "-q", "-m", "fake JP_TOOLS")
@@ -401,6 +404,22 @@ def shim_cases(tmp: Path) -> None:
     check("a named JP_TOOLS_DIR that is not there is refused, not passed over",
           r.returncode != 0 and "has no check.py" in out and "staged file(s) checked" not in out,
           out)
+
+    # dynatext-tools' note on #80: a copy with no .git was refused "on ? ?"
+    # with a Fix (checkout master) that cannot work there.
+    home2 = tmp / "home2"
+    copy = fake_jp_tools(home2 / "projects" / "JP_TOOLS", git_repo=False)
+    env2 = dict(env, HOME=str(home2))
+    r = commit_with_env(repo, "c7.py", CLEAN_PY, env2)
+    out = r.stdout + r.stderr
+    check("a JP_TOOLS copy with no .git, found by the search, is refused as not a git checkout",
+          r.returncode != 0 and "not a git checkout" in out and "on ? ?" not in out, out)
+    check("... with a Fix that can work there (name it with JP_TOOLS_DIR)",
+          "export JP_TOOLS_DIR=" in out, out)
+    r = commit_with_env(repo, "c8.py", CLEAN_PY, dict(env2, JP_TOOLS_DIR=str(copy)))
+    out = r.stdout + r.stderr
+    check("... and naming that copy on purpose runs it, saying it is not a git checkout",
+          r.returncode == 0 and "(not a git checkout)" in out, out)
 
     git(tree, "checkout", "-q", "master")
     hook.write_text(hook.read_text(encoding="utf-8").replace(
