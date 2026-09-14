@@ -449,6 +449,13 @@ def run_prettier(target: str) -> dict[str, Any]:
         line = line.strip()
         if line.startswith("[warn]"):
             fp = line[len("[warn]"):].strip()
+            # prettier ends --check with a summary on its own [warn] line:
+            # "Code style issues found in the above file. Run Prettier with
+            # --write to fix." (prettier 2: "... Forgot to run Prettier?").
+            # Read as a filename, it counted every unformatted file twice --
+            # seen in CI on PR #59, the first run where prettier ran at all.
+            if fp.startswith("Code style issues"):
+                continue
             issues.append({
                 "file":     fp,
                 "line":     0,

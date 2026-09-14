@@ -146,7 +146,12 @@ jobs:
       - run: npm install
       - name: Self-check JS files
         run: |
+          # rc accumulates, as in the Python job. Without it the step took
+          # the LAST file's exit code, so a failure on jp_eslint.mjs was
+          # hidden by a clean jp_stylelint.mjs.
+          rc=0
           for f in jp_eslint.mjs jp_stylelint.mjs; do
             echo "--- $f ---"
-            python check.py "$f" --pretty
+            python check.py "$f" --pretty || rc=1
           done
+          exit $rc
