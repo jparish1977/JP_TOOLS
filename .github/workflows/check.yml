@@ -79,11 +79,22 @@ jobs:
       # found") and this job was red on every Forgejo head (#64). Skipping
       # the step when composer is absent would make the phpstan suites skip,
       # which reads as a pass: the shape #59 removed. 8.3 because phpunit
-      # ^12.5 in composer.json requires it.
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          tools: composer
+      # ^12.5 in composer.json requires it, and 8.3 is what Ubuntu 24.04's apt
+      # ships.
+      #
+      # apt, not shivammathur/setup-php: the Forgejo runner resolves every
+      # `uses:` through its data.forgejo.org mirror, which does not carry
+      # setup-php ("remote: Not found", task 272), and GitHub does not accept
+      # a full URL in `uses:`. An install that fails fails this step.
+      - name: PHP and composer (the Forgejo runner image has neither)
+        run: |
+          if ! command -v composer >/dev/null 2>&1; then
+            SUDO=$(command -v sudo || true)
+            $SUDO apt-get update -q
+            $SUDO apt-get install -y -q php-cli php-xml php-mbstring php-curl unzip composer
+          fi
+          php --version
+          composer --version
       - name: Install PHP tools
         run: composer install --no-interaction --no-progress
       - name: Run test suites
