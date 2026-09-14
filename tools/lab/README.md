@@ -26,6 +26,7 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `test-against-ref.sh` | does a new test fail on the code before the fix | all three fields |
 | `ci-job-fields.py` | what did check.py report inside a CI job, per file; exits 1 on an empty log | all three fields |
 | `file-sizes.py` | how many source files pass a line threshold, and how much of each is prose | all three fields |
+| `doc-pointers.py` | do the `~/` paths in our docs still resolve, in three outcomes (#53) | all three fields |
 
 **That last row is stated rather than fixed.** The tool is `claude-config-advisor`'s
 and its docstring is theirs to complete; editing another seat's header to satisfy
