@@ -95,6 +95,15 @@ jobs:
           fi
           php --version
           composer --version
+      # shellcheck, declared in requirements-system.txt, so the shell arm's
+      # finding cases run here rather than skip (tests/test_check_shell.py).
+      - name: shellcheck (declared in requirements-system.txt)
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            SUDO=$(command -v sudo || true)
+            $SUDO apt-get install -y -q shellcheck || { $SUDO apt-get update -q && $SUDO apt-get install -y -q shellcheck; }
+          fi
+          shellcheck --version
       - name: Install PHP tools
         run: composer install --no-interaction --no-progress
       - name: Run test suites

@@ -1,0 +1,22 @@
+# System tools check.py shells out to: the ones pip, npm and composer cannot
+# install. One per line: TOOL MIN_VERSION APT_PACKAGE WINDOWS_PACKAGE.
+#
+# WRITTEN 2026-09-14, with the shellcheck arm (#57, #77). Joe, on installing it:
+# "make sure we list it as a dependency". requirements-dev.txt declares the
+# Python runners, package.json the JS ones and composer.json the PHP ones, but
+# the apt-installed tools were declared NOWHERE: cppcheck has been an arm since
+# 2026-08 and appeared only in a runtime hint inside check.py. METHODOLOGY §7
+# item 9 asks for a manifest a person can read, install from and diff.
+#
+# A missing tool is not silent any more: since #59, a check that did not run
+# exits 2. But "exits 2 on commit" is a bad way to learn a box needs a package,
+# so install.sh and CI read this file.
+#
+# MIN_VERSION is what the arm was tested on, not a pin: apt ships one version
+# per release. Measured 2026-09-14:
+#   shellcheck 0.9.0 on joe-MacBookAir (installed that day) and iteration8.
+#   cppcheck   2.13.0 on joe-MacBookAir; ABSENT on iteration8, so a C/C++ file
+#              checked there exits 2 until it is installed.
+
+shellcheck  0.9.0   shellcheck  koalaman.shellcheck
+cppcheck    2.13.0  cppcheck    Cppcheck.Cppcheck
