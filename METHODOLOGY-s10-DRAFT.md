@@ -141,7 +141,7 @@ forming them, and then nothing gets tested at all.
    **Fixed since:** #59 (merged 2026-09-14) passes ruff's returncode to
    `_status`; on master `7c902ed` that is `run_ruff` at :64, the call at :100
    (dynatext-tools, reviewing #81). What follows is the 2026-09-01 measurement.
-   In it, ruff Ruff writes a config-load failure to stderr and
+   In it, Ruff writes a config-load failure to stderr and
    exits **2** with empty stdout, so the wrapper reads `[]` and publishes
    `"status": "pass"`, `"total": 0`, exit 0. Reproduced 2026-09-01 in three lines, with a positive control proving the
    sample dirty:
