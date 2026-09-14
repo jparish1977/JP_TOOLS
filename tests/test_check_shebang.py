@@ -82,10 +82,11 @@ def main() -> int:
         shell = d / "hook"
         shell.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
         rc, out = run(str(shell))
-        check("a shell script is still undetected (no shell arm yet), exit 2",
-              rc == 2 and "Cannot detect language" in out, out[:300])
-        rc, out = run(str(shell), "--skip-unsupported")
-        check("... and --skip-unsupported still lets it through, exit 0", rc == 0, out[:300])
+        # #57 part 2 gave shell a tool, so a sh script is shell now, not unknown.
+        # Whether it then passes or exits 2 depends on shellcheck being
+        # installed; tests/test_check_shell.py covers both.
+        check("a '#!/bin/sh' script is detected as shell, not unknown",
+              "Cannot detect language" not in out and '"language": "shell"' in out, out[:300])
 
         plain = d / "Makefile"
         plain.write_text("all:\n\techo hi\n", encoding="utf-8")

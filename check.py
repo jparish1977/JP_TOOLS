@@ -667,7 +667,13 @@ _EXT_TO_LANG = {
     # to an embedded project.
     ".c":    "cpp", ".h":   "cpp", ".cpp": "cpp",
     ".hpp":  "cpp", ".cc":  "cpp", ".ino": "cpp",
+    # Shell, backed by shellcheck. #57: 261 shell files across 18 fleet repos
+    # and no gate read any of them.
+    ".sh":   "shell", ".bash": "shell",
 }
+
+# Interpreters shellcheck understands, as a #! line names them.
+_SHELL_INTERPRETERS = {b"sh", b"bash", b"dash", b"ksh"}
 
 # Directories to skip when scanning
 _SKIP_DIRS = {"node_modules", "vendor", "__pycache__", ".git", ".venv", "venv",
@@ -681,8 +687,8 @@ def _shebang_lang(p: Path) -> str | None:
     passes --skip-unsupported, so `bin/tool` went through as "cannot detect
     language" while ruff and mypy both check such a file fine when named
     (measured 2026-09-14: F401 and an assignment error found). Reads one line.
-    Python only for now. Shell waits for a shellcheck arm; detecting a
-    language with no tool behind it would turn a skip into exit 2 everywhere.
+    Python, and shell now that shellcheck backs it: `#!/bin/sh`, `#!/bin/bash`
+    and `#!/usr/bin/env bash` alike, since `env` names the interpreter next.
     """
     if p.suffix:
         return None
@@ -691,8 +697,15 @@ def _shebang_lang(p: Path) -> str | None:
             first = fh.readline(256)
     except OSError:
         return None
-    if first.startswith(b"#!") and b"python" in first:
+    if not first.startswith(b"#!"):
+        return None
+    if b"python" in first:
         return "python"
+    words = first[2:].split()
+    if words and words[0].endswith(b"/env"):
+        words = [w for w in words[1:] if not w.startswith(b"-")]
+    if words and words[0].rsplit(b"/", 1)[-1] in _SHELL_INTERPRETERS:
+        return "shell"
     return None
 
 
@@ -803,6 +816,44 @@ def run_cppcheck(target: str) -> dict[str, Any]:
             "fixable_unsafe": False,
         })
     return {"tool": "cppcheck", "status": _status(issues), "issues": issues}
+
+
+def run_shellcheck(target: str) -> dict[str, Any]:
+    """Shell scripts, by shellcheck. #57.
+
+    Exit codes are READ, not discarded: 0 clean, 1 findings, 2 or more means it
+    could not run (a bad argument, an unreadable file), and that must not read
+    as a pass (#29, and the ruff returncode fix). Levels map like cppcheck's:
+    error and warning block; info and style are reported as warnings.
+
+    Measured before this became a gate, as #57 asked: 261 shell files across
+    18 fleet repos, 118 clean; error 5, warning 106, style 141, info 477.
+    tools/lab/shellcheck-sweep.py re-measures it.
+    """
+    if not shutil.which("shellcheck"):
+        return _tool_missing("shellcheck (apt install shellcheck)")
+    result = subprocess.run(["shellcheck", "--format=json1", target],
+                            capture_output=True, text=True, check=False,
+                            env=_plain_env())
+    issues: list[dict[str, Any]] = []
+    try:
+        comments = json.loads(result.stdout or "{}").get("comments", [])
+    except ValueError:
+        return {"tool": "shellcheck", "status": "error", "issues": [],
+                "note": f"shellcheck output was not JSON (exit {result.returncode})"}
+    for c in comments:
+        issues.append({
+            "file":     c.get("file", target),
+            "line":     int(c.get("line", 0)),
+            "col":      int(c.get("column", 0)),
+            "severity": "error" if c.get("level") in ("error", "warning") else "warning",
+            "rule":     f"SC{c.get('code', '')}",
+            "message":  c.get("message", ""),
+            "fixable":  False,
+            "fixable_unsafe": False,
+        })
+    return {"tool": "shellcheck", "status": _status(issues, result.returncode),
+            "issues": issues}
 
 
 # A coverage exemption is a CLAIM: that the function is a thin wrapper with
@@ -985,6 +1036,7 @@ def run_no_cover(target: str) -> dict[str, Any]:
 
 TOOL_RUNNERS = {
     "cppcheck":       run_cppcheck,
+    "shellcheck":     run_shellcheck,
     "no-cover":       run_no_cover,
     "ruff":           run_ruff,
     "mypy":           run_mypy,
@@ -1006,6 +1058,7 @@ DEFAULT_TOOLS = {
     "html":   ["eslint", "stylelint", "prettier"],
     "php":    ["phpstan", "phpcs", "rector"],
     "cpp":    ["cppcheck"],
+    "shell":  ["shellcheck"],
 }
 
 AUDIT_TOOLS = {
