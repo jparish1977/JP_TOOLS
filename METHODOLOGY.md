@@ -209,7 +209,7 @@ Joe's rule, 2026-09-08: **"pbq and pbq-grep should be part if methodolgy in spir
 
 **Not one of the fifteen rounds proposed it.** A review asks whether the code is correct. It does not ask whether the code should exist, and by round fifteen nobody is asking either.
 
-**Enforcement is mechanical, on the same footing as §2.5, which is what makes this a principle here rather than advice.** `hook-book-first` refuses bare `grep`, `rg`, `ugrep` and `ack` fleet-wide, with no flag, marker or comment that lifts it -- a person edits the hook. The ladder is `~/projects/projectbook/bin/pbq-grep`, **by full path**, since it is not on `PATH` even though `pbq` is:
+**Enforcement is mechanical, on the same footing as §2.5, which is what makes this a principle here rather than advice.** `hook-book-first` refuses bare `grep`, `rg`, `ugrep` and `ack` fleet-wide, with no flag, marker or comment a seat can use; a person lifts it with `bin/book-first`, and `bin/book-first status` says where it is lifted. The ladder is `~/projects/projectbook/bin/pbq-grep`, **by full path**, since it is not on `PATH` even though `pbq` is:
 
     ~/projects/projectbook/bin/pbq-grep --phrase TERM -- <your command>
 
@@ -249,7 +249,7 @@ That ambiguity is worth stating plainly, because it is the enforcement tool for 
 
 **IN SPIRIT IF NOT IN NAME is doing real work in Joe's sentence, and the spool-audit case is why.** `pbq` searches this fleet's own record. It would not have found `cancel -a -x`, because that is CUPS' manual, not ours. The principle is **find out what already exists before you build it**, and the instrument varies with the question: the fleet record for anything we have done before, the platform's own documentation for anything the platform might already do, the tracker for anything already decided and disposed of. Reaching for the wrong one of those and getting a clean nothing is the failure mode, not an exemption from the rule.
 
-**Status per §1, stated because this principle arrives with more evidence behind it than §2.9 and less than §2.5.** The mechanism is proven: the refusal is wired, unbypassable, and it fired on the author of this section while the section was being researched, naming its own fix in the refusal text. What is NOT established is a JP_TOOLS-native cycle. The spool-audit instance is this repo's and it is real, but it was caught by Joe reading his own tool rather than by any search, so it demonstrates the cost of the failure and not yet the value of the cure. The fleet instances that demonstrate the cure are session tooling, not this codebase. That gap is the test this principle has still to pass.
+**Status per §1, stated because this principle arrives with more evidence behind it than §2.9 and less than §2.5.** The mechanism is proven: the refusal is wired, and refuses the common spellings; it has known holes (a searcher after `if`/`while`/`!`, searches in python or jq), so it is a strong nudge rather than a wall. It fired on the author of this section while the section was being researched, naming its own fix in the refusal text. What is NOT established is a JP_TOOLS-native cycle. The spool-audit instance is this repo's and it is real, but it was caught by Joe reading his own tool rather than by any search, so it demonstrates the cost of the failure and not yet the value of the cure. The fleet instances that demonstrate the cure are session tooling, not this codebase. That gap is the test this principle has still to pass.
 
 ---
 
