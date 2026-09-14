@@ -43,22 +43,34 @@ def name_process() -> None:
 
 
 def git(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=False,
+                          encoding="utf-8", errors="replace")
 
 
-def added_dashes(diff: str) -> dict[str, list[int]]:
-    """{path: [line numbers in the new file]} for ADDED lines holding an em-dash."""
-    found: dict[str, list[int]] = {}
-    path: str | None = None
+def staged_files() -> list[str]:
+    """Paths staged as added or modified. NUL-separated, so git does not quote a
+    non-ASCII name the way it does in a diff header (claude-config's review of #84)."""
+    out = git("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR").stdout
+    return [p for p in out.split("\0") if p]
+
+
+def added_dashes(diff: str) -> list[int]:
+    """Line numbers, in the new file, of ADDED lines holding an em-dash.
+
+    `diff` is ONE file's `git diff -U0`. Everything before the first hunk is
+    header; after it every "+" row is content, even one reading "+++ ", which
+    is what an added line starting "++ " looks like (claude-config's review of
+    #84: taking it for a header left the rest of the file unchecked)."""
+    found: list[int] = []
     line = 0
+    in_hunk = False
     for row in diff.splitlines():
-        if row.startswith("+++ "):
-            path = row[6:] if row.startswith("+++ b/") else None
-        elif (m := HUNK.match(row)) is not None:
+        if (m := HUNK.match(row)) is not None:
             line = int(m.group(1))
-        elif row.startswith("+") and path is not None:
+            in_hunk = True
+        elif in_hunk and row.startswith("+"):
             if DASH in row:
-                found.setdefault(path, []).append(line)
+                found.append(line)
             line += 1
     return found
 
@@ -82,6 +94,16 @@ def fix_file(path: str, lines: list[int]) -> bool:
     return True
 
 
+def find_dashes() -> dict[str, list[int]]:
+    """{path: [line numbers]} for every staged file, one diff per file."""
+    found: dict[str, list[int]] = {}
+    for path in staged_files():
+        diff = git("diff", "--cached", "-U0", "--no-color", "--no-ext-diff", "--", path).stdout
+        if lines := added_dashes(diff):
+            found[path] = lines
+    return found
+
+
 def main() -> int:
     name_process()
     if {"-h", "--help"} & set(sys.argv[1:]):
@@ -92,7 +114,7 @@ def main() -> int:
         print("fix-dashes: not in a git repository")
         return 2
     os.chdir(top.stdout.strip())
-    found = added_dashes(git("diff", "--cached", "-U0", "--no-color", "--no-ext-diff").stdout)
+    found = find_dashes()
     if "--check" in sys.argv[1:]:
         for path, lines in sorted(found.items()):
             print("\n".join(f"  {path}:{n}" for n in lines))

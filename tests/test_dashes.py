@@ -117,6 +117,31 @@ def unstaged_case(repo: Path) -> None:
           and DASH in (repo / "other.md").read_text(encoding="utf-8"), r.stdout)
 
 
+def edge_cases(tmp: Path) -> None:
+    """claude-config's review of #84: two ways a new em-dash got past --check.
+    Each in a fresh repo, so nothing staged earlier can make it pass."""
+    print("\nDiff edges (#84 review):")
+    edges = (
+        ("plus.md", f"++ reads like a header {DASH} but is not",
+         "an added line starting '++ ' (a '+++ ' row in the diff)"),
+        ("nöte.md", f"a line {DASH} in a non-ASCII file",
+         "a file with a non-ASCII name (quoted in a diff header)"),
+    )
+    for i, (name, text, what) in enumerate(edges):
+        d = tmp / f"edge{i}"
+        d.mkdir()
+        repo = setup(d)
+        add_line(repo, name, text)
+        r = git(repo, "commit", "-m", "edge")
+        out = r.stdout + r.stderr
+        check(f"{what} is refused", r.returncode != 0 and f"{name}:1" in out, out)
+        run(repo, sys.executable, str(ROOT / "fix-dashes.py"))
+        r = git(repo, "commit", "-m", "edge, fixed")
+        fixed = (repo / name).read_text(encoding="utf-8")
+        check("... and fix-dashes.py fixes it, so the commit goes through",
+              r.returncode == 0 and DASH not in fixed, r.stdout + r.stderr + fixed)
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
@@ -127,6 +152,7 @@ def main() -> int:
         refusal_cases(repo)
         fixer_cases(repo)
         unstaged_case(repo)
+        edge_cases(Path(td))
     print(f"\n{checks - fails}/{checks} passed")
     return 1 if fails else 0
 
