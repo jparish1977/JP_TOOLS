@@ -1034,10 +1034,174 @@ def run_no_cover(target: str) -> dict[str, Any]:
     return {"tool": "no-cover", "status": _status(issues), "issues": issues}
 
 
+# ── smells (#55) ──────────────────────────────────────────────────────────────
+# Joe, 2026-09-14: "a 1000 line file is a stink... a 100 line fucntion is a
+# stink... compexity of a function is a stink... complexity of a file is a
+# stink", then "fail on new warn on existing" and "the base 0 fro... well...
+# thats new": the base is TODAY. A smell that was not there before this change
+# FAILS; one that was there already WARNS. "Before" is the file at the smells
+# base: HEAD by default, which is the last commit when the pre-commit hook runs;
+# CI on a pull request passes the PR's base with --smells-base.
+#
+# Python, measured with ast. Complexity is McCabe-style: 1, plus each if and
+# elif, loop, except, conditional expression, match case, extra boolean operand
+# and comprehension clause. A nested function is measured on its own. The file
+# complexity is the sum over its functions.
+_SMELL_FILE_LINES = 1000        # a smell at or over
+_SMELL_FUNC_LINES = 100         # a smell at or over
+_SMELL_FUNC_COMPLEXITY = 11     # over 10
+_SMELL_FILE_COMPLEXITY = 101    # over 100
+_SMELLS = {"base": "HEAD"}      # set from --smells-base in main()
+_BRANCHES = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
+             ast.IfExp, ast.match_case)
+
+
+def _complexity(fn: ast.AST) -> int:
+    n = 1
+    stack = list(ast.iter_child_nodes(fn))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(node, _BRANCHES):
+            n += 1
+        elif isinstance(node, ast.BoolOp):
+            n += len(node.values) - 1
+        elif isinstance(node, ast.comprehension):
+            n += 1 + len(node.ifs)
+        stack.extend(ast.iter_child_nodes(node))
+    return n
+
+
+def _smell_measure(src: str) -> tuple[int, dict[str, tuple[int, int, int]]]:
+    """(physical lines, {qualified function name: (lines, complexity, line)})."""
+    funcs: dict[str, tuple[int, int, int]] = {}
+    stack: list[tuple[ast.AST, str]] = [(ast.parse(src), "")]
+    while stack:
+        node, prefix = stack.pop()
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                name = prefix + child.name
+                size = (child.end_lineno or child.lineno) - child.lineno + 1
+                funcs[name] = (size, _complexity(child), child.lineno)
+                stack.append((child, name + "."))
+            elif isinstance(child, ast.ClassDef):
+                stack.append((child, prefix + child.name + "."))
+            else:
+                stack.append((child, prefix))
+    return len(src.splitlines()), funcs
+
+
+def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    # A hook exports GIT_DIR and GIT_INDEX_FILE relative to the committing
+    # repo, which points at the wrong place for a `git -C` elsewhere (#54).
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True,
+                              text=True, check=False, env=env)
+    except FileNotFoundError as e:
+        raise _NoGitError("git") from e
+
+
+class _NoSmellsBaseError(Exception):
+    """The ref named with --smells-base does not resolve."""
+
+
+class _NoGitError(Exception):
+    """git itself is not on PATH, so no history can be read."""
+
+
+def _smell_base(path: Path) -> str | None:
+    """The file as it stood at the smells base; None if it did not exist there.
+
+    Outside git, or in a repo with no commits yet, there is no history, so
+    every smell is new. A named base that does not resolve is refused rather
+    than guessed at: new could not be told from existing.
+    """
+    base = _SMELLS["base"]
+    top = _git(["rev-parse", "--show-toplevel"], path.resolve().parent)
+    if top.returncode != 0:
+        return None
+    root = Path(top.stdout.strip())
+    if _git(["rev-parse", "-q", "--verify", base + "^{commit}"], root).returncode != 0:
+        if base == "HEAD":
+            return None
+        raise _NoSmellsBaseError(base)
+    rel = path.resolve().relative_to(root.resolve()).as_posix()
+    shown = _git(["show", f"{base}:{rel}"], root)
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def _smell(f: Path, line: int, rule: str, what: str,
+           counts: tuple[int, int, int]) -> dict[str, Any] | None:
+    """counts = (now, before, limit). None when under the limit now."""
+    now, before, limit = counts
+    if now < limit:
+        return None
+    new = before < limit
+    return {
+        "file": str(f), "line": line, "col": 0,
+        "severity": "error" if new else "warning",
+        "rule": rule,
+        "message": (f"{what} is {now} (a smell at {limit}); "
+                    + (f"NEW: was {before} before this change" if new
+                       else f"existing: was already {before}, so a warning")),
+        "fixable": False, "fixable_unsafe": False,
+    }
+
+
+def _file_smells(f: Path) -> list[dict[str, Any]]:
+    try:
+        lines, funcs = _smell_measure(f.read_text(encoding="utf-8", errors="replace"))
+    except (SyntaxError, ValueError, OSError):
+        return []           # ruff reports a file that does not parse
+    base = _smell_base(f)
+    try:
+        b_lines, b_funcs = _smell_measure(base) if base is not None else (0, {})
+    except (SyntaxError, ValueError):
+        b_lines, b_funcs = 0, {}
+    cx_now = sum(c for _, c, _ in funcs.values())
+    cx_before = sum(c for _, c, _ in b_funcs.values())
+    found = [
+        _smell(f, 1, "SMELL-FILE-LINES", "file length",
+               (lines, b_lines, _SMELL_FILE_LINES)),
+        _smell(f, 1, "SMELL-FILE-COMPLEXITY", "file complexity (sum over its functions)",
+               (cx_now, cx_before, _SMELL_FILE_COMPLEXITY)),
+    ]
+    for name, (size, cx, line) in funcs.items():
+        b_size, b_cx, _ = b_funcs.get(name, (0, 0, 0))
+        found.append(_smell(f, line, "SMELL-FUNC-LINES", f"function {name} length",
+                            (size, b_size, _SMELL_FUNC_LINES)))
+        found.append(_smell(f, line, "SMELL-FUNC-COMPLEXITY", f"function {name} complexity",
+                            (cx, b_cx, _SMELL_FUNC_COMPLEXITY)))
+    return [s for s in found if s is not None]
+
+
+def run_smells(target: str) -> dict[str, Any]:
+    p = Path(target)
+    files = ([f for f in sorted(p.rglob("*.py")) if is_project_file(f, p)]
+             if p.is_dir() else [p])
+    issues: list[dict[str, Any]] = []
+    try:
+        for f in files:
+            issues.extend(_file_smells(f))
+    except _NoSmellsBaseError as e:
+        return {"tool": "smells", "status": "error", "issues": [],
+                "note": f"--smells-base {e} does not resolve, so a new smell "
+                        "cannot be told from an existing one"}
+    except _NoGitError:
+        # Without git there is no history, so new cannot be told from
+        # existing: a check that did not run, never a pass (#59).
+        return _tool_missing("git (the smells arm reads history to tell new from existing)")
+    status = "fail" if any(i["severity"] == "error" for i in issues) else "pass"
+    return {"tool": "smells", "status": status, "issues": issues}
+
+
 TOOL_RUNNERS = {
     "cppcheck":       run_cppcheck,
     "shellcheck":     run_shellcheck,
     "no-cover":       run_no_cover,
+    "smells":         run_smells,
     "ruff":           run_ruff,
     "mypy":           run_mypy,
     "eslint":         run_eslint,
@@ -1052,7 +1216,7 @@ TOOL_RUNNERS = {
 }
 
 DEFAULT_TOOLS = {
-    "python": ["ruff", "mypy", "no-cover"],
+    "python": ["ruff", "mypy", "no-cover", "smells"],
     "js":     ["eslint", "prettier"],
     "css":    ["stylelint", "prettier"],
     "html":   ["eslint", "stylelint", "prettier"],
@@ -1068,7 +1232,7 @@ AUDIT_TOOLS = {
 }
 
 # Tools that accept directories natively (pass the dir, not individual files)
-_DIR_CAPABLE = {"ruff", "mypy", "no-cover", "phpstan", "phpcs", "rector",
+_DIR_CAPABLE = {"ruff", "mypy", "no-cover", "smells", "phpstan", "phpcs", "rector",
                 "pip-audit", "npm-audit", "composer-audit"}
 # cppcheck is deliberately not in _DIR_CAPABLE: the .ino suppression is decided
 # per file, and passing a directory would apply sketch rules to every .cpp.
@@ -1508,7 +1672,14 @@ def main() -> None:
                              "drops files the existing one recorded. Needed "
                              "only when that loss is intended, such as after "
                              "deleting files.")
+    parser.add_argument("--smells-base", metavar="REF", default="HEAD",
+                        help="What a smell is NEW against (#55): over its threshold "
+                             "now and not at REF fails; already over at REF warns. "
+                             "Default HEAD, the last commit, which is what the "
+                             "pre-commit hook wants. CI on a pull request passes "
+                             "the PR's base.")
     args = parser.parse_args()
+    _SMELLS["base"] = args.smells_base
 
     target = str(Path(args.target).resolve())
     if not Path(target).exists():
