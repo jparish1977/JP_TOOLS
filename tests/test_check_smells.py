@@ -161,6 +161,33 @@ def the_base(repo: Path) -> None:
           rc == 2 and "does not resolve" in raw, raw)
 
 
+def moves(repo: Path) -> None:
+    """projectbook-helper's rows D and E, reviewing #82: a smell that MOVES is
+    not new, or the arm fails the split the file-length smell asks for."""
+    print("\nMoving a smell (#82 review):")
+    old = repo / "old.py"
+    old.write_text(long_func("lng", 100) + "\n\n" + complex_func("cpx", 11), encoding="utf-8")
+    commit(repo, "old smells")
+    git(repo, "mv", "old.py", "moved.py")
+    rc, pairs, raw = smells(repo / "moved.py")
+    check("D: a file moved with git mv keeps its smells as existing: warnings, exit 0",
+          rc == 0 and pairs == [("SMELL-FUNC-COMPLEXITY", "warning"),
+                                ("SMELL-FUNC-LINES", "warning")], raw)
+    commit(repo, "moved")
+    moved = repo / "moved.py"
+    moved.write_text(long_func("lng", 100), encoding="utf-8")
+    part = repo / "part.py"
+    part.write_text(complex_func("cpx", 11), encoding="utf-8")
+    rc, pairs, raw = smells(part)
+    check("E: a smelly function moved out into a new file is existing: a warning, exit 0",
+          rc == 0 and pairs == [("SMELL-FUNC-COMPLEXITY", "warning")], raw)
+    part.write_text(complex_func("cpx", 11) + "\n\n" + complex_func("fresh", 11),
+                    encoding="utf-8")
+    rc, pairs, raw = smells(part)
+    check("CONTROL: a genuinely new smelly function in that file still fails, exit 1",
+          rc == 1 and ("SMELL-FUNC-COMPLEXITY", "error") in pairs, raw)
+
+
 def outside_and_clean(repo: Path, tmp: Path) -> None:
     print("\nNo history, and a clean file:")
     loose = tmp / "loose.py"
@@ -187,6 +214,7 @@ def main() -> int:
         function_complexity(repo)
         file_smells(repo)
         the_base(repo)
+        moves(repo)
         outside_and_clean(repo, tmp)
     print(f"\n{checks - fails}/{checks} passed")
     return 1 if fails else 0

@@ -1111,12 +1111,12 @@ class _NoGitError(Exception):
     """git itself is not on PATH, so no history can be read."""
 
 
-def _smell_base(path: Path) -> str | None:
-    """The file as it stood at the smells base; None if it did not exist there.
+def _smells_context(path: Path) -> tuple[Path, str] | None:
+    """(repo root, base ref) when there is history to compare against.
 
-    Outside git, or in a repo with no commits yet, there is no history, so
-    every smell is new. A named base that does not resolve is refused rather
-    than guessed at: new could not be told from existing.
+    None outside git, or in a repo with no commits yet: no history, so every
+    smell is new. A named base that does not resolve is refused rather than
+    guessed at: new could not be told from existing.
     """
     base = _SMELLS["base"]
     top = _git(["rev-parse", "--show-toplevel"], path.resolve().parent)
@@ -1127,9 +1127,56 @@ def _smell_base(path: Path) -> str | None:
         if base == "HEAD":
             return None
         raise _NoSmellsBaseError(base)
-    rel = path.resolve().relative_to(root.resolve()).as_posix()
+    return root, base
+
+
+def _base_text(root: Path, base: str, rel: str) -> str | None:
     shown = _git(["show", f"{base}:{rel}"], root)
     return shown.stdout if shown.returncode == 0 else None
+
+
+def _renamed_from(root: Path, base: str, rel: str) -> str | None:
+    """The path this file had at the base, when git sees the change as a rename."""
+    out = _git(["diff", "-M", "--name-status", "--diff-filter=R", base, "--"], root).stdout
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[2] == rel:
+            return parts[1]
+    return None
+
+
+def _function_elsewhere(root: Path, base: str, name: str) -> tuple[int, int, int]:
+    """A function's size and complexity at the base in ANY file, for one that
+    moved: splitting a smelly file moves its smells, it does not add them
+    (projectbook-helper, reviewing #82). The largest measure found wins."""
+    leaf = name.rsplit(".", 1)[-1]
+    hits = _git(["grep", "-l", "-E", f"def {leaf}\\(", base, "--", "*.py"], root).stdout
+    best = (0, 0, 0)
+    for hit in hits.splitlines():
+        src = _base_text(root, base, hit.split(":", 1)[-1])
+        try:
+            found = _smell_measure(src)[1].get(name) if src is not None else None
+        except (SyntaxError, ValueError):
+            found = None
+        if found:
+            best = (max(best[0], found[0]), max(best[1], found[1]), 0)
+    return best
+
+
+def _base_measure(f: Path, ctx: tuple[Path, str] | None) -> tuple[int, dict[str, tuple[int, int, int]]]:
+    """The file as it stood at the base, by its path or the path it was renamed from."""
+    if ctx is None:
+        return 0, {}
+    root, base = ctx
+    rel = f.resolve().relative_to(root.resolve()).as_posix()
+    src = _base_text(root, base, rel)
+    if src is None:
+        old = _renamed_from(root, base, rel)
+        src = _base_text(root, base, old) if old else None
+    try:
+        return _smell_measure(src) if src is not None else (0, {})
+    except (SyntaxError, ValueError):
+        return 0, {}
 
 
 def _smell(f: Path, line: int, rule: str, what: str,
@@ -1150,16 +1197,24 @@ def _smell(f: Path, line: int, rule: str, what: str,
     }
 
 
+def _unmeasured(f: Path) -> dict[str, Any]:
+    return {"file": str(f), "line": 1, "col": 0, "severity": "warning",
+            "rule": "SMELL-UNMEASURED",
+            "message": "could not be parsed, so its smells were not measured "
+                       "(ruff reports the parse error)",
+            "fixable": False, "fixable_unsafe": False}
+
+
 def _file_smells(f: Path) -> list[dict[str, Any]]:
+    """The four smells for one file. A function missing at its own path is
+    looked for across the base tree before it counts as new; a function renamed
+    in place still counts as new, which is a chance to fix it."""
     try:
         lines, funcs = _smell_measure(f.read_text(encoding="utf-8", errors="replace"))
     except (SyntaxError, ValueError, OSError):
-        return []           # ruff reports a file that does not parse
-    base = _smell_base(f)
-    try:
-        b_lines, b_funcs = _smell_measure(base) if base is not None else (0, {})
-    except (SyntaxError, ValueError):
-        b_lines, b_funcs = 0, {}
+        return [_unmeasured(f)]
+    ctx = _smells_context(f)
+    b_lines, b_funcs = _base_measure(f, ctx)
     cx_now = sum(c for _, c, _ in funcs.values())
     cx_before = sum(c for _, c, _ in b_funcs.values())
     found = [
@@ -1168,13 +1223,26 @@ def _file_smells(f: Path) -> list[dict[str, Any]]:
         _smell(f, 1, "SMELL-FILE-COMPLEXITY", "file complexity (sum over its functions)",
                (cx_now, cx_before, _SMELL_FILE_COMPLEXITY)),
     ]
-    for name, (size, cx, line) in funcs.items():
-        b_size, b_cx, _ = b_funcs.get(name, (0, 0, 0))
-        found.append(_smell(f, line, "SMELL-FUNC-LINES", f"function {name} length",
-                            (size, b_size, _SMELL_FUNC_LINES)))
-        found.append(_smell(f, line, "SMELL-FUNC-COMPLEXITY", f"function {name} complexity",
-                            (cx, b_cx, _SMELL_FUNC_COMPLEXITY)))
+    found.extend(_function_smells(f, funcs, b_funcs, ctx))
     return [s for s in found if s is not None]
+
+
+def _function_smells(f: Path, funcs: dict[str, tuple[int, int, int]],
+                     b_funcs: dict[str, tuple[int, int, int]],
+                     ctx: tuple[Path, str] | None) -> list[dict[str, Any] | None]:
+    """Length and complexity for each function, each against its own before."""
+    out: list[dict[str, Any] | None] = []
+    for name, (size, cx, line) in funcs.items():
+        before = b_funcs.get(name)
+        smelly = size >= _SMELL_FUNC_LINES or cx >= _SMELL_FUNC_COMPLEXITY
+        if before is None and ctx is not None and smelly:
+            before = _function_elsewhere(ctx[0], ctx[1], name)
+        b_size, b_cx, _ = before or (0, 0, 0)
+        out.append(_smell(f, line, "SMELL-FUNC-LINES", f"function {name} length",
+                          (size, b_size, _SMELL_FUNC_LINES)))
+        out.append(_smell(f, line, "SMELL-FUNC-COMPLEXITY", f"function {name} complexity",
+                          (cx, b_cx, _SMELL_FUNC_COMPLEXITY)))
+    return out
 
 
 def run_smells(target: str) -> dict[str, Any]:
