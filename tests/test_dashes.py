@@ -142,6 +142,31 @@ def edge_cases(tmp: Path) -> None:
               r.returncode == 0 and DASH not in fixed, r.stdout + r.stderr + fixed)
 
 
+def rename_cases(tmp: Path) -> None:
+    """claude-config's second review of #84: the lines a moved file carries are
+    not added lines, and a commit that renames is still checked."""
+    print("\nRenames (#84 review):")
+    allow = dict(os.environ, JP_TOOLS_ALLOW_EMDASH="1")
+    record = "".join(f"line {n}\n" for n in range(1, 6)) + f"dated {DASH} record\n"
+    cases = (
+        ("a plain new line", False, "moving a dated record and adding a plain line passes"),
+        (f"a new {DASH} line", True, "moving a file and adding a dash line is refused, line 7 only"),
+    )
+    for i, (added, want_refused, what) in enumerate(cases):
+        d = tmp / f"rename{i}"
+        d.mkdir()
+        repo = setup(d)
+        (repo / "record.md").write_text(record, encoding="utf-8")
+        git(repo, "add", "record.md")
+        git(repo, "commit", "-q", "-m", "the record", env=allow)
+        git(repo, "mv", "record.md", "moved.md")
+        add_line(repo, "moved.md", added)
+        r = git(repo, "commit", "-m", "moved")
+        out = r.stdout + r.stderr
+        ok = (r.returncode != 0 and "moved.md:7" in out) if want_refused else r.returncode == 0
+        check(what, ok and "moved.md:6" not in out, out)
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
@@ -153,6 +178,7 @@ def main() -> int:
         fixer_cases(repo)
         unstaged_case(repo)
         edge_cases(Path(td))
+        rename_cases(Path(td))
     print(f"\n{checks - fails}/{checks} passed")
     return 1 if fails else 0
 

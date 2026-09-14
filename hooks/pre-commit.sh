@@ -71,11 +71,6 @@ if [ -n "$MISSING" ]; then
         "git -C \"$TOOLS_DIR\" pull --ff-only"
 fi
 
-STAGED=$(git diff --cached --name-only --diff-filter=ACM)
-if [ -z "$STAGED" ]; then
-    exit 0
-fi
-
 # NO NEW EM-DASHES, Joe's rule (CLAUDE.md, 2026-04-17). Only the lines this
 # commit ADDS are checked, so a dated record is never retrofitted, and the fix
 # is mechanical, so the refusal gives the one command that does it.
@@ -83,6 +78,9 @@ fi
 # (Joe: "itll need a flag to allow instances where its actually a thing we
 # need to do"), and it is announced every time, because an exported variable
 # outlives the commit it was set for.
+# It runs BEFORE the STAGED list below, which is ACM for check.py: a commit
+# that only renames files would exit there, and a rename can add lines
+# (claude-config, reviewing #84). fix-dashes.py finds its own files.
 if [ -n "$JP_TOOLS_ALLOW_EMDASH" ]; then
     echo "JP_TOOLS hook: JP_TOOLS_ALLOW_EMDASH is set; em-dashes are allowed in this commit." >&2
 elif DASHED=$("$PY" "$TOOLS_DIR/fix-dashes.py" --check); [ -n "$DASHED" ]; then
@@ -94,6 +92,11 @@ elif DASHED=$("$PY" "$TOOLS_DIR/fix-dashes.py" --check); [ -n "$DASHED" ]; then
     echo " If one is genuinely needed: JP_TOOLS_ALLOW_EMDASH=1 git commit ..."
     echo "====================================="
     exit 1
+fi
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+if [ -z "$STAGED" ]; then
+    exit 0
 fi
 
 # Split on newlines only, so paths with spaces survive.

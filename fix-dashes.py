@@ -47,11 +47,20 @@ def git(*args: str) -> subprocess.CompletedProcess[str]:
                           encoding="utf-8", errors="replace")
 
 
-def staged_files() -> list[str]:
-    """Paths staged as added or modified. NUL-separated, so git does not quote a
-    non-ASCII name the way it does in a diff header (claude-config's review of #84)."""
-    out = git("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR").stdout
-    return [p for p in out.split("\0") if p]
+def staged_files() -> list[list[str]]:
+    """Each staged added, modified or renamed file, as the paths its diff needs:
+    [path], or [old, new] for a rename, so the lines a moved file carries are
+    not read as added (claude-config's second review of #84). NUL-separated, so
+    git does not quote a non-ASCII name the way it does in a diff header."""
+    out = git("diff", "--cached", "--name-status", "-z", "-M", "--diff-filter=ACMR").stdout
+    fields = out.split("\0")
+    entries: list[list[str]] = []
+    i = 0
+    while i < len(fields) and fields[i]:
+        n = 2 if fields[i].startswith("R") else 1
+        entries.append(fields[i + 1:i + 1 + n])
+        i += 1 + n
+    return entries
 
 
 def added_dashes(diff: str) -> list[int]:
@@ -97,10 +106,10 @@ def fix_file(path: str, lines: list[int]) -> bool:
 def find_dashes() -> dict[str, list[int]]:
     """{path: [line numbers]} for every staged file, one diff per file."""
     found: dict[str, list[int]] = {}
-    for path in staged_files():
-        diff = git("diff", "--cached", "-U0", "--no-color", "--no-ext-diff", "--", path).stdout
+    for paths in staged_files():
+        diff = git("diff", "--cached", "-U0", "-M", "--no-color", "--no-ext-diff", "--", *paths).stdout
         if lines := added_dashes(diff):
-            found[path] = lines
+            found[paths[-1]] = lines
     return found
 
 
