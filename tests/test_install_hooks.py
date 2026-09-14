@@ -219,12 +219,52 @@ def incapable_tools_cases(tmp: Path) -> None:
           "staged file(s) checked" not in out, out)
 
 
+def append_roundtrip_cases(tmp: Path) -> None:
+    """#66: install then --remove on a repo's OWN hook gives it back byte for
+    byte, and a second cycle gives the same file.
+
+    Before the fix, install appended the template with its own #!/bin/sh and
+    --remove kept every line above the marker, so each cycle left one more
+    stray shebang (romtools went from 1 to 2). Needs no ruff.
+    """
+    print("Appending to a repo's own hook (#66):")
+    repo = tmp / "own-hook"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.parent.mkdir(exist_ok=True)
+    own = "#!/bin/sh\necho repo's own gate\n"
+    hook.write_text(own, encoding="utf-8")
+    hook.chmod(0o755)
+
+    r = run_installer(repo)
+    installed = hook.read_text(encoding="utf-8")
+    check("install appends to the repo's own hook, exit 0", r.returncode == 0,
+          r.stdout + r.stderr)
+    check("the repo's own hook is still first", installed.startswith(own),
+          installed[:200])
+    check("the appended section adds no second shebang",
+          installed.count("#!/bin/sh") == 1, installed[:400])
+
+    run_installer(repo, "--remove")
+    after = hook.read_text(encoding="utf-8")
+    check("--remove gives the repo's hook back byte for byte", after == own, after)
+
+    run_installer(repo)
+    run_installer(repo, "--remove")
+    after = hook.read_text(encoding="utf-8")
+    check("a second install/remove cycle gives the same file", after == own, after)
+    print()
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
         return 0
     with tempfile.TemporaryDirectory() as td:
         symlinked_hook_cases(Path(td))
+    with tempfile.TemporaryDirectory() as td:
+        append_roundtrip_cases(Path(td))
     if not shutil.which("ruff"):
         print(f"SKIP the rest: ruff not found, check.py cannot fail a file ({checks - fails}/{checks} passed above)")
         return 1 if fails else 0

@@ -245,12 +245,20 @@ def install(repo_path: Path) -> None:
         # There's a non-JP_TOOLS hook — don't clobber it
         print(f"Warning: existing pre-commit hook found at {hook_file}")
         print("Appending JP_TOOLS check. Review the hook if needed.")
-        # Append to existing hook
+        # Append to the existing hook WITHOUT the template's own shebang. The
+        # repo's hook already starts with one, and remove() keeps every line
+        # above the marker, so an appended shebang survived each --remove and
+        # every reinstall added another: romtools went from 1 to 2. With the
+        # shebang dropped the marker is the first appended line, and remove()
+        # gives back the repo's hook as it was. #66.
+        body = HOOK_TEMPLATE.format(
+            marker=HOOK_MARKER,
+            tools_dir=str(TOOLS_DIR).replace("\\", "/"),
+        )
+        if body.startswith("#!"):
+            body = body.split("\n", 1)[1]
         with open(hook_file, "a", encoding="utf-8") as f:
-            f.write("\n" + HOOK_TEMPLATE.format(
-                marker=HOOK_MARKER,
-                tools_dir=str(TOOLS_DIR).replace("\\", "/"),
-            ))
+            f.write("\n" + body)
     else:
         hook_file.write_text(
             HOOK_TEMPLATE.format(
