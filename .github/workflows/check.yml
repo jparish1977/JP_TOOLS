@@ -72,6 +72,18 @@ jobs:
       # in tests/ skips, and a skip is indistinguishable from a pass in the log.
       # test_check_phpstan.py pins a bug that reported the repo directory as
       # the filename for every finding; it is worth nothing if it never runs.
+      #
+      # PHP and composer are installed EXPLICITLY. GitHub's ubuntu-latest
+      # happens to ship both; the act image behind the iteration8 Forgejo
+      # runner ships neither, so `composer install` exited 127 ("command not
+      # found") and this job was red on every Forgejo head (#64). Skipping
+      # the step when composer is absent would make the phpstan suites skip,
+      # which reads as a pass: the shape #59 removed. 8.3 because phpunit
+      # ^12.5 in composer.json requires it.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer
       - name: Install PHP tools
         run: composer install --no-interaction --no-progress
       - name: Run test suites
