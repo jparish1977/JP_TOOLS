@@ -9,9 +9,10 @@ Usage:
 """
 
 import argparse
-import sys
 import subprocess
+import sys
 from pathlib import Path
+
 
 def _tools_dir() -> Path:
     """Where to record as the install-time fallback.
