@@ -245,12 +245,20 @@ def install(repo_path: Path) -> None:
         # There's a non-JP_TOOLS hook — don't clobber it
         print(f"Warning: existing pre-commit hook found at {hook_file}")
         print("Appending JP_TOOLS check. Review the hook if needed.")
-        # Append to existing hook
+        # Append to the existing hook WITHOUT the template's own shebang. The
+        # repo's hook already starts with one, and remove() keeps every line
+        # above the marker, so an appended shebang survived each --remove and
+        # every reinstall added another: romtools went from 1 to 2. With the
+        # shebang dropped the marker is the first appended line, and remove()
+        # gives back the repo's hook as it was. #66.
+        body = HOOK_TEMPLATE.format(
+            marker=HOOK_MARKER,
+            tools_dir=str(TOOLS_DIR).replace("\\", "/"),
+        )
+        if body.startswith("#!"):
+            body = body.split("\n", 1)[1]
         with open(hook_file, "a", encoding="utf-8") as f:
-            f.write("\n" + HOOK_TEMPLATE.format(
-                marker=HOOK_MARKER,
-                tools_dir=str(TOOLS_DIR).replace("\\", "/"),
-            ))
+            f.write("\n" + body)
     else:
         hook_file.write_text(
             HOOK_TEMPLATE.format(
@@ -294,9 +302,17 @@ def remove(repo_path: Path) -> None:
         hook_file.unlink()
         print(f"Removed JP_TOOLS pre-commit hook from {hook_file}")
     else:
-        # Our hook was appended — remove just our section
-        before = lines[:marker_idx]
-        hook_file.write_text("\n".join(before).rstrip() + "\n", encoding="utf-8")
+        # Our section was appended. install() writes exactly "\n" + the marker
+        # onward, so cut at that offset and the repo's hook comes back byte for
+        # byte, whatever its ending. Splitting into lines and rstrip()ing
+        # rewrote a hook with no final newline or a trailing blank line
+        # (projectbook-helper, reviewing #74). An install from before #66 also
+        # left its own "#!/bin/sh" just above the marker; strip that too, so
+        # older installs come back clean.
+        before = content[:content.index("\n" + HOOK_MARKER)]
+        if before.endswith("\n#!/bin/sh"):
+            before = before[:-len("\n#!/bin/sh")]
+        hook_file.write_text(before, encoding="utf-8")
         print(f"Removed JP_TOOLS section from {hook_file} (kept existing hook)")
 
 
