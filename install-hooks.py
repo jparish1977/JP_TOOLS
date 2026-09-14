@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -316,14 +317,68 @@ def remove(repo_path: Path) -> None:
         print(f"Removed JP_TOOLS section from {hook_file} (kept existing hook)")
 
 
+def hook_status(repo: Path) -> tuple[str, str]:
+    """(STATE, detail) for one repo's pre-commit hook. #65, part 2.
+
+    An installed hook never updates itself, and nothing said so: on
+    2026-09-14 all three on joe-MacBookAir were the pre-#41 template, and one
+    baked a worktree path that had gone stale (#40). CURRENT means the JP_TOOLS
+    section is exactly what this JP_TOOLS would install today for the same
+    recorded path. STALE says why, so the fix is a reinstall.
+    """
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    if hook.is_symlink():
+        return "SYMLINK", f"-> {os.readlink(hook)} (the repo's own hook; install refuses it)"
+    if not hook.exists():
+        return "NONE", ""
+    content = hook.read_text(encoding="utf-8", errors="replace")
+    if HOOK_MARKER not in content:
+        return "NOT-JP_TOOLS", ""
+    section = content[content.index(HOOK_MARKER):]
+    m = re.search(r'for cand in .* "([^"]*)"; do', section)
+    if m is None:
+        return "STALE", "no run-time JP_TOOLS lookup: installed before #41"
+    expected = HOOK_TEMPLATE.format(marker=HOOK_MARKER, tools_dir=m.group(1))
+    expected = expected[expected.index(HOOK_MARKER):]
+    if section.rstrip("\n") == expected.rstrip("\n"):
+        return "CURRENT", f"records {m.group(1)}"
+    return "STALE", "differs from this JP_TOOLS' template"
+
+
+def status(roots: list[Path]) -> int:
+    """Report every repo's hook under `roots`; exit 1 if any is STALE."""
+    repos: list[Path] = []
+    for root in roots:
+        if (root / ".git").is_dir():
+            repos.append(root)
+            continue
+        # A worktree has a .git FILE and shares its main repo's hooks, so it
+        # is reported there, not twice.
+        repos.extend(sorted(d for d in root.iterdir() if (d / ".git").is_dir()))
+    stale = 0
+    for repo in repos:
+        state, detail = hook_status(repo)
+        stale += state == "STALE"
+        print(f"{state:<13} {repo}{'  ' + detail if detail else ''}")
+    print(f"{len(repos)} repos, {stale} STALE" + (": reinstall each with "
+          "install-hooks.py --remove, then install-hooks.py" if stale else ""))
+    return 1 if stale else 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Install/remove JP_TOOLS pre-commit hook")
     parser.add_argument("path", nargs="?", default=".",
                         help="Path to git repository (default: cwd)")
     parser.add_argument("--remove", action="store_true",
                         help="Remove the JP_TOOLS hook")
+    parser.add_argument("--status", nargs="*", metavar="ROOT",
+                        help="Report whether each repo's installed hook is current "
+                             "(default root: ~/projects); exit 1 if any is stale")
     args = parser.parse_args()
 
+    if args.status is not None:
+        roots = [Path(r).resolve() for r in args.status] or [Path.home() / "projects"]
+        sys.exit(status(roots))
     repo = Path(args.path).resolve()
     if args.remove:
         remove(repo)
