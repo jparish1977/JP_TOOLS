@@ -674,10 +674,32 @@ _SKIP_DIRS = {"node_modules", "vendor", "__pycache__", ".git", ".venv", "venv",
               "dist", "build", ".mypy_cache", ".ruff_cache", ".pytest_cache"}
 
 
+def _shebang_lang(p: Path) -> str | None:
+    """The language a script's #! line names, for a file with NO suffix. #57.
+
+    Suffix-only detection left every extensionless script unchecked: the hook
+    passes --skip-unsupported, so `bin/tool` went through as "cannot detect
+    language" while ruff and mypy both check such a file fine when named
+    (measured 2026-09-14: F401 and an assignment error found). Reads one line.
+    Python only for now. Shell waits for a shellcheck arm; detecting a
+    language with no tool behind it would turn a skip into exit 2 everywhere.
+    """
+    if p.suffix:
+        return None
+    try:
+        with p.open("rb") as fh:
+            first = fh.readline(256)
+    except OSError:
+        return None
+    if first.startswith(b"#!") and b"python" in first:
+        return "python"
+    return None
+
+
 def _detect_lang(target: str) -> str:
     p = Path(target)
     if p.is_file():
-        return _EXT_TO_LANG.get(p.suffix.lower(), "unknown")
+        return _EXT_TO_LANG.get(p.suffix.lower()) or _shebang_lang(p) or "unknown"
     return "unknown"
 
 
@@ -704,7 +726,8 @@ def _collect_files(directory: str) -> tuple[dict[str, list[str]], dict[str, int]
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
         for f in files:
             ext = Path(f).suffix.lower()
-            lang = _EXT_TO_LANG.get(ext)
+            lang = _EXT_TO_LANG.get(ext) or (
+                _shebang_lang(Path(root) / f) if not ext else None)
             if lang:
                 groups.setdefault(lang, []).append(str(Path(root) / f))
             elif ext not in _UNREMARKABLE:
@@ -1446,8 +1469,20 @@ def main() -> None:
             if not runner:
                 continue
             if name in _DIR_CAPABLE:
-                # Run once against the whole dir — tool handles file discovery
-                lang_checks.append(runner(target))
+                # Run once against the whole dir -- tool handles file discovery.
+                result = runner(target)
+                # ...by SUFFIX, so a script found by its shebang is not in it.
+                # Name each one to the tool and fold it into the same result,
+                # a not-run status included, so it cannot drop out. #57.
+                for fp in (f for f in files if not Path(f).suffix):
+                    extra = runner(fp)
+                    result["issues"] = result.get("issues", []) + extra.get("issues", [])
+                    if extra["status"] not in _RAN and result["status"] in _RAN:
+                        result["status"] = extra["status"]
+                        result["note"] = extra.get("note", "")
+                    elif extra["status"] == "fail" and result["status"] == "pass":
+                        result["status"] = "fail"
+                lang_checks.append(result)
             else:
                 # Run per-file, merge issues into one result per tool.
                 # A runner that could not run on a file did not run for this
