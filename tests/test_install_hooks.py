@@ -201,6 +201,10 @@ def incapable_tools_cases(tmp: Path) -> None:
     stub = tmp / "stale-jp-tools"
     stub.mkdir()
     (stub / "check.py").write_text(STUB_CHECK_PY, encoding="utf-8")
+    # The template is current, so what is refused is the stale check.py (#73's
+    # flag check, now in hooks/pre-commit.sh), not a too-old tree.
+    (stub / "hooks").mkdir()
+    shutil.copy2(ROOT / "hooks" / "pre-commit.sh", stub / "hooks" / "pre-commit.sh")
     home = tmp / "home"
     home.mkdir()
     env = dict(os.environ, JP_TOOLS_DIR=str(stub), HOME=str(home))
@@ -302,7 +306,7 @@ def status_cases(tmp: Path) -> None:
     edited = make("edited")
     run_installer(edited)
     h = edited / ".git" / "hooks" / "pre-commit"
-    h.write_text(h.read_text(encoding="utf-8").replace("exit 0\n", "exit 0  # edited\n", 1),
+    h.write_text(h.read_text(encoding="utf-8").replace("exec sh", "exec  sh", 1),
                  encoding="utf-8")
     make("none")
     linked = make("linked")
@@ -331,10 +335,109 @@ def status_cases(tmp: Path) -> None:
     print()
 
 
+def fake_jp_tools(at: Path, with_template: bool = True, git_repo: bool = True) -> Path:
+    """A JP_TOOLS tree from this checkout's working files: a git repo on master
+    whose origin/master is set, locally, to its first commit. With
+    git_repo=False, a plain copy with no .git at all."""
+    at.mkdir(parents=True)
+    shutil.copy2(ROOT / "check.py", at / "check.py")
+    shutil.copytree(ROOT / "configs", at / "configs")
+    if with_template:
+        (at / "hooks").mkdir()
+        shutil.copy2(ROOT / "hooks" / "pre-commit.sh", at / "hooks" / "pre-commit.sh")
+    if not git_repo:
+        return at
+    git(at, "init", "-q", "-b", "master")
+    git(at, "add", "-A")
+    git(at, "commit", "-q", "-m", "fake JP_TOOLS")
+    git(at, "update-ref", "refs/remotes/origin/master", "HEAD")
+    return at
+
+
+def shim_cases(tmp: Path) -> None:
+    """#65 part 3, the design's acceptance (dynatext-tools): a feature-branch
+    tree found by the search, and a shim from an older interface, each print
+    BROKEN, with master as the control. Plus: an explicit JP_TOOLS_DIR runs on
+    any branch and says so; a tree with no template and a named tree that is
+    not there both refuse, never falling through to another candidate.
+    """
+    print("\nThe shim (#65 part 3):")
+    home = tmp / "home"
+    tree = fake_jp_tools(home / "projects" / "JP_TOOLS")
+    env = {k: v for k, v in os.environ.items() if k != "JP_TOOLS_DIR"}
+    env["HOME"] = str(home)
+    repo, _ = build_repo(tmp)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    check("the installed hook is the shim, not a copy of the template",
+          "exec sh" in hook.read_text(encoding="utf-8")
+          and "--skip-unsupported" not in hook.read_text(encoding="utf-8"))
+
+    r = commit_with_env(repo, "c1.py", CLEAN_PY, env)
+    out = r.stdout + r.stderr
+    check("CONTROL: a tree found by the search, at its origin/master, runs the checks",
+          r.returncode == 0 and "staged file(s) checked" in out, out)
+
+    git(tree, "checkout", "-q", "-b", "feature/x")
+    (tree / "x.txt").write_text("x\n", encoding="utf-8")
+    git(tree, "add", "x.txt")
+    git(tree, "commit", "-q", "-m", "feature work")
+    r = commit_with_env(repo, "c2.py", CLEAN_PY, env)
+    out = r.stdout + r.stderr
+    check("a feature-branch tree found by the search is refused: BROKEN, naming the branch",
+          r.returncode != 0 and "BROKEN" in out and "feature/x" in out
+          and "staged file(s) checked" not in out, out)
+    check("... and the refusal prints the command that clears it", "pull --ff-only" in out, out)
+
+    r = commit_with_env(repo, "c3.py", CLEAN_PY, dict(env, JP_TOOLS_DIR=str(tree)))
+    out = r.stdout + r.stderr
+    check("an EXPLICIT JP_TOOLS_DIR on that feature branch runs, and announces itself",
+          r.returncode == 0 and "JP_TOOLS_DIR is set; running" in out and "feature/x" in out, out)
+
+    old = fake_jp_tools(tmp / "old-jp-tools", with_template=False)
+    r = commit_with_env(repo, "c4.py", CLEAN_PY, dict(env, JP_TOOLS_DIR=str(old)))
+    out = r.stdout + r.stderr
+    check("a tree with no hooks/pre-commit.sh is refused as too old",
+          r.returncode != 0 and "too old" in out, out)
+
+    r = commit_with_env(repo, "c5.py", CLEAN_PY, dict(env, JP_TOOLS_DIR=str(tmp / "nowhere")))
+    out = r.stdout + r.stderr
+    check("a named JP_TOOLS_DIR that is not there is refused, not passed over",
+          r.returncode != 0 and "has no check.py" in out and "staged file(s) checked" not in out,
+          out)
+
+    # dynatext-tools' note on #80: a copy with no .git was refused "on ? ?"
+    # with a Fix (checkout master) that cannot work there.
+    home2 = tmp / "home2"
+    copy = fake_jp_tools(home2 / "projects" / "JP_TOOLS", git_repo=False)
+    env2 = dict(env, HOME=str(home2))
+    r = commit_with_env(repo, "c7.py", CLEAN_PY, env2)
+    out = r.stdout + r.stderr
+    check("a JP_TOOLS copy with no .git, found by the search, is refused as not a git checkout",
+          r.returncode != 0 and "not a git checkout" in out and "on ? ?" not in out, out)
+    check("... with a Fix that can work there (name it with JP_TOOLS_DIR)",
+          "export JP_TOOLS_DIR=" in out, out)
+    r = commit_with_env(repo, "c8.py", CLEAN_PY, dict(env2, JP_TOOLS_DIR=str(copy)))
+    out = r.stdout + r.stderr
+    check("... and naming that copy on purpose runs it, saying it is not a git checkout",
+          r.returncode == 0 and "(not a git checkout)" in out, out)
+
+    git(tree, "checkout", "-q", "master")
+    hook.write_text(hook.read_text(encoding="utf-8").replace(
+        "JP_TOOLS_HOOK_API=1", "JP_TOOLS_HOOK_API=0"), encoding="utf-8")
+    r = commit_with_env(repo, "c6.py", CLEAN_PY, env)
+    out = r.stdout + r.stderr
+    check("a shim from an older interface is refused against a newer template",
+          r.returncode != 0 and "BROKEN" in out and "interface" in out, out)
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
         return 0
+    # Every commit below goes through the shim, which runs the template from
+    # the tree it resolves. Name THIS tree, the one under test; otherwise the
+    # shim would find ~/projects/JP_TOOLS and test whatever that holds.
+    os.environ["JP_TOOLS_DIR"] = str(ROOT)
     with tempfile.TemporaryDirectory() as td:
         symlinked_hook_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:
@@ -345,8 +448,8 @@ def main() -> int:
         print(f"SKIP the rest: ruff not found, check.py cannot fail a file ({checks - fails}/{checks} passed above)")
         return 1 if fails else 0
 
-    print("Generated hook, static:")
-    hook_src = INSTALL_HOOKS.read_text(encoding="utf-8")
+    print("Hook template, static (hooks/pre-commit.sh, which the shim runs):")
+    hook_src = (ROOT / "hooks" / "pre-commit.sh").read_text(encoding="utf-8")
     check("does not invoke a bare `python`",
           '"$PY" "$CHECK_PY"' in hook_src and 'python "$CHECK_PY"' not in hook_src)
     check("passes --skip-unsupported", "--skip-unsupported" in hook_src)
@@ -401,6 +504,8 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as td:
         incapable_tools_cases(Path(td))
+    with tempfile.TemporaryDirectory() as td:
+        shim_cases(Path(td))
 
     print(f"\n{checks - fails}/{checks} passed")
     return 1 if fails else 0
