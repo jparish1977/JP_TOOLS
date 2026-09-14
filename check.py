@@ -233,6 +233,9 @@ def run_eslint(target: str) -> dict[str, Any]:
         return _tool_missing("jp_eslint.mjs")
     result = subprocess.run([node, str(runner), target], capture_output=True, text=True, check=False,
                             cwd=str(tools_dir))
+    failed = _node_runner_failed("eslint", result)
+    if failed:
+        return failed
     issues = []
     try:
         for file_result in json.loads(result.stdout or "[]"):
@@ -266,6 +269,9 @@ def run_stylelint(target: str) -> dict[str, Any]:
         return _tool_missing("jp_stylelint.mjs")
     result = subprocess.run([node, str(runner), target], capture_output=True, text=True, check=False,
                             cwd=str(tools_dir))
+    failed = _node_runner_failed("stylelint", result)
+    if failed:
+        return failed
     issues = []
     try:
         for file_result in json.loads(result.stdout or "[]"):
@@ -311,6 +317,26 @@ def _node_bin(name: str) -> str | None:
         if local.exists():
             return str(local)
     return shutil.which(name) or shutil.which(f"{name}.cmd")
+
+
+def _node_runner_failed(tool: str,
+                        result: subprocess.CompletedProcess[str]) -> dict[str, Any] | None:
+    """The result to report when a JP_TOOLS node runner did not lint, else None.
+
+    jp_eslint.mjs and jp_stylelint.mjs exit 0 with a JSON array whenever they
+    linted, lint findings included. Any other exit means they did not: node
+    could not load eslint or stylelint (ERR_MODULE_NOT_FOUND, exit 1), or the
+    runner refused (exit 2). stdout is then empty, and `result.stdout or "[]"`
+    read that as a clean pass. Measured 2026-09-14: a file holding `var` and
+    `==`, no node_modules, reported eslint "pass" and exit 0.
+    """
+    if result.returncode == 0:
+        return None
+    lines = [ln.strip() for ln in strip_ansi(result.stderr).splitlines() if ln.strip()]
+    detail = next((ln for ln in lines if "Error" in ln),
+                  lines[0] if lines else f"exit {result.returncode}")
+    return {"tool": tool, "status": "error", "issues": [],
+            "note": f"runner exited {result.returncode}: {detail[:300]}"}
 
 
 def _php_cmd() -> str | None:

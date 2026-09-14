@@ -1,5 +1,6 @@
-# JP_TOOLS CI — drop this into .github/workflows/check.yml
-# Runs check.py on every push and PR, reports issues as annotations.
+# JP_TOOLS CI -- drop this into .github/workflows/check.yml
+# (Forgejo Actions reads the same syntax from .forgejo/workflows/.)
+# Runs check.py on every push and PR.
 #
 # Install: python JP_TOOLS/init-ci.py  (copies this into your repo)
 #
@@ -35,48 +36,74 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Enable the languages your project uses
-        include:
-          - lang: python
-            setup: |
-              # Pin these. Unpinned linters turn a green build red without any
-              # code change, months later, in whichever PR happens to be open.
-              pip install ruff==0.16.1 mypy==2.3.0 pip-audit==2.10.1
-          - lang: js
-            setup: |
-              npm install -g eslint prettier
-          - lang: php
-            setup: |
-              sudo apt-get install -y php-cli php-mbstring
-              composer global require phpstan/phpstan squizlabs/php_codesniffer
+        # Every language check.py covers here. One this repo has no files of
+        # is detected and skipped, with a message, so nothing needs deleting.
+        # That matters because check.py exits 2 when a check could not run
+        # (#29): an entry left running over a language with no files would go
+        # red, where it used to go green having checked nothing.
+        lang: [python, js, php]
 
     steps:
       - uses: actions/checkout@v6
 
+      - name: Does this repo have ${{ matrix.lang }} files?
+        id: present
+        run: |
+          set -f   # the patterns are for git, not for this shell to expand
+          case "${{ matrix.lang }}" in
+            python) pats='*.py' ;;
+            js)     pats='*.js *.mjs *.cjs *.jsx *.ts *.tsx' ;;
+            php)    pats='*.php' ;;
+          esac
+          if [ -n "$(git ls-files -- $pats | head -n 1)" ]; then
+            echo "found=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=no" >> "$GITHUB_OUTPUT"
+            echo "No ${{ matrix.lang }} files in this repo: nothing to check for it."
+          fi
+
       - name: Set up Python
+        if: steps.present.outputs.found == 'yes'
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
       - name: Set up Node
-        if: matrix.lang == 'js'
+        if: steps.present.outputs.found == 'yes' && matrix.lang == 'js'
         uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Set up PHP
-        if: matrix.lang == 'php'
+        if: steps.present.outputs.found == 'yes' && matrix.lang == 'php'
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
 
+      # BESIDE the checkout, not in /tmp. A project ruff.toml that extends
+      # ../JP_TOOLS/configs/ruff.toml loads only from here; cloned to /tmp,
+      # the config failed to load and ruff read "pass".
       - name: Clone JP_TOOLS
-        run: git clone https://github.com/jparish1977/JP_TOOLS.git /tmp/jp_tools
+        if: steps.present.outputs.found == 'yes'
+        run: git clone --depth 1 https://github.com/jparish1977/JP_TOOLS.git ../JP_TOOLS
 
+      # From JP_TOOLS' own manifests, because that is where check.py looks:
+      #   requirements-dev.txt  pinned ruff and mypy
+      #   package.json          eslint and its plugins, prettier, stylelint.
+      #                         jp_eslint.mjs imports them from
+      #                         ../JP_TOOLS/node_modules; a global npm install
+      #                         does not satisfy an ES module import.
+      #   composer.json         phpstan, phpcs, rector, found in vendor/bin
+      # One declaration each, instead of a second copy of the pins here.
       - name: Install tool dependencies
-        run: ${{ matrix.setup }}
+        if: steps.present.outputs.found == 'yes'
+        run: |
+          case "${{ matrix.lang }}" in
+            python) pip install -r ../JP_TOOLS/requirements-dev.txt ;;
+            js)     npm --prefix ../JP_TOOLS install ;;
+            php)    composer --working-dir=../JP_TOOLS install --no-interaction --no-progress ;;
+          esac
 
       - name: Run check
-        run: |
-          python /tmp/jp_tools/check.py . --lang ${{ matrix.lang }} --pretty
-        continue-on-error: false
+        if: steps.present.outputs.found == 'yes'
+        run: python ../JP_TOOLS/check.py . --lang ${{ matrix.lang }} --pretty

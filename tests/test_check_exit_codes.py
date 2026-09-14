@@ -122,6 +122,50 @@ def test_directory_per_file_merge(tmp: Path) -> None:
     expect("directory, no node: exit (was 0)", rc, 2)
 
 
+FAKE_NODE = """#!{python}
+import os, sys
+sys.stdout.write(os.environ.get("FAKE_NODE_OUT", ""))
+sys.stderr.write(os.environ.get("FAKE_NODE_ERR", ""))
+sys.exit(int(os.environ.get("FAKE_NODE_RC", "0")))
+"""
+
+
+def run_with_fake_node(tmp: Path, target: str, tool: str, out: str, err: str,
+                       rc: int) -> tuple[int, dict[str, Any]]:
+    # A fake `node` alone on PATH, so the runner script is "found" and its
+    # outcome is exactly what the fake says, whatever this box has installed.
+    bindir = tmp / "_fakebin"
+    bindir.mkdir(exist_ok=True)
+    node = bindir / "node"
+    node.write_text(FAKE_NODE.format(python=sys.executable))
+    node.chmod(0o755)
+    env = dict(os.environ, PATH=str(bindir), FAKE_NODE_OUT=out,
+               FAKE_NODE_ERR=err, FAKE_NODE_RC=str(rc))
+    r = subprocess.run([sys.executable, str(CHECK), target, "--tools", tool],
+                       cwd=tmp, env=env, capture_output=True, text=True,
+                       check=False, timeout=120)
+    try:
+        doc = json.loads(r.stdout) if r.stdout.strip() else {}
+    except json.JSONDecodeError:
+        doc = {}
+    return r.returncode, doc
+
+
+def test_node_runner_cannot_load(tmp: Path) -> None:
+    (tmp / "bad.js").write_text("var x = 1\nconsole.log(x == 2)\n")
+    (tmp / "bad.css").write_text("a { color: #FFF }\n")
+    missing = ("Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'eslint' "
+               "imported from jp_eslint.mjs\n")
+    for tool, target in (("eslint", "bad.js"), ("stylelint", "bad.css")):
+        rc, doc = run_with_fake_node(tmp, target, tool, "", missing, 1)
+        expect(f"{tool}, runner cannot load: status (was pass)", statuses(doc).get(tool), "error")
+        expect(f"{tool}, runner cannot load: exit (was 0)", rc, 2)
+        # Control: the same fake, exiting 0 with an empty result, is a pass.
+        rc, doc = run_with_fake_node(tmp, target, tool, "[]", "", 0)
+        expect(f"{tool}, runner linted, nothing found: status", statuses(doc).get(tool), "pass")
+        expect(f"{tool}, runner linted, nothing found: exit", rc, 0)
+
+
 def test_skip_unsupported_unchanged(tmp: Path) -> None:
     # The pre-commit hook passes every staged file with --skip-unsupported and
     # blocks on any non-zero exit. A README must still exit 0 with no tools.
