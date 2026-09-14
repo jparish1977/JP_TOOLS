@@ -76,6 +76,26 @@ if [ -z "$STAGED" ]; then
     exit 0
 fi
 
+# NO NEW EM-DASHES, Joe's rule (CLAUDE.md, 2026-04-17). Only the lines this
+# commit ADDS are checked, so a dated record is never retrofitted, and the fix
+# is mechanical, so the refusal gives the one command that does it.
+# JP_TOOLS_ALLOW_EMDASH=1 lets through a commit that genuinely needs one
+# (Joe: "itll need a flag to allow instances where its actually a thing we
+# need to do"), and it is announced every time, because an exported variable
+# outlives the commit it was set for.
+if [ -n "$JP_TOOLS_ALLOW_EMDASH" ]; then
+    echo "JP_TOOLS hook: JP_TOOLS_ALLOW_EMDASH is set; em-dashes are allowed in this commit." >&2
+elif DASHED=$("$PY" "$TOOLS_DIR/fix-dashes.py" --check); [ -n "$DASHED" ]; then
+    echo ""
+    echo "====================================="
+    echo " Pre-commit check FAILED: this commit adds em-dashes:"
+    echo "$DASHED"
+    echo " Fix: python3 \"$TOOLS_DIR/fix-dashes.py\"   (changes only those lines, re-stages them)"
+    echo " If one is genuinely needed: JP_TOOLS_ALLOW_EMDASH=1 git commit ..."
+    echo "====================================="
+    exit 1
+fi
+
 # Split on newlines only, so paths with spaces survive.
 #
 # WARNING to whoever adds the next flag to this loop: newline IFS also DISABLES
