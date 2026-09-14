@@ -166,6 +166,59 @@ def symlinked_hook_cases(tmp: Path) -> None:
     print()
 
 
+def commit_with_env(repo: Path, name: str, body: str,
+                    env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """commit_file, with the hook seeing `env` (JP_TOOLS_DIR, HOME)."""
+    (repo / name).write_text(body, encoding="utf-8")
+    git(repo, "add", "--", name)
+    return subprocess.run(
+        ["git", "-c", "user.email=test@example.invalid", "-c", "user.name=JP_TOOLS test",
+         "-c", "commit.gpgsign=false", "commit", "-m", f"add {name}"],
+        cwd=repo, capture_output=True, text=True, check=False, env=env)
+
+
+# A stale JP_TOOLS: has a check.py, whose --help lacks the hook's flags, and
+# which "passes" anything it is handed. Trusting it is a silent false pass.
+STUB_CHECK_PY = (
+    "import sys\n"
+    "if '--help' in sys.argv:\n"
+    "    print('usage: check.py [-h] target')\n"
+    "sys.exit(0)\n"
+)
+
+
+def incapable_tools_cases(tmp: Path) -> None:
+    """#65: a JP_TOOLS tree that cannot run the hook is REFUSED, not trusted
+    and not skipped.
+
+    The stub passes anything it is handed, so trusting it is a silent false
+    pass. Skipping it would let a usable tree further down quietly override the
+    one that was chosen, so the recorded install-time path here is a usable
+    tree (the main checkout, since installing from a worktree records that),
+    and the commit must STILL be refused.
+    """
+    print("\nA JP_TOOLS tree that cannot run the hook (#65):")
+    stub = tmp / "stale-jp-tools"
+    stub.mkdir()
+    (stub / "check.py").write_text(STUB_CHECK_PY, encoding="utf-8")
+    home = tmp / "home"
+    home.mkdir()
+    env = dict(os.environ, JP_TOOLS_DIR=str(stub), HOME=str(home))
+
+    repo, _ = build_repo(tmp)
+    r = commit_with_env(repo, "clean.py", CLEAN_PY, env)
+    out = r.stdout + r.stderr
+    check("a commit is refused when the chosen tree cannot run the hook, even a clean one",
+          r.returncode != 0, out)
+    check("... as BROKEN and NOTHING WAS CHECKED, not as a failing check",
+          "BROKEN" in out and "NOTHING WAS CHECKED" in out
+          and "Pre-commit check FAILED" not in out, out)
+    check("... naming the tree and the flag it lacks",
+          str(stub) in out and "--skip-unsupported" in out, out)
+    check("... and not falling through to a usable tree further down",
+          "staged file(s) checked" not in out, out)
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
@@ -229,6 +282,9 @@ def main() -> int:
         r = commit_file(repo, "bad space.py", DIRTY_PY)
         check("a failing path containing a space is still blocked",
               r.returncode != 0, r.stdout + r.stderr)
+
+    with tempfile.TemporaryDirectory() as td:
+        incapable_tools_cases(Path(td))
 
     print(f"\n{checks - fails}/{checks} passed")
     return 1 if fails else 0

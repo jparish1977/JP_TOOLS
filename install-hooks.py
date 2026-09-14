@@ -72,12 +72,64 @@ HOOK_TEMPLATE = r"""#!/bin/sh
 # It used to be a single hardcoded absolute path. That made every hook work on
 # exactly one machine, and a hook installed from a git WORKTREE broke on the
 # machine it was installed on the moment that worktree was removed. See #40.
+
+# python3 everywhere it exists; several Linux boxes ship no bare `python`,
+# and Windows installs it under that name only.
+PY=python3
+command -v "$PY" >/dev/null 2>&1 || PY=python
+
+# An inherited repo ratchets against a recorded baseline rather than against
+# zero. If one is committed at the repo root, use it; with no baseline the gate
+# is unchanged and still fails on any finding, which is correct for a clean
+# repo. METHODOLOGY.md, "Adopting this in a codebase you inherited", step 2.
+#
+# check.py REFUSES to compare a baseline recorded in a different mode, so a
+# whole-repo baseline dropped here fails loudly instead of reporting scope
+# difference as regression.
+BASELINE_FILE="$(git rev-parse --show-toplevel)/quality-baseline.json"
+
+# A TREE THAT HAS check.py IS NOT NECESSARILY ONE THAT CAN RUN THIS HOOK. The
+# first candidate is usually a WORKING CHECKOUT, on whatever branch someone
+# left it. On 2026-09-14 the Air's ~/projects/JP_TOOLS sat on a feature branch
+# whose check.py had no --baseline, so every commit in a repo with a baseline
+# failed on "unrecognized arguments" and was reported as a failing check. So
+# ask the tree for the flags this hook is about to pass, and if it lacks one,
+# REFUSE, naming the tree, its branch and what it lacks. Not skip to the next
+# candidate: that would quietly override the tree someone chose or left in
+# place, and the broken setup would outlive a message nobody reads. #65.
+UNUSABLE=""
 for cand in "$JP_TOOLS_DIR" "$HOME/projects/JP_TOOLS" "$HOME/JP_TOOLS" "{tools_dir}"; do
     if [ -n "$cand" ] && [ -f "$cand/check.py" ]; then
+        HELP=$("$PY" "$cand/check.py" --help 2>/dev/null)
+        NEED="--skip-unsupported"
+        [ -f "$BASELINE_FILE" ] && NEED="--skip-unsupported --baseline"
+        MISSING=""
+        for flag in $NEED; do
+            case "$HELP" in
+                *"$flag"*) ;;
+                *) MISSING="$MISSING $flag" ;;
+            esac
+        done
+        if [ -n "$MISSING" ]; then
+            UNUSABLE="$cand: its check.py has no$MISSING (on $(git -C "$cand" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') $(git -C "$cand" rev-parse --short HEAD 2>/dev/null))"
+            break
+        fi
         TOOLS_DIR="$cand"
         break
     fi
 done
+if [ -n "$UNUSABLE" ]; then
+    echo ""
+    echo "====================================="
+    echo " JP_TOOLS hook is BROKEN: the JP_TOOLS it found cannot run this hook."
+    echo " NOTHING WAS CHECKED. This is not a problem with your changes."
+    echo "   $UNUSABLE"
+    echo " Fix: put that tree on master and pull, or point JP_TOOLS_DIR at one"
+    echo "      that is. It is refused, not skipped, so it cannot hide."
+    echo " To commit without the gate: git commit --no-verify"
+    echo "====================================="
+    exit 1
+fi
 
 # A MISSING CHECKER IS NOT A FAILING CHECK, and saying so is the whole point of
 # this branch. Previously check.py's absence made python3 exit non-zero, which
@@ -101,25 +153,10 @@ if [ -z "$TOOLS_DIR" ]; then
 fi
 CHECK_PY="$TOOLS_DIR/check.py"
 
-# python3 everywhere it exists; several Linux boxes ship no bare `python`,
-# and Windows installs it under that name only.
-PY=python3
-command -v "$PY" >/dev/null 2>&1 || PY=python
-
 STAGED=$(git diff --cached --name-only --diff-filter=ACM)
 if [ -z "$STAGED" ]; then
     exit 0
 fi
-
-# An inherited repo ratchets against a recorded baseline rather than against
-# zero. If one is committed at the repo root, use it; with no baseline the gate
-# is unchanged and still fails on any finding, which is correct for a clean
-# repo. METHODOLOGY.md, "Adopting this in a codebase you inherited", step 2.
-#
-# check.py REFUSES to compare a baseline recorded in a different mode, so a
-# whole-repo baseline dropped here fails loudly instead of reporting scope
-# difference as regression.
-BASELINE_FILE="$(git rev-parse --show-toplevel)/quality-baseline.json"
 
 # Split on newlines only, so paths with spaces survive.
 #
