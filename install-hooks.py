@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -164,6 +165,27 @@ exit 0
 """
 
 
+def _refuse_symlink(hook_file: Path, verb: str) -> None:
+    """Exit 2 if the hook is a symlink, dangling or not, naming its target.
+
+    Every write below follows a link: open(..., "a"), write_text(), chmod()
+    and read_text(). A repo that ships its own hook as a tracked file and links
+    it into .git/hooks (projectbook's hooks/install.sh does) would get the
+    JP_TOOLS hook appended INTO THE TRACKED FILE, and its mode changed. A
+    dangling link is worse: write_text() creates the target. Replacing the
+    link instead would silently disable the repo's own hook. So refuse, and
+    say what to do. #67.
+    """
+    if hook_file.is_symlink():
+        print(f"Refusing to {verb}: {hook_file} is a symlink to "
+              f"{os.readlink(hook_file)}.")
+        print("Writing through it would change the file it points to, which is "
+              "usually tracked in the repo.")
+        print("Add a step to that repo's own hook that runs check.py instead, "
+              "or remove the link first.")
+        sys.exit(2)
+
+
 def install(repo_path: Path) -> None:
     git_dir = repo_path / ".git"
     if not git_dir.is_dir():
@@ -173,6 +195,7 @@ def install(repo_path: Path) -> None:
     hooks_dir = git_dir / "hooks"
     hooks_dir.mkdir(exist_ok=True)
     hook_file = hooks_dir / "pre-commit"
+    _refuse_symlink(hook_file, "install")
 
     # Check for existing hook
     if hook_file.exists():
@@ -210,6 +233,7 @@ def install(repo_path: Path) -> None:
 
 def remove(repo_path: Path) -> None:
     hook_file = repo_path / ".git" / "hooks" / "pre-commit"
+    _refuse_symlink(hook_file, "remove")
     if not hook_file.exists():
         print("No pre-commit hook found.")
         return
