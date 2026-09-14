@@ -1033,14 +1033,74 @@ def _run_tools(tool_names: list[str], target: str) -> list[dict[str, Any]]:
     return checks
 
 
+# A LAB FILE IS HELD TO ITS HEADER, NOT TO ZERO. METHODOLOGY 2.9: a tools/lab
+# instrument has no bar at entry ("dusty is fine, lost is not"); what it owes
+# is a header saying what it answers, what it was tested against, and what it
+# was NOT tested against. The gate held lab files to zero anyway, so editing
+# one with an old finding blocked the commit. #68. The rule is projectbook's
+# ratchet's (Joe: "shape 2 it is"), with one hole closed: "TESTED AGAINST" is a
+# substring of "NOT TESTED AGAINST", so a plain `in` test accepted a header
+# missing the tested-against field. Exempt findings are still listed.
+_LAB_DIR = "lab"
+_LAB_TESTED = re.compile(r"(?<!NOT )TESTED AGAINST")
+_LAB_EXEMPT_REASON = "lab file under its METHODOLOGY 2.9 header"
+
+
+def _repo_root_of(p: Path) -> Path | None:
+    for parent in p.parents:
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
+def lab_claim(p: Path) -> bool:
+    """True for a file in a `lab/` directory of its repo whose opening 4000
+    characters carry all three 2.9 fields.
+
+    The `lab/` test is relative to the repo root, so a repo that merely lives
+    under some directory called `lab` does not exempt all of its files.
+    """
+    p = p.resolve()
+    root = _repo_root_of(p)
+    parts = p.relative_to(root).parts[:-1] if root else p.parts[:-1]
+    if _LAB_DIR not in parts:
+        return False
+    try:
+        with p.open(encoding="utf-8", errors="replace") as fh:
+            head = fh.read(4000)
+    except OSError:
+        return False
+    return ("ANSWERS" in head and "NOT TESTED AGAINST" in head
+            and _LAB_TESTED.search(head) is not None)
+
+
+def _mark_lab_exempt(checks: list[dict[str, Any]]) -> None:
+    """Tag each issue in a lab file under its header as exempt. #68."""
+    claims: dict[str, bool] = {}
+    for c in checks:
+        issues = c.get("issues", [])
+        for i in issues:
+            f = str(i.get("file", ""))
+            if f not in claims:
+                claims[f] = bool(f) and lab_claim(Path(f))
+            if claims[f]:
+                i["exempt"] = _LAB_EXEMPT_REASON
+        if c.get("status") == "fail" and issues and all(i.get("exempt") for i in issues):
+            c["status"] = "pass"
+
+
 def _summarize(checks: list[dict[str, Any]]) -> dict[str, Any]:
     all_issues = [i for c in checks for i in c.get("issues", [])]
-    errors   = sum(1 for i in all_issues if i["severity"] == "error")
-    warnings = sum(1 for i in all_issues if i["severity"] == "warning")
+    counted  = [i for i in all_issues if not i.get("exempt")]
+    errors   = sum(1 for i in counted if i["severity"] == "error")
+    warnings = sum(1 for i in counted if i["severity"] == "warning")
     return {
         "total":    len(all_issues),
         "errors":   errors,
         "warnings": warnings,
+        # Listed in "total" and in the issues, never counted as errors: a lab
+        # file under its 2.9 header (#68).
+        "exempt":   len(all_issues) - len(counted),
         # Split deliberately: "fixable" is what `fix.py` applies now, and
         # "fixable_unsafe" is what `fix.py --unsafe` would additionally attempt.
         # Reporting one combined number described work no tool would do.
@@ -1430,6 +1490,7 @@ def main() -> None:
             tool_names.extend(AUDIT_TOOLS.get(lang, []))
 
         checks = _run_tools(tool_names, target)
+        _mark_lab_exempt(checks)
         # Held in its own name rather than read back out of `output`: the dict
         # is heterogeneous, so indexing it twice asks the type checker to
         # believe a str and a list are also subscriptable by "errors".
@@ -1516,6 +1577,7 @@ def main() -> None:
             "tools":      [c["tool"] for c in lang_checks],
         })
 
+    _mark_lab_exempt(all_checks)
     summary = _summarize(all_checks)
     output = {
         "target":     target,
