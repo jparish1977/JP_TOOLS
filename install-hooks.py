@@ -181,8 +181,9 @@ def _refuse_symlink(hook_file: Path, verb: str) -> None:
               f"{os.readlink(hook_file)}.")
         print("Writing through it would change the file it points to, which is "
               "usually tracked in the repo.")
-        print("Add a step to that repo's own hook that runs check.py instead, "
-              "or remove the link first.")
+        print("Add a step to that repo's own hook that runs check.py instead.")
+        print("Removing the link and re-running this would REPLACE that repo's "
+              "hook, not add to it: the repo's own checks would stop running.")
         sys.exit(2)
 
 
