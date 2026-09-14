@@ -277,6 +277,60 @@ def append_roundtrip_cases(tmp: Path) -> None:
     print()
 
 
+def status_cases(tmp: Path) -> None:
+    """#65 part 2: --status says which installed hooks are stale. Needs no ruff.
+
+    Before it, nothing said a hook was the old template: dynatext-tools found
+    all three on joe-MacBookAir by reading them. Five repos under one root,
+    one of each state.
+    """
+    print("Installed-hook status (#65 part 2):")
+    root = tmp / "fleet"
+    root.mkdir()
+
+    def make(name: str) -> Path:
+        r = root / name
+        r.mkdir()
+        git(r, "init", "-q")
+        (r / ".git" / "hooks").mkdir(exist_ok=True)
+        return r
+
+    run_installer(make("current"))
+    (make("old") / ".git" / "hooks" / "pre-commit").write_text(
+        "#!/bin/sh\n# JP_TOOLS pre-commit hook\nTOOLS_DIR=/somewhere/JP_TOOLS\n",
+        encoding="utf-8")
+    edited = make("edited")
+    run_installer(edited)
+    h = edited / ".git" / "hooks" / "pre-commit"
+    h.write_text(h.read_text(encoding="utf-8").replace("exit 0\n", "exit 0  # edited\n", 1),
+                 encoding="utf-8")
+    make("none")
+    linked = make("linked")
+    (linked / "hooks").mkdir()
+    (linked / "hooks" / "pre-commit").write_text("#!/bin/sh\n", encoding="utf-8")
+    (linked / ".git" / "hooks" / "pre-commit").symlink_to(Path("..") / ".." / "hooks" / "pre-commit")
+
+    r = run_installer(root, "--status")
+    states = {Path(line.split()[1]).name: line for line in r.stdout.splitlines()
+              if len(line.split()) > 1 and line.split()[0].isupper()}
+    check("a root with a stale hook exits 1", r.returncode == 1, r.stdout + r.stderr)
+    check("a fresh install reads CURRENT", states.get("current", "").startswith("CURRENT"),
+          r.stdout)
+    check("a pre-#41 hook reads STALE, saying why",
+          states.get("old", "").startswith("STALE") and "#41" in states.get("old", ""), r.stdout)
+    check("an edited install reads STALE, as differing from the template",
+          states.get("edited", "").startswith("STALE") and "differs" in states.get("edited", ""),
+          r.stdout)
+    check("no hook reads NONE, a symlinked one SYMLINK",
+          states.get("none", "").startswith("NONE")
+          and states.get("linked", "").startswith("SYMLINK"), r.stdout)
+    check("the summary counts 5 repos and 2 STALE", "5 repos, 2 STALE" in r.stdout, r.stdout)
+
+    r = run_installer(root / "current", "--status")
+    check("a root holding only a current hook exits 0", r.returncode == 0, r.stdout + r.stderr)
+    print()
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
@@ -285,6 +339,8 @@ def main() -> int:
         symlinked_hook_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:
         append_roundtrip_cases(Path(td))
+    with tempfile.TemporaryDirectory() as td:
+        status_cases(Path(td))
     if not shutil.which("ruff"):
         print(f"SKIP the rest: ruff not found, check.py cannot fail a file ({checks - fails}/{checks} passed above)")
         return 1 if fails else 0
