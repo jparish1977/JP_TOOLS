@@ -81,17 +81,27 @@ fi
 # It runs BEFORE the STAGED list below, which is ACM for check.py: a commit
 # that only renames files would exit there, and a rename can add lines
 # (claude-config, reviewing #84). fix-dashes.py finds its own files.
+# FAILS CLOSED: --check exits 0 (none) or 1 (listed); anything else means the
+# check did not run, and a crash that printed nothing used to read as clean.
+# Joe: "if we need the tool to pass then we cant pass without the fucking tool".
 if [ -n "$JP_TOOLS_ALLOW_EMDASH" ]; then
     echo "JP_TOOLS hook: JP_TOOLS_ALLOW_EMDASH is set; em-dashes are allowed in this commit." >&2
-elif DASHED=$("$PY" "$TOOLS_DIR/fix-dashes.py" --check); [ -n "$DASHED" ]; then
-    echo ""
-    echo "====================================="
-    echo " Pre-commit check FAILED: this commit adds em-dashes:"
-    echo "$DASHED"
-    echo " Fix: python3 \"$TOOLS_DIR/fix-dashes.py\"   (changes only those lines, re-stages them)"
-    echo " If one is genuinely needed: JP_TOOLS_ALLOW_EMDASH=1 git commit ..."
-    echo "====================================="
-    exit 1
+else
+    DASHED=$("$PY" "$TOOLS_DIR/fix-dashes.py" --check)
+    dash_rc=$?
+    if [ "$dash_rc" -eq 1 ] && [ -n "$DASHED" ]; then
+        echo ""
+        echo "====================================="
+        echo " Pre-commit check FAILED: this commit adds em-dashes:"
+        echo "$DASHED"
+        echo " Fix: python3 \"$TOOLS_DIR/fix-dashes.py\"   (changes only those lines, re-stages them)"
+        echo " If one is genuinely needed: JP_TOOLS_ALLOW_EMDASH=1 git commit ..."
+        echo "====================================="
+        exit 1
+    elif [ "$dash_rc" -ne 0 ]; then
+        broken "the em-dash check (fix-dashes.py --check) exited $dash_rc, so it did not run." \
+            "run it by hand to see why: $PY \"$TOOLS_DIR/fix-dashes.py\" --check"
+    fi
 fi
 
 STAGED=$(git diff --cached --name-only --diff-filter=ACM)

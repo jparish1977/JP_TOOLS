@@ -167,6 +167,33 @@ def rename_cases(tmp: Path) -> None:
         check(what, ok and "moved.md:6" not in out, out)
 
 
+def crash_case(tmp: Path) -> None:
+    """claude-config's note on #84: a fixer that crashed printed nothing, and
+    the hook let the commit through. Joe: "if we need the tool to pass then we
+    cant pass without the fucking tool". So anything but exit 0 or 1 from
+    --check is BROKEN, never clean."""
+    print("\nA fixer that crashes (#84 note):")
+    tools = tmp / "tools"
+    tools.mkdir()
+    for name in ("check.py", "install-hooks.py"):
+        shutil.copy2(ROOT / name, tools / name)
+    shutil.copytree(ROOT / "hooks", tools / "hooks")
+    (tools / "fix-dashes.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
+    git(tools, "init", "-q")
+    git(tools, "add", "-A")
+    git(tools, "commit", "-q", "-m", "a JP_TOOLS copy whose fixer exits 3")
+    d = tmp / "crash"
+    d.mkdir()
+    repo = setup(d)
+    add_line(repo, "notes.md", f"new {DASH} line")
+    r = git(repo, "commit", "-m", "x", env=dict(os.environ, JP_TOOLS_DIR=str(tools)))
+    out = r.stdout + r.stderr
+    # "exited 3" as well as BROKEN: the template has other BROKEN refusals, and
+    # one of those passing this check would say nothing about the fixer.
+    check("a fixer that exits 3 refuses the commit as BROKEN, not as clean",
+          r.returncode != 0 and "BROKEN" in out and "exited 3" in out, out)
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
@@ -179,6 +206,7 @@ def main() -> int:
         unstaged_case(repo)
         edge_cases(Path(td))
         rename_cases(Path(td))
+        crash_case(Path(td))
     print(f"\n{checks - fails}/{checks} passed")
     return 1 if fails else 0
 
