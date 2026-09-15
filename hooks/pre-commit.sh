@@ -64,8 +64,13 @@ for flag in $NEED; do
         *) MISSING="$MISSING $flag" ;;
     esac
 done
+# JP_TOOLS' repository, read with the committing repo's git environment
+# cleared: in a linked worktree GIT_DIR is set, and it outranks `git -C`.
+tools_git() {
+    (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR; git -C "$TOOLS_DIR" "$@")
+}
 if [ -n "$MISSING" ]; then
-    broken "the check.py at $TOOLS_DIR has no$MISSING (on $(git -C "$TOOLS_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') $(git -C "$TOOLS_DIR" rev-parse --short HEAD 2>/dev/null))." \
+    broken "the check.py at $TOOLS_DIR has no$MISSING (on $(tools_git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') $(tools_git rev-parse --short HEAD 2>/dev/null))." \
         "git -C \"$TOOLS_DIR\" pull --ff-only"
 fi
 

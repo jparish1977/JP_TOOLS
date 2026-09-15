@@ -97,13 +97,16 @@ if [ -z "$TOOLS_DIR" ]; then
         "export JP_TOOLS_DIR=/path/to/JP_TOOLS, or re-run install-hooks.py on this machine."
 fi
 
-# The git -C calls below read TOOLS_DIR's repository, not the committing
-# repo's: a hook runs with GIT_INDEX_FILE set (relative), and dynatext-tools
-# measured that it does not leak into `git -C OTHER` for these reads. Nothing
-# is unset, because the template's own git commands must keep the committing
-# repo's index.
-if git -C "$TOOLS_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-    WHERE="on $(git -C "$TOOLS_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null) $(git -C "$TOOLS_DIR" rev-parse --short HEAD 2>/dev/null)"
+# JP_TOOLS' own repository is read with the committing repo's git environment
+# cleared. In a linked worktree git runs this hook with GIT_DIR set, and
+# GIT_DIR outranks `git -C`, so a plain `git -C "$TOOLS_DIR"` reads the
+# committing repo instead. The subshell keeps the variables for the template,
+# whose own git commands must still see the committing repo.
+tools_git() {{
+    (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR; git -C "$TOOLS_DIR" "$@")
+}}
+if tools_git rev-parse --git-dir >/dev/null 2>&1; then
+    WHERE="on $(tools_git rev-parse --abbrev-ref HEAD 2>/dev/null) $(tools_git rev-parse --short HEAD 2>/dev/null)"
 else
     WHERE="(not a git checkout)"
 fi
@@ -123,8 +126,8 @@ else
         broken "the JP_TOOLS at $TOOLS_DIR is not a git checkout, so the master check cannot run." \
             "use a git clone of JP_TOOLS there, or name this tree on purpose: export JP_TOOLS_DIR=$TOOLS_DIR"
     fi
-    HEAD_SHA=$(git -C "$TOOLS_DIR" rev-parse HEAD 2>/dev/null)
-    MASTER=$(git -C "$TOOLS_DIR" rev-parse -q --verify origin/master 2>/dev/null || git -C "$TOOLS_DIR" rev-parse -q --verify master 2>/dev/null)
+    HEAD_SHA=$(tools_git rev-parse HEAD 2>/dev/null)
+    MASTER=$(tools_git rev-parse -q --verify origin/master 2>/dev/null || tools_git rev-parse -q --verify master 2>/dev/null)
     if [ -z "$HEAD_SHA" ] || [ "$HEAD_SHA" != "$MASTER" ]; then
         broken "the JP_TOOLS at $TOOLS_DIR is $WHERE, not at its origin/master (compared locally, no fetch)." \
             "git -C \"$TOOLS_DIR\" checkout master && git -C \"$TOOLS_DIR\" pull --ff-only"
