@@ -44,7 +44,11 @@ jobs:
         lang: [python, js, php, shell]
 
     steps:
+      # Full history: the smells arm reads the PR's base commit, and a shallow
+      # clone does not have it (#55).
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Does this repo have ${{ matrix.lang }} files?
         id: present
@@ -120,12 +124,25 @@ jobs:
       # directory, so `--lang shell` on `.` could only exit 2 as not run.
       - name: Run check
         if: steps.present.outputs.found == 'yes'
+        env:
+          SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
+          # The smells arm (#55) fails a smell that is NEW against --smells-base
+          # and warns on one that existed. Its default, HEAD, is the commit under
+          # test here, so without this a new smell only ever warned. The base is
+          # the PR's, or on a push the commit before it; a first push has none
+          # (all zeros), which falls back to HEAD and says so.
+          base="$SMELLS_BASE"
+          case "$base" in *[!0]*) ;; *) base="" ;; esac
+          if [ -z "$base" ]; then
+            echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
+            base=HEAD
+          fi
           if [ "${{ matrix.lang }}" = shell ]; then
             rc=0
             for f in $(git ls-files -- '*.sh' '*.bash'); do
-              python ../JP_TOOLS/check.py "$f" --pretty || rc=1
+              python ../JP_TOOLS/check.py "$f" --pretty --smells-base "$base" || rc=1
             done
             exit $rc
           fi
-          python ../JP_TOOLS/check.py . --lang ${{ matrix.lang }} --pretty
+          python ../JP_TOOLS/check.py . --lang ${{ matrix.lang }} --pretty --smells-base "$base"
