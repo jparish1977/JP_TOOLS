@@ -725,6 +725,27 @@ _UNREMARKABLE = {
 }
 
 
+def _symlink_kind(link: Path, top: Path) -> str | None:
+    """Which kind of symlink LINK is, as a skipped label; None for a plain file.
+
+    A SYMLINKED FILE IS NOT COLLECTED (#99). Findings are keyed by the resolved
+    path, so a file reached through N links was measured N+1 times under one
+    key, and its baseline came out N+1 times too loose. A link inside the tree
+    loses nothing, since its target is collected directly. One pointing out of
+    the tree is not this repo's file. Each kind is counted with the skipped
+    extensions, so that it is reported.
+    """
+    if not link.is_symlink():
+        return None
+    try:
+        target = link.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return "(broken symlink)"
+    if target.is_relative_to(top):
+        return "(symlink inside the tree, measured at its target)"
+    return "(symlink out of the tree, not this repo's file)"
+
+
 def _collect_files(directory: str) -> tuple[dict[str, list[str]], dict[str, int]]:
     """Scan a directory, grouping files by language.
 
@@ -736,9 +757,14 @@ def _collect_files(directory: str) -> tuple[dict[str, list[str]], dict[str, int]
     """
     groups: dict[str, list[str]] = {}
     skipped: dict[str, int] = {}
+    top = Path(directory).resolve()
     for root, dirs, files in os.walk(directory):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
         for f in files:
+            kind = _symlink_kind(Path(root) / f, top)
+            if kind:
+                skipped[kind] = skipped.get(kind, 0) + 1
+                continue
             ext = Path(f).suffix.lower()
             lang = _EXT_TO_LANG.get(ext) or (
                 _shebang_lang(Path(root) / f) if not ext else None)
