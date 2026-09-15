@@ -11,7 +11,11 @@ jobs:
     name: Python (ruff + mypy)
     runs-on: ubuntu-latest
     steps:
+      # Full history: the smells arm reads the PR's base commit, and a shallow
+      # clone does not have it (#55).
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -22,6 +26,8 @@ jobs:
       # in whichever unrelated PR happens to be open.
       - run: pip install ruff==0.16.1 mypy==2.3.0 coverage==7.15.4
       - name: Self-check Python files
+        env:
+          SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           # No `set -e` reliance: the runner aborts the loop on the first
           # failure, which hid every problem after the first file.
@@ -29,10 +35,22 @@ jobs:
           # someone remembers to add it. spool-audit.py was merged-ready with a
           # green badge while no job in this file touched it, so "CI green" was
           # true and said nothing about the code. Add new scripts here.
+          #
+          # The smells arm (#55) fails a smell that is NEW against --smells-base
+          # and warns on one that existed. Its default, HEAD, is the commit under
+          # test here, so without this a new smell only ever warned. The base is
+          # the PR's, or on a push the commit before it; a first push has none
+          # (all zeros), which falls back to HEAD and says so.
+          base="$SMELLS_BASE"
+          case "$base" in *[!0]*) ;; *) base="" ;; esac
+          if [ -z "$base" ]; then
+            echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
+            base=HEAD
+          fi
           rc=0
           for f in check.py fix.py install-hooks.py init-ci.py spool-audit.py list-exemptions.py; do
             echo "--- $f ---"
-            python check.py "$f" --pretty || rc=1
+            python check.py "$f" --pretty --smells-base "$base" || rc=1
           done
           exit $rc
       - name: Report which Python files are NOT checked
@@ -168,7 +186,10 @@ jobs:
     name: JS (eslint)
     runs-on: ubuntu-latest
     steps:
+      # Full history, as in the Python job: the base must be in the clone.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -177,13 +198,22 @@ jobs:
           node-version: '22'
       - run: npm install
       - name: Self-check JS files
+        env:
+          SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           # rc accumulates, as in the Python job. Without it the step took
           # the LAST file's exit code, so a failure on jp_eslint.mjs was
           # hidden by a clean jp_stylelint.mjs.
+          # The base, as in the Python job: the PR's, or the push's before.
+          base="$SMELLS_BASE"
+          case "$base" in *[!0]*) ;; *) base="" ;; esac
+          if [ -z "$base" ]; then
+            echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
+            base=HEAD
+          fi
           rc=0
           for f in jp_eslint.mjs jp_stylelint.mjs; do
             echo "--- $f ---"
-            python check.py "$f" --pretty || rc=1
+            python check.py "$f" --pretty --smells-base "$base" || rc=1
           done
           exit $rc
