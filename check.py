@@ -1465,14 +1465,16 @@ def _repo_root(target: str) -> Path:
     """
     p = Path(target).resolve()
     start = p if p.is_dir() else p.parent
+    # Through _git, which drops the hook's GIT_* variables. In a linked
+    # worktree a hook runs with GIT_DIR set and no GIT_WORK_TREE, and git then
+    # answers the current directory as the top, so a file in a subdirectory
+    # would be keyed by its bare name and miss its baseline entry (#54).
     try:
-        r = subprocess.run(
-            ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, check=False, timeout=30)
-        if r.returncode == 0 and r.stdout.strip():
-            return Path(r.stdout.strip())
-    except (OSError, subprocess.SubprocessError):
-        pass
+        r = _git(["rev-parse", "--show-toplevel"], start)
+    except _NoGitError:
+        return start
+    if r.returncode == 0 and r.stdout.strip():
+        return Path(r.stdout.strip())
     return start
 
 

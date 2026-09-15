@@ -76,6 +76,40 @@ def make_repo(tmp: str) -> str:
     return str(repo)
 
 
+def worktree_case(tmp: str) -> None:
+    """#54: a hook in a linked worktree runs with GIT_DIR set and no
+    GIT_WORK_TREE. A file's key must still be its path from the repo root, or
+    it misses its baseline entry and every existing finding reads as new."""
+    print("a file in a subdirectory, from a linked worktree, with the hook's GIT_DIR")
+    repo = Path(tmp) / "wtrepo"
+    (repo / "sub").mkdir(parents=True)
+
+    def git(*args: str, cwd: Path = repo) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["git", "-c", "user.email=test@example.invalid", "-c", "user.name=test",
+                               "-c", "commit.gpgsign=false", *args],
+                              cwd=str(cwd), capture_output=True, text=True, check=True)
+
+    git("init", "-q", "-b", "master")
+    (repo / "sub" / "dirty.py").write_text(DIRTY, encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "a file with findings, in a subdirectory")
+    wt = Path(tmp) / "wtrepo-worktree"
+    git("worktree", "add", "-q", "-b", "wt", str(wt))
+    base = str(Path(tmp) / "wt-base.json")
+    run(".", "--record-baseline", base, cwd=str(wt))
+    keys = list(json.loads(Path(base).read_text(encoding="utf-8")).get("files", {}))
+    check("recorded in the worktree, the key is the path from the root", keys == ["sub/dirty.py"], str(keys))
+    (wt / "sub" / "dirty.py").write_text(DIRTY + "z = 3\n", encoding="utf-8")
+    r = run("sub/dirty.py", "--baseline", base, cwd=str(wt))
+    check("CONTROL: an unchanged count, without GIT_DIR, exits 0", r.returncode == 0, r.stderr)
+    gitdir = git("rev-parse", "--absolute-git-dir", cwd=wt).stdout.strip()
+    r = subprocess.run([sys.executable, str(CHECK), "sub/dirty.py", "--baseline", base],
+                       capture_output=True, text=True, check=False, cwd=str(wt),
+                       env=dict(os.environ, GIT_DIR=gitdir))
+    check("with the hook's GIT_DIR set, the same unchanged count still exits 0",
+          r.returncode == 0, r.stderr)
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
@@ -85,6 +119,7 @@ def main() -> int:
         return 0
 
     with tempfile.TemporaryDirectory() as tmp:
+        worktree_case(tmp)
         repo = make_repo(tmp)
         base = str(Path(repo) / "base.json")
 
