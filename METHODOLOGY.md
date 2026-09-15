@@ -287,6 +287,48 @@ Joe, 2026-09-15: **"our methodology really needs a clean up after yourself sesti
 
 **Status per §1.** The evidence is one evening across four seats, all of it from the same round. Rule 1 has been measured: thirteen tests changed to register their cleanup at creation all pass, and they leave nothing under their prefixes afterwards. Rule 2 is closed for the mutation runner, by dynatext-tools in claude-config `b91ab5e`. `tools/lab/mutate-on-target.py` now gives each test run its own `TMPDIR` and removes it whatever happens; at the timeout it kills the test's whole process group, so nothing it started lingers. Any other harness that can kill a run owes the same, and none has yet been checked.
 
+### 2.12 One long run for everything that is ready
+
+Joe, 2026-09-15: **"dot run 5 fucking tests ina row that take 15-20 miues
+each if you could run all the etst ina singe fuckign rn"**.
+
+The sibling of §2.8. That rule is about the shape of a sweep; this one is
+about how many times you pay for a long one. When several changes are waiting
+on the same slow suite, the suite runs once, over all of them together.
+
+**What it replaced, measured the same night.** projectbook's full suite runs
+as a two-arm comparison on iteration8: `origin/main` against the branch, on
+one box at one moment (`vm/lab/i8-two-arm-suite.sh`). Each ready branch got
+its own run, one after another. One chain alone was three two-arm runs and a
+coverage measurement, announced at about 40 minutes. Over the night six such
+runs were reported as landed, and **the arms matched on every one of them**.
+Five of those six runs bought nothing that a single run over the stack would
+not have. And while they ran, the box's fixed ports were held, so every other
+seat's port window waited behind the queue.
+
+**The rules:**
+
+1. **Stack every READY branch onto one integration branch** (`land-<date>`,
+   each branch cherry-picked onto main) and run the suite once, main against
+   the stack. The comparison takes any branch name; a stack is a branch.
+2. **If the arms match, fast-forward main to the stack.** If main moved
+   during the run, rebase the stack onto it again first.
+3. **If the arms differ, bisect the stack.** Drop half the branches and
+   rerun; never fall back to one run per branch. A failure costs a few extra
+   runs; running every branch alone costs one run per branch, every time.
+4. **Still one suite on a box at a time.** The artefact tests bind fixed
+   ports, so two suites on one box skew or break each other. Stacking is also
+   what makes this cheap: one run holds the ports once.
+5. **A branch that is not ready waits for the next stack.** It does not get
+   a run of its own because it happened to finish first.
+
+**Status per §1.** The evidence is one night on one repository.
+`projectbook-helper` confirmed that nothing in the two-arm design needs one
+branch per run, and applied the rule the same hour: its last two branches
+(`fix-live-cache`, `fleet-docs-class`) went into one stack, `land-0915`, with
+one run. Rule 3's bisection has not yet been needed, so its cost is argued,
+not measured.
+
 ---
 
 ## 3. The canonical exemplar: FileScanner
