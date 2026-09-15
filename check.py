@@ -759,6 +759,8 @@ def _collect_files(directory: str) -> tuple[dict[str, list[str]], dict[str, int]
 # so `*` crosses directories. The reason after `#` is REQUIRED, the way a
 # no-cover needs one, so a vendor copy and a file nobody wanted to fix cannot
 # look alike. A skipped file is always reported, with the entry that skipped it.
+# A line splits at its FIRST `#`, so a path containing `#` cannot be written as
+# a glob: everything after that `#` is read as the reason.
 _IGNORE_FILE = ".jp-tools-ignore"
 Ignore = tuple[str, str]                  # glob, reason
 
