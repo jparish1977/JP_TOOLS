@@ -18,6 +18,7 @@ Exit codes:
 
 import argparse
 import ast
+import fnmatch
 import io
 import json
 import os
@@ -746,6 +747,78 @@ def _collect_files(directory: str) -> tuple[dict[str, list[str]], dict[str, int]
             elif ext not in _UNREMARKABLE:
                 skipped[ext] = skipped.get(ext, 0) + 1
     return groups, skipped
+
+
+# ── content this repo does not own (#90) ──────────────────────────────────────
+# Joe, 2026-09-14: "we cant control the quality of vendor tools". A repo lists
+# such paths in a committed .jp-tools-ignore at its root, one entry per line:
+#
+#     oob/*.html   # byte-exact vendor pages kept as provenance
+#
+# The glob is matched with fnmatch against the path relative to the repo root,
+# so `*` crosses directories. The reason after `#` is REQUIRED, the way a
+# no-cover needs one, so a vendor copy and a file nobody wanted to fix cannot
+# look alike. A skipped file is always reported, with the entry that skipped it.
+_IGNORE_FILE = ".jp-tools-ignore"
+Ignore = tuple[str, str]                  # glob, reason
+
+
+class _IgnoreError(Exception):
+    """A .jp-tools-ignore line check.py cannot use."""
+
+
+def load_ignores(root: Path) -> list[Ignore]:
+    """(glob, reason) for each entry in ROOT/.jp-tools-ignore; [] when there is none."""
+    path = root / _IGNORE_FILE
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    out: list[Ignore] = []
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        glob, _, reason = line.partition("#")
+        if not glob.strip() or not reason.strip():
+            raise _IgnoreError(f"{path}:{n}: '{line}' needs a glob and a reason after '#', "
+                               "so a vendor copy and a file nobody wanted to fix cannot look alike")
+        out.append((glob.strip(), reason.strip()))
+    return out
+
+
+def ignored_by(path: str, root: Path, ignores: list[Ignore]) -> Ignore | None:
+    """The entry that ignores PATH, or None."""
+    rel = _rel(path, root)
+    return next(((g, r) for g, r in ignores if fnmatch.fnmatchcase(rel, g)), None)
+
+
+def _drop_ignored(groups: dict[str, list[str]], root: Path,
+                  ignores: list[Ignore]) -> list[dict[str, str]]:
+    """Remove ignored files from GROUPS in place; return each one with its entry."""
+    gone: list[dict[str, str]] = []
+    for lang, files in groups.items():
+        keep = []
+        for f in files:
+            hit = ignored_by(f, root, ignores)
+            if hit:
+                gone.append({"file": _rel(f, root), "pattern": hit[0], "reason": hit[1]})
+            else:
+                keep.append(f)
+        groups[lang] = keep
+    return gone
+
+
+def _drop_ignored_issues(result: dict[str, Any], root: Path, ignores: list[Ignore]) -> None:
+    """A dir-capable tool finds its own files, ignored ones included: drop their findings."""
+    if not ignores:
+        return
+    issues = result.get("issues", [])
+    kept = [i for i in issues if not ignored_by(i.get("file", ""), root, ignores)]
+    if len(kept) != len(issues):
+        result["issues"] = kept
+        if result.get("status") == "fail" and not kept:
+            result["status"] = "pass"
 
 
 # Arduino sketches use ArduinoJson's `variant | fallback` operator, which reads
@@ -1518,10 +1591,13 @@ def _per_file_checks(target: str, audit: bool = False) -> list[dict[str, Any]]:
     reproduce -- which is the bug this feature exists to remove.
     """
     p = Path(target)
+    root = _repo_root(target)
+    ignores = load_ignores(root)
     if p.is_file():
-        files = [str(p)]
+        files = [] if ignored_by(str(p), root, ignores) else [str(p)]
     else:
         groups, _ = _collect_files(str(p))
+        _drop_ignored(groups, root, ignores)
         files = sorted(f for fs in groups.values() for f in fs)
     checks: list[dict[str, Any]] = []
     for f in files:
@@ -1766,6 +1842,14 @@ def main() -> None:
 
     is_dir = Path(target).is_dir()
 
+    # Read before any measuring, so a bad entry refuses every mode alike (#90).
+    root = _repo_root(target)
+    try:
+        ignores = load_ignores(root)
+    except _IgnoreError as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(2)
+
     # ── Record a baseline and stop ────────────────────────────────────────
     # Its own path, before the normal flow, because recording MEASURES
     # DIFFERENTLY: it runs every file on its own even when handed a directory,
@@ -1776,6 +1860,13 @@ def main() -> None:
 
     # ── Single file or explicit --lang / --tools ──────────────────────────
     if not is_dir or args.lang != "auto" or args.tools:
+        # A file the repo does not own is skipped, and says which entry did it,
+        # so the hook prints the exclusion in every commit it applies to.
+        hit = None if is_dir else ignored_by(target, root, ignores)
+        if hit:
+            print(json.dumps({"target": target,
+                              "skipped": f"ignored by {_IGNORE_FILE}: {hit[0]} ({hit[1]})"}))
+            sys.exit(0)
         lang = args.lang if args.lang != "auto" else _detect_lang(target)
         if args.tools:
             tool_names = [t.strip() for t in args.tools.split(",")]
@@ -1792,6 +1883,11 @@ def main() -> None:
             tool_names.extend(AUDIT_TOOLS.get(lang, []))
 
         checks = _run_tools(tool_names, target)
+        # A directory named with --tools or --lang is handed to each tool whole,
+        # so ignored files are found there too: drop their findings (#90).
+        if is_dir:
+            for c in checks:
+                _drop_ignored_issues(c, root, ignores)
         _mark_lab_exempt(checks)
         # Held in its own name rather than read back out of `output`: the dict
         # is heterogeneous, so indexing it twice asks the type checker to
@@ -1812,6 +1908,8 @@ def main() -> None:
 
     # ── Directory: scan, group by language, run appropriate tools ─────────
     groups, skipped = _collect_files(target)
+    ignored = _drop_ignored(groups, root, ignores)
+    groups = {lang: files for lang, files in groups.items() if files}
     if not groups:
         print(json.dumps({"error": f"No recognized source files in: {target}"}))
         sys.exit(2)
@@ -1834,6 +1932,7 @@ def main() -> None:
             if name in _DIR_CAPABLE:
                 # Run once against the whole dir -- tool handles file discovery.
                 result = runner(target)
+                _drop_ignored_issues(result, root, ignores)
                 # ...by SUFFIX, so a script found by its shebang is not in it.
                 # Name each one to the tool and fold it into the same result,
                 # a not-run status included, so it cannot drop out. #57.
@@ -1889,6 +1988,8 @@ def main() -> None:
         # rather than an absence the reader has to infer.
         "skipped":    [{"extension": e, "file_count": n}
                        for e, n in sorted(skipped.items(), key=lambda kv: -kv[1])],
+        # Every file .jp-tools-ignore left out, with the entry that did it (#90).
+        "ignored":    ignored,
         "checks":     all_checks,
         "summary":    summary,
     }
