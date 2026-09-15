@@ -30,6 +30,7 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `file-sizes-as-run.py` | AS RUN: `file-sizes.py` as it first ran for the #62 size draft, before later edits | all three fields |
 | `test-against-ref-as-run.sh` | AS RUN: the first draft of `test-against-ref.sh`, which produced its recorded numbers | all three fields |
 | `shellcheck-sweep.py` | how much would a shellcheck gate find across a tree of repos, by level and by repo (#57's measurement) | all three fields |
+| `ast-before-after.py` | which functions a cleanup restructured between two refs, drawn before and after, with complexity and check.py findings by rule | all three fields |
 
 **The `forged-verdict-probe.py` row is stated rather than fixed.** The tool is `claude-config-advisor`'s
 and its docstring is theirs to complete; editing another seat's header to satisfy
