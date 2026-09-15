@@ -262,6 +262,31 @@ That ambiguity is worth stating plainly, because it is the enforcement tool for 
 
 **Status per §1, stated because this principle arrives with more evidence behind it than §2.9 and less than §2.5.** The mechanism is proven: the refusal is wired, and refuses the common spellings; it has known holes (a searcher after `if`/`while`/`!`, searches in python or jq), so it is a strong nudge rather than a wall. It fired on the author of this section while the section was being researched, naming its own fix in the refusal text. What is NOT established is a JP_TOOLS-native cycle. The spool-audit instance is this repo's and it is real, but it was caught by Joe reading his own tool rather than by any search, so it demonstrates the cost of the failure and not yet the value of the cure. The fleet instances that demonstrate the cure are session tooling, not this codebase. That gap is the test this principle has still to pass.
 
+### 2.11 Clean up after yourself
+
+Joe, 2026-09-15: **"our methodology really needs a clean up after yourself sestion, this is stupid"**. It came half an hour after he found the same thing on the filesystem, relayed by `projectbook-helper`: *"wtf are you doing not accounting for the secret scanner and leaving shit around on the fs"*.
+
+**What a change leaves behind is read by other tools, and some of those tools raise findings.** The fleet's leak sweep (`scan-credential-shapes`) reads the disk. A fixture left under `/tmp` with a credential-shaped string in it becomes a finding that someone has to rule on. Deleting the tree afterwards does not close the finding; only a verdict does. On the night this section was written, 57 CERTAIN-tier findings on iteration8 were routed to one seat. Four sat in live corpus inputs. The other 53 were in trees nobody was using: a test shelf's work directory untouched for six days, and a hardlinked copy of a staging directory. **The cheapest finding is the one that was never written to disk.**
+
+**It never announces itself, for the same reason as §2.10.** The run that left the mess succeeded, and the mess sits on a path nobody opens. It is found by the sweep, by the next seat, or by Joe. Here is what one evening of a coverage round left, found and measured on 2026-09-14/15:
+
+- **Test fixtures removed only on the test's last line.** A test that fails or crashes part-way leaves the whole fake HOME, the stub tools and the fake repositories under `/tmp`. Found on the Air: four `pb-pbq-grep-*` directories and one `pb-t-vocab-book-*`. That last one was left by a mutation run that hung and was killed, so its cleanup never ran at all.
+- **A probe that printed its temporary directory and never removed it**, written by the author of this section (`/tmp/proto-cc-*`).
+- **A full-suite run started before a context compaction, then forgotten.** It ran from 00:24 to 02:16, shared its output directory with a later measurement, which then carried a caveat, and overlapped another seat's port window.
+- **Worktrees under `/tmp`**: fifteen were registered in iteration8's projectbook at once. Removing one with `rm` leaves it registered, and the next `git worktree add` on that path refuses.
+
+**The rules, each for the reason above:**
+
+1. **Register the cleanup when you create the thing, not on your last line.** Call `atexit.register(shutil.rmtree, d, ignore_errors=True)` right after `mkdtemp`, or use a context manager. A cleanup on the last line runs only if every line before it did.
+2. **A killed process runs no cleanup at all,** so whatever can kill a run should own that run's scratch space. A harness with a timeout should give each run its own `TMPDIR` and remove it afterwards. `atexit` cannot help once the process is gone.
+3. **Never put a secret-shaped value in a fixture.** Use the canonical placeholders the guards accept: a `$VAR` for any assignment, `example` for a user or password, a reserved host (`example.com`, `host.invalid`, `*.test`). A fixture that has to look real to be worth testing is a fixture the sweep will find.
+4. **A long-running job gets its own output directory, and a line where the next session will look.** Put its PID, its directory and how to stop it in the checklist or on the board. A job started before a compaction is invisible after it; its only record is the one you wrote.
+5. **Remove a worktree with `git worktree remove`, never `rm`.** Do it only after checking that what it held has landed: an ancestor check, or byte-identical files when the branch was rebased.
+6. **A scratch script either earns a place in `tools/lab` (§2.9) or is deleted.** Check each one against the repositories before deleting it: a draft of something that already landed goes, and anything that exists only in the scratchpad is read before it goes.
+7. **Before you stop, list what you created and account for each item:** temporary directories, worktrees, background jobs, board claims, branches. Remove each one or hand it off, and say which you did. For a test, the check is one command: list `/tmp` for your fixture prefixes after the suite has run, and expect nothing.
+
+**Status per §1.** The evidence is one evening across four seats, all of it from the same round. Rule 1 has been measured: thirteen tests changed to register their cleanup at creation all pass, and they leave nothing under their prefixes afterwards. Rule 2 has not been closed. It is a proposal to the mutation runner's owner, and until it lands a killed run can still leave its directory behind.
+
 ---
 
 ## 3. The canonical exemplar: FileScanner
@@ -591,6 +616,12 @@ below is here because its absence cost a round.
    runs.** If the same message that launches a review also proposes more work,
    the launch was premature. A round that reports on a tree that has moved is
    worth nothing, and cancelling it costs nothing.
+
+10. **Leave nothing behind (§2.11).** Every temporary directory, worktree,
+    background job and scratch script this change created is either removed or
+    handed off, and no fixture carries a secret-shaped value. The check: after
+    the tests have run, list `/tmp` for your fixture prefixes and expect
+    nothing.
 
 The through-line, and the one worth keeping if only one survives: **a check
 that did not run looks exactly like a check that passed.** Twelve instances in
