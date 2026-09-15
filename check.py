@@ -812,6 +812,7 @@ def load_ignores(root: Path) -> list[Ignore]:
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
+        # reason: no .jp-tools-ignore is no entries, as the docstring says
         return []
     out: list[Ignore] = []
     for n, raw in enumerate(text.splitlines(), 1):
@@ -1019,6 +1020,7 @@ def coverage_exemptions(path: Path) -> list[dict[str, Any]]:
         src = path.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(src)
     except (OSError, SyntaxError, ValueError):
+        # reason: not this check's job to report an unparseable file; ruff already does (below)
         # Not this check's job to report unparseable files; ruff already does,
         # and reporting it twice makes one problem look like two.
         return []
@@ -1040,6 +1042,7 @@ def coverage_exemptions(path: Path) -> list[dict[str, Any]]:
                 for row in range(tok.start[0], tok.end[0] + 1):
                     code_rows.add(row)
     except (tokenize.TokenError, IndentationError, SyntaxError):
+        # reason: as above: a file the tokenizer refuses is ruff's to report, and this lists nothing
         return []
 
     # Every construct a pragma could sit inside, so the innermost one can be
@@ -1181,7 +1184,6 @@ def run_no_cover(target: str) -> dict[str, Any]:
 #     try is SIM105 (which pushes code into the suppress() form this rule
 #     then sees). The new reach is suppress(...) and a handler that returns a
 #     default, continues, breaks, or passes after a longer try body.
-_SILENT_RETURNS = (ast.Constant, ast.Name)
 _BLIND_NAMES = {"Exception", "BaseException"}
 
 
@@ -1204,13 +1206,28 @@ def _names_blind(node: ast.expr | None) -> bool:
     return False
 
 
+def _is_literal(node: ast.expr) -> bool:
+    """A value written out in full: a constant, `[]`, `{}`, `()`, `-1`, a
+    list of constants. jp-tools' review of the first draft: `return []` and
+    `return -1` are the commonest silent defaults and a Constant-only test
+    let every one of them through."""
+    try:
+        ast.literal_eval(node)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        # reason: literal_eval refusing is the answer "not a literal"; the
+        # types are what it documents raising on a non-literal expression
+        return False
+    return True
+
+
 def _handler_is_silent(h: ast.ExceptHandler) -> bool:
     """True when the handler's body only passes, continues, breaks or returns a
-    constant or a bare name: nothing is recorded and nothing is decided."""
+    literal or a bare name: nothing is recorded and nothing is decided."""
     for stmt in h.body:
         if isinstance(stmt, (ast.Pass, ast.Continue, ast.Break)):
             continue
-        if isinstance(stmt, ast.Return) and (stmt.value is None or isinstance(stmt.value, _SILENT_RETURNS)):
+        if isinstance(stmt, ast.Return) and (stmt.value is None or isinstance(stmt.value, ast.Name)
+                                             or _is_literal(stmt.value)):
             continue
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
             continue                                         # a docstring-shaped string
@@ -1464,6 +1481,7 @@ def _base_measure(f: Path, ctx: tuple[Path, str] | None) -> tuple[int, dict[str,
     try:
         return _smell_measure(src) if src is not None else (0, {})
     except (SyntaxError, ValueError):
+        # reason: a base that will not parse has no smells to compare, so every smell reads NEW, the stricter side
         return 0, {}
 
 
@@ -1858,6 +1876,7 @@ def _dropped_entries(dest: str, files: dict[str, Any]) -> tuple[list[str], int, 
     try:
         prior = json.loads(Path(dest).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        # reason: the third value says the baseline could not be read, and the caller reports that
         return [], 0, True
     had = prior.get("files")
     if not isinstance(had, dict):

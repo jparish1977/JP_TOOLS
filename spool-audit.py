@@ -1241,7 +1241,12 @@ def _unlink_at(root_fd: int, rel: str) -> tuple[str | None, int]:
                 fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
                              | os.O_CLOEXEC, dir_fd=fd)
             except FileNotFoundError:
-                return None, 0  # the parent is gone, so the file is too
+                # A PARENT that is gone is not the file being gone: a renamed
+                # parent leaves the content alive at its new path, and "gone"
+                # here reported a destruction this tool did not perform (#45).
+                # Said as a note, so it is told apart from a real removal.
+                return (f"{safe_name(rel)} (a parent component vanished mid-run; "
+                        "NOT removed by this tool, and it may survive elsewhere)"), 0
             except OSError as exc:
                 return _component_note(rel, part, fd, exc), 0
             opened.append(fd)
@@ -1250,6 +1255,7 @@ def _unlink_at(root_fd: int, rel: str) -> tuple[str | None, int]:
             lfd = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
                           | os.O_CLOEXEC, dir_fd=fd)
         except FileNotFoundError:
+            # reason: the LEAF is gone between listing and open: nothing to delete, (None, 0) is 'gone'
             return None, 0
         except OSError as exc:
             if exc.errno == errno.ELOOP:
@@ -1265,6 +1271,7 @@ def _unlink_at(root_fd: int, rel: str) -> tuple[str | None, int]:
         try:
             os.unlink(leaf, dir_fd=fd)
         except FileNotFoundError:
+            # reason: the leaf went between open and unlink: nothing left to delete, (None, 0) is 'gone'
             return None, 0
         except OSError as exc:
             return (f"{safe_name(rel)} (delete FAILED: {exc.__class__.__name__}; "
