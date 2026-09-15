@@ -1779,12 +1779,14 @@ def test_head_reads_a_prefix_and_never_raises() -> None:
         empty.touch()
         check("an empty file gives an empty head", spool_audit._head(empty), "")
 
-        # An unreadable file must arrive as "" rather than raising: callers
-        # treat "" as UNKNOWN, which is_harmless_temp then declines to dismiss.
-        # Raising here would abort the whole listing over one file.
+        # An unreadable file arrives as None rather than raising (raising would
+        # abort the whole listing over one file) and rather than "" (#42: that
+        # collapsed "could not read" into "read nothing", and the distinction
+        # lived only in every caller's habit of failing closed on ""). Both
+        # callers list a None as unexamined, never classify it.
         missing = root / "not-there"
-        check("a missing file gives '' and does not raise",
-              spool_audit._head(missing), "")
+        check("a missing file gives None, not '', and does not raise",
+              spool_audit._head(missing), None)
 
         binary = root / "raw"
         binary.write_bytes(b"\xff\xfe\x00garbage")

@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -40,7 +41,11 @@ def _ruff_count(target: str) -> int:
     ).stdout
     try:
         return len(json.loads(out)) if out.strip() else 0
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        # A count that is not known is said, not read as zero: the before and
+        # after counts are what this tool reports as its work.
+        print(f"fix: ruff's output was not JSON ({e}); its count is unknown, read as 0",
+              file=sys.stderr)
         return 0
 
 
@@ -149,6 +154,7 @@ def fix_phpcs(target: str, dry_run: bool, **_: object) -> dict[str, Any]:
                 return {"tool": "phpcbf", "status": "dry-run",
                         "would_fix": len(fixable), "items": fixable}
             except (json.JSONDecodeError, TypeError):
+                # reason: not the JSON expected: would_fix reads '?', which is visible
                 pass
         return {"tool": "phpcbf", "status": "dry-run", "would_fix": "?"}
     result = subprocess.run([*args, target], capture_output=True, text=True, check=False)

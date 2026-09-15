@@ -104,7 +104,10 @@ def complexity(src: str | None, name: str) -> dict[str, int]:
     out: dict[str, int] = {}
     try:
         rows = json.loads(p.stdout or "[]")
-    except ValueError:
+    except ValueError as e:
+        # Said, not read as "no functions": every complexity would print 0.
+        print(f"ast-before-after: ruff's output was not JSON ({e}); no complexities read",
+              file=sys.stderr)
         return out
     for row in rows:
         m = re.match(r"`([^`]+)` is too complex \((\d+) > 0\)", row.get("message", ""))
@@ -128,6 +131,7 @@ def findings(src: str | None, name: str) -> dict[str, int]:
         try:
             doc = json.loads(line)
         except ValueError:
+            # reason: a line that is not a JSON document is not a check.py report; the next may be
             continue
         for arm in doc.get("checks", []):
             for issue in arm.get("issues", []):
