@@ -60,6 +60,7 @@ def shellcheck_result(out: str) -> dict[str, Any]:
     try:
         doc = json.loads(out)
     except ValueError:
+        # reason: not a check.py report: no result, which fails the check that reads it
         return {}
     for c in doc.get("checks", []):
         if c.get("tool") == "shellcheck":

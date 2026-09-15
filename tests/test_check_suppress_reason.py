@@ -83,6 +83,13 @@ def test_a_silent_handler_is_flagged() -> None:
         ("return a constant", "    return 0\n"),
         ("return a bare name", "    return rows\n"),
         ("a bare return", "    return\n"),
+        # jp-tools' review: the commonest silent defaults are these, and a
+        # Constant-only test let every one of them through.
+        ("return an empty list", "    return []\n"),
+        ("return an empty dict", "    return {}\n"),
+        ("return an empty tuple", "    return ()\n"),
+        ("return a negative number", "    return -1\n"),
+        ("return a literal list", "    return [0, '']\n"),
     ]:
         src = ("def f(rows):\n  for p in rows:\n   try:\n    open(p)\n   except OSError:\n" + body)
         check(f"a handler that only does {label} is flagged", rules_for(src), ["suppress-reason"])
@@ -180,7 +187,7 @@ def main() -> int:
     if FAILURES:
         print(f"FAILED ({len(FAILURES)})")
         for f in FAILURES:
-            print(f"  {f}")
+            print(f"FAIL {f}")      # "FAIL <label>: ...", the line mutate-on-target reads
         return 1
     print("all check.py suppress-reason tests passed")
     return 0

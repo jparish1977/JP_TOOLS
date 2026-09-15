@@ -69,6 +69,7 @@ def functions(src: str | None) -> dict[str, ast.AST]:
     try:
         tree = ast.parse(src)
     except SyntaxError:
+        # reason: a source that will not parse has no functions to compare (lab header says so)
         return {}
     out: dict[str, ast.AST] = {}
 

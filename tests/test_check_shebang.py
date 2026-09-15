@@ -57,6 +57,7 @@ def issues_for(out: str, tool: str) -> list[str]:
     try:
         doc = json.loads(out)
     except ValueError:
+        # reason: not a check.py report: no issues listed, which fails the check that expects some
         return []
     return [str(i.get("file", "")) for c in doc.get("checks", [])
             if c.get("tool") == tool for i in c.get("issues", [])]

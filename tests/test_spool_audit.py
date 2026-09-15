@@ -1319,7 +1319,11 @@ def test_purge_refuses_what_is_not_a_regular_file() -> None:
 def test_purge_counts_an_already_gone_file_as_removed() -> None:
     """The goal state is 'no file at that path', however reached. A live
     spool deletes its own temp files; racing one is not a failure, and the
-    old delete() already knew this (FileNotFoundError counted as deleted)."""
+    old delete() already knew this (FileNotFoundError counted as deleted).
+
+    A missing PARENT is not the same thing (#45): a renamed parent leaves the
+    content alive at its new path, so "removed" there was a destruction the
+    tool did not perform. It is a failure note now, told apart from a removal."""
     with tempfile.TemporaryDirectory() as raw:
         spool = pathlib.Path(raw)
         res = spool_audit.delete_residue(
@@ -1329,9 +1333,11 @@ def test_purge_counts_an_already_gone_file_as_removed() -> None:
                 Entry(name="tmp/also-gone.ps", kind=Kind.TEMP, in_temp=True),
             ),
         )
-        check("both count as removed", sorted(res.removed),
-              ["gone.ps", "tmp/also-gone.ps"])
-        check("no failures", res.failed, ())
+        check("a leaf already gone counts as removed", sorted(res.removed), ["gone.ps"])
+        note = ("tmp/also-gone.ps (a parent component vanished mid-run; NOT removed by "
+                "this tool, and it may survive elsewhere)")
+        check("a leaf under a parent that is gone is a note, not a removal (#45)",
+              tuple(res.failed), (note,))
 
 
 def test_purge_removes_only_its_victims() -> None:
