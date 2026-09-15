@@ -1787,8 +1787,22 @@ def compare_baseline(checks: list[dict[str, Any]], target: str,
             skipped.append((tool, f"version {was_v} -> {now_v}"))
     skip = {t for t, _ in skipped}
 
+    # A run measures only what it was pointed at. A baselined file outside that
+    # was not looked at, so it is counted on one line rather than compared:
+    # read as zero it would print as a gain that never happened, once per file,
+    # and the hook checks one staged file per run (#36). A measured file that
+    # went clean has no findings in `now`, so the target itself is added.
+    rel_target = _rel(target, root)
+    if Path(target).is_dir():
+        prefix = "" if rel_target in ("", ".") else rel_target.rstrip("/") + "/"
+        in_scope = {p for p in was if p.startswith(prefix)}
+    else:
+        in_scope = {rel_target}
+    compared = set(now) | in_scope
+    unmeasured = len(set(was) - compared)
+
     worse, deltas = [], []
-    for path in sorted(set(now) | set(was)):
+    for path in sorted(compared):
         tools = set(now.get(path, {})) | set(was.get(path, {}))
         for tool in sorted(tools - skip):
             before = int(was.get(path, {}).get(tool, {}).get("errors", 0))
@@ -1808,6 +1822,9 @@ def compare_baseline(checks: list[dict[str, Any]], target: str,
         # Say it. A ratchet that only speaks when it fails is indistinguishable
         # from one that never ran, which is the whole complaint in step 3.
         print(f"baseline: no change against {Path(source).name}")
+    if unmeasured:
+        print(f"baseline: {unmeasured} other baselined file(s) not measured in "
+              f"this run, so not compared")
 
     if worse:
         print("", file=sys.stderr)

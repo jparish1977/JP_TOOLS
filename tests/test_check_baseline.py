@@ -110,6 +110,33 @@ def worktree_case(tmp: str) -> None:
           r.returncode == 0, r.stderr)
 
 
+def scope_case(repo: str) -> None:
+    """#36: the hook checks one staged file per run, and every other baselined
+    file used to print as improved to zero. Two dirty files recorded, one
+    checked: the other must be counted, never compared."""
+    print("a per-file run compares only the file it measured (#36)")
+    (Path(repo) / "other.py").write_text(DIRTY, encoding="utf-8")
+    (Path(repo) / "dirty.py").write_text(DIRTY, encoding="utf-8")
+    two = str(Path(repo) / "two.json")
+    r = run(".", "--record-baseline", two, cwd=repo)
+    recorded = set(json.loads(Path(two).read_text(encoding="utf-8")).get("files", {}))
+    check("CONTROL: both dirty files are recorded",
+          r.returncode == 0 and {"dirty.py", "other.py"} <= recorded, r.stdout + r.stderr)
+    r = run("dirty.py", "--baseline", two, cwd=repo)
+    check("an unmeasured baselined file is not printed as improved",
+          "other.py" not in r.stdout, r.stdout)
+    check("  and the measured file's unchanged count says no change",
+          r.returncode == 0 and "baseline: no change" in r.stdout, r.stdout)
+    check("  and the unmeasured one is counted on one line",
+          "1 other baselined file(s) not measured" in r.stdout, r.stdout)
+    (Path(repo) / "dirty.py").write_text(CLEAN, encoding="utf-8")
+    r = run("dirty.py", "--baseline", two, cwd=repo)
+    check("a measured file that went clean still shows its gain",
+          any(ln.strip().startswith("dirty.py  ruff") and "-> 0 (-" in ln
+              for ln in r.stdout.splitlines()), r.stdout)
+    (Path(repo) / "other.py").unlink()
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
@@ -162,6 +189,8 @@ def main() -> int:
         check("a lowered count exits 0", r.returncode == 0, r.stderr)
         check("the gain is reported, not silently accepted",
               "-3" in r.stdout, r.stdout)
+
+        scope_case(repo)
 
         print("mode enforcement")
         (Path(repo) / "dirty.py").write_text(DIRTY, encoding="utf-8")
