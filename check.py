@@ -1180,19 +1180,26 @@ def _base_measure(f: Path, ctx: tuple[Path, str] | None) -> tuple[int, dict[str,
 
 
 def _smell(f: Path, line: int, rule: str, what: str,
-           counts: tuple[int, int, int]) -> dict[str, Any] | None:
-    """counts = (now, before, limit). None when under the limit now."""
+           counts: tuple[int, int, int], history: bool = True) -> dict[str, Any] | None:
+    """counts = (now, before, limit). None when under the limit now.
+
+    With no history, before is a default and not a measurement: the smell still
+    counts as new, since nothing shows it is old, and the message says why."""
     now, before, limit = counts
     if now < limit:
         return None
     new = before < limit
+    if not history:
+        why = "NEW: no git history here, so its age cannot be told and it counts as new"
+    elif new:
+        why = f"NEW: was {before} before this change"
+    else:
+        why = f"existing: was already {before}, so a warning"
     return {
         "file": str(f), "line": line, "col": 0,
         "severity": "error" if new else "warning",
         "rule": rule,
-        "message": (f"{what} is {now} (a smell at {limit}); "
-                    + (f"NEW: was {before} before this change" if new
-                       else f"existing: was already {before}, so a warning")),
+        "message": f"{what} is {now} (a smell at {limit}); {why}",
         "fixable": False, "fixable_unsafe": False,
     }
 
@@ -1214,14 +1221,15 @@ def _file_smells(f: Path) -> list[dict[str, Any]]:
     except (SyntaxError, ValueError, OSError):
         return [_unmeasured(f)]
     ctx = _smells_context(f)
+    history = ctx is not None
     b_lines, b_funcs = _base_measure(f, ctx)
     cx_now = sum(c for _, c, _ in funcs.values())
     cx_before = sum(c for _, c, _ in b_funcs.values())
     found = [
         _smell(f, 1, "SMELL-FILE-LINES", "file length",
-               (lines, b_lines, _SMELL_FILE_LINES)),
+               (lines, b_lines, _SMELL_FILE_LINES), history),
         _smell(f, 1, "SMELL-FILE-COMPLEXITY", "file complexity (sum over its functions)",
-               (cx_now, cx_before, _SMELL_FILE_COMPLEXITY)),
+               (cx_now, cx_before, _SMELL_FILE_COMPLEXITY), history),
     ]
     found.extend(_function_smells(f, funcs, b_funcs, ctx))
     return [s for s in found if s is not None]
@@ -1239,9 +1247,9 @@ def _function_smells(f: Path, funcs: dict[str, tuple[int, int, int]],
             before = _function_elsewhere(ctx[0], ctx[1], name)
         b_size, b_cx, _ = before or (0, 0, 0)
         out.append(_smell(f, line, "SMELL-FUNC-LINES", f"function {name} length",
-                          (size, b_size, _SMELL_FUNC_LINES)))
+                          (size, b_size, _SMELL_FUNC_LINES), ctx is not None))
         out.append(_smell(f, line, "SMELL-FUNC-COMPLEXITY", f"function {name} complexity",
-                          (cx, b_cx, _SMELL_FUNC_COMPLEXITY)))
+                          (cx, b_cx, _SMELL_FUNC_COMPLEXITY), ctx is not None))
     return out
 
 
