@@ -4,12 +4,11 @@ JP_TOOLS/tests/test_dashes.py
 No NEW em-dashes: the hook refuses a commit that ADDS one, and fix-dashes.py
 fixes exactly those lines and nothing else.
 
-Joe, 2026-09-14: "appeasing the fickle joe is only worth it if this does the
-trcik, if it doesnt and it keeps wasting time then ill just drop the damned
-ban", and on a way through: "itll need a flag to allow instances where its
-actually a thing we need to do". So the tests pin both halves: that it stops a
-new one cheaply, and that a line already there, a dated record, is never
-touched.
+Pins both halves: a new one is stopped and fixed cheaply, JP_TOOLS_ALLOW_EMDASH
+lets a genuine one through and says so, and a line already there, a dated
+record, is never touched. Then the diff shapes that could hide one (a '++ '
+line, a non-ASCII name, a rename), and a fixer that crashes, which must read
+as BROKEN.
 
 Uses .md files, which check.py skips, so ruff and mypy cannot blur the verdict.
 The hook is installed (a shim) with JP_TOOLS_DIR naming this tree.
@@ -118,9 +117,9 @@ def unstaged_case(repo: Path) -> None:
 
 
 def edge_cases(tmp: Path) -> None:
-    """claude-config's review of #84: two ways a new em-dash got past --check.
-    Each in a fresh repo, so nothing staged earlier can make it pass."""
-    print("\nDiff edges (#84 review):")
+    """Two diff shapes that could hide a new em-dash from --check. Each in a
+    fresh repo, so nothing staged earlier can make it pass."""
+    print("\nDiff edges:")
     edges = (
         ("plus.md", f"++ reads like a header {DASH} but is not",
          "an added line starting '++ ' (a '+++ ' row in the diff)"),
@@ -143,9 +142,9 @@ def edge_cases(tmp: Path) -> None:
 
 
 def rename_cases(tmp: Path) -> None:
-    """claude-config's second review of #84: the lines a moved file carries are
-    not added lines, and a commit that renames is still checked."""
-    print("\nRenames (#84 review):")
+    """The lines a moved file carries are not added lines, and a commit that
+    renames is still checked."""
+    print("\nRenames:")
     allow = dict(os.environ, JP_TOOLS_ALLOW_EMDASH="1")
     record = "".join(f"line {n}\n" for n in range(1, 6)) + f"dated {DASH} record\n"
     cases = (
@@ -168,11 +167,9 @@ def rename_cases(tmp: Path) -> None:
 
 
 def crash_case(tmp: Path) -> None:
-    """claude-config's note on #84: a fixer that crashed printed nothing, and
-    the hook let the commit through. Joe: "if we need the tool to pass then we
-    cant pass without the fucking tool". So anything but exit 0 or 1 from
-    --check is BROKEN, never clean."""
-    print("\nA fixer that crashes (#84 note):")
+    """A fixer that crashes prints nothing. Anything but exit 0 or 1 from
+    --check must read as BROKEN, never clean."""
+    print("\nA fixer that crashes:")
     tools = tmp / "tools"
     tools.mkdir()
     for name in ("check.py", "install-hooks.py"):
