@@ -195,6 +195,8 @@ def outside_and_clean(repo: Path, tmp: Path) -> None:
     rc, pairs, raw = smells(loose)
     check("outside git there is no history, so a smell is new, exit 1",
           rc == 1 and ("SMELL-FUNC-LINES", "error") in pairs, raw)
+    check("... and it says there is no history, not that it was 0 before",
+          "no git history here" in raw and "was 0 before" not in raw, raw)
     clean = repo / "clean.py"
     clean.write_text("def ok():\n    return 1\n", encoding="utf-8")
     rc, pairs, raw = smells(clean)
