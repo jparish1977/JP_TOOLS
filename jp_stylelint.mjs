@@ -43,7 +43,19 @@ try {
     files: absTarget,
     config,
   });
-  console.log(JSON.stringify(result.results));
+  // Only the fields check.py reads. A whole result object can hold a parser
+  // that refers back to itself, which JSON.stringify cannot print.
+  const out = result.results.map((r) => ({
+    source: r.source,
+    warnings: r.warnings.map((w) => ({
+      line: w.line,
+      column: w.column,
+      severity: w.severity,
+      rule: w.rule,
+      text: w.text,
+    })),
+  }));
+  console.log(JSON.stringify(out));
 } catch (err) {
   console.error(JSON.stringify({ error: err.message }));
   process.exit(1);
