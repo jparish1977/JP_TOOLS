@@ -70,7 +70,10 @@ def gather(target: Path, check_mod: object) -> tuple[list[dict[str, Any]], int]:
     for f in files:
         try:
             total_lines += len(f.read_text(encoding="utf-8", errors="replace").splitlines())
-        except OSError:
+        except OSError as e:
+            # Said, not skipped: the exemption share is rows over total lines,
+            # and a file left out of both makes the share read as if it had looked.
+            print(f"list-exemptions: {f} unreadable ({e}); NOT in the total", file=sys.stderr)
             continue
         rows.extend(check_mod.coverage_exemptions(f))  # type: ignore[attr-defined]
     return rows, total_lines

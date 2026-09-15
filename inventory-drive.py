@@ -80,7 +80,11 @@ def record_tree(root: str, top: str, out: TextIO) -> "tuple[int, int]":
             full = os.path.join(dirpath, name)
             try:
                 stat = os.stat(full)
-            except OSError:
+            except OSError as e:
+                # Said, not skipped: an inventory that quietly leaves a file
+                # out is a shorter inventory nobody knows is short.
+                print(f"inventory-drive: {full} cannot be stat'd ({e}); NOT inventoried",
+                      file=sys.stderr)
                 continue
             rel = os.path.relpath(full, root)
             out.write("%s\t%d\t%d\n" % (rel, stat.st_size, int(stat.st_mtime)))

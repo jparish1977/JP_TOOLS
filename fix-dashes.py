@@ -37,6 +37,7 @@ def name_process() -> None:
         import ctypes
         ctypes.CDLL(None).prctl(15, b"fix-dashes", 0, 0, 0)
     except (OSError, AttributeError):
+        # reason: no libc or no prctl (named types): the process runs unnamed, which is never fatal
         pass
 
 

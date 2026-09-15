@@ -214,8 +214,10 @@ class TempFile:
     """A file in CUPS TempDir, with just enough to classify it.
 
     `head` is the first few bytes, decoded lossily, used only to recognise
-    known-harmless formats. It is never printed. Empty string means the header
-    could not be read, which is treated as "unknown", not as "harmless".
+    known-harmless formats. It is never printed. A file whose header could not
+    be read never becomes a TempFile: it is listed as unexamined (#42). An
+    empty string is a file that read as empty, which is "unknown", not
+    "harmless".
     """
 
     name: str
@@ -856,14 +858,22 @@ def purge_outcome(
 # above stays testable without a printer, a spool or root.
 
 
-def _head(path: Path, n: int = 32) -> str:
-    """First bytes of a file, decoded lossily. Used only to recognise known
-    harmless formats such as PPDs. Never printed, never logged."""
+def _head(path: Path, n: int = 32) -> str | None:
+    """First bytes of a file, decoded lossily, or None when the file could
+    not be read. Used only to recognise known harmless formats such as PPDs.
+    Never printed, never logged.
+
+    None, not "": "could not read" and "read nothing" used to be the same
+    value (#42), so the distinction lived in every caller's habit of failing
+    closed on "". A caller now has to decide what an unreadable file is, and
+    both callers list it as unexamined rather than classify it."""
     try:
         with path.open("rb") as fh:
             return fh.read(n).decode("utf-8", "replace")
     except OSError:
-        return ""
+        # reason: None IS the recorded outcome, "could not read", and both
+        # callers list such a file as unexamined rather than classify it (#42)
+        return None
 
 
 def _walk_temp(
@@ -926,11 +936,13 @@ def _walk_temp(
             is_regular=stat.S_ISREG(st.st_mode), target=target,
         )
         if note is None:
-            # No try here: st is already known and _head() swallows its own
-            # OSError, so the handler that used to wrap this could not fire.
-            # An unreadable file arrives with head="" and is treated as
-            # possible content by is_harmless_temp.
-            found.append(TempFile(name=name, size=st.st_size, head=_head(f)))
+            # st is already known; _head() answers None for a file it could
+            # not read, and that file is UNEXAMINED, never classified (#42).
+            head = _head(f)
+            if head is None:
+                unexamined.append(f"{safe_name(name)} (could not be read)")
+            else:
+                found.append(TempFile(name=name, size=st.st_size, head=head))
         else:
             unexamined.append(note)
 
@@ -1074,6 +1086,7 @@ def read_spool(
         # readable document.
         unexamined.append(f"{TEMP_SUBDIR}/ (permission denied)")
     except FileNotFoundError:
+        # reason: no TempDir at all is nothing to examine, not something unexamined (above)
         # No TempDir at all. Nothing to examine is not the same as something
         # unexamined, and treating it as unexamined meant a spool without a
         # tmp/ could never exit 0.
@@ -1134,10 +1147,13 @@ def read_spool(
         if d.suspect:
             suspect.append(n)
         if d.wants_content:
-            try:
-                extra.append(TempFile(name=n, size=st.st_size, head=_head(f)))
-            except OSError:
-                unexamined.append(f"{safe_name(n)} (vanished while reading)")
+            # The try/except OSError that stood here could never fire: _head()
+            # catches its own. It answers None instead, and that is unexamined.
+            head = _head(f)
+            if head is None:
+                unexamined.append(f"{safe_name(n)} (could not be read)")
+            else:
+                extra.append(TempFile(name=n, size=st.st_size, head=head))
 
     return Listing(
         verdict,
@@ -1173,7 +1189,7 @@ def _component_note(rel: str, part: str, fd: int, exc: OSError) -> str:
     so racing it cannot reopen the path.
     """
     if exc.errno in (errno.ELOOP, errno.ENOTDIR):
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(OSError):  # reason: the lstat is for the message only, after the refusal; a failed one loses the symlink detail
             if stat.S_ISLNK(os.lstat(part, dir_fd=fd).st_mode):
                 return (f"{safe_name(rel)} (refused: {safe_name(part)} is "
                         "a symlink, NOT followed)")
@@ -1359,6 +1375,8 @@ def retention_state(conf: str) -> bool | None:
     try:
         body = _read_conf(conf)
     except OSError:
+        # reason: None is the documented "config unreadable", which render()
+        # and purge_outcome() show as such rather than as a retention verdict
         return None
     return parse_retention(body)
 
@@ -1388,7 +1406,7 @@ def main(argv: list[str] | None = None) -> int:
     # UnicodeEncodeError, exit 1 -- which this tool uses for "content is still
     # there", so a wrapper cannot tell a crash from a finding. The parsing side
     # was hardened for hostile names; the output side undid it.
-    with contextlib.suppress(AttributeError, ValueError):
+    with contextlib.suppress(AttributeError, ValueError):  # reason: a stdout with no reconfigure (a StringIO under test) keeps strict encoding, as above
         sys.stdout.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
 
     ap = argparse.ArgumentParser(

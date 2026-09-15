@@ -95,6 +95,7 @@ def add_directories(image: Path, mountpoint: Path) -> bool:
         subprocess.run(["mount", "-o", "loop", str(image), str(mountpoint)],
                        check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
+        # reason: mount failed or is absent: False is SKIP, said by the caller
         return False
     try:
         # Guarded like the mount itself: a loop image that mounts read-only or
@@ -105,6 +106,7 @@ def add_directories(image: Path, mountpoint: Path) -> bool:
         (mountpoint / "realdir" / "inner.bin").touch()
         (mountpoint / "realdir" / "deeper" / "deep.bin").touch()
     except OSError:
+        # reason: a read-only or degraded mount: False is SKIP, said by the caller (above)
         # A read-only or degraded mount lands here. The caller treats False as
         # "directory cases not exercised" and carries on, which is a SKIP.
         return False

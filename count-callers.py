@@ -40,7 +40,10 @@ def find_callers(root: Path, func_name: str, extensions: set[str], exclude: set[
 
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as e:
+            # Said, not skipped: a file left out of the count makes the count
+            # read lower than the truth, and a caller count is a claim.
+            print(f"count-callers: {path} unreadable ({e}); NOT counted", file=sys.stderr)
             continue
 
         for i, line in enumerate(lines):

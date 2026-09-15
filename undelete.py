@@ -53,6 +53,7 @@ def find_tool(name):
             if result.returncode == 0 and result.stdout.strip():
                 return ["wsl", result.stdout.strip()]
         except FileNotFoundError:
+            # reason: no wsl on this box; the search moves to the next candidate, and None is the answer
             pass
 
     return None

@@ -255,7 +255,11 @@ def main() -> int:
         (s / "tmp" / ".cache" / "leak.ps").write_bytes(b"%!PS-Adobe-3.0\n")
         assert_invariant("cache report", s, expect=1)
 
-        # 6. Unreadable file: neither side can rule it out. Skipped as root,
+        # 6. Unreadable file: the tool could not look, and says so -- exit 2,
+        #    the file listed as unexamined (#42). It used to read as "content
+        #    still there", exit 1, because _head() handed back "" for a file it
+        #    could not read and the classifier took "" as unknown content; the
+        #    verdict was right by accident and wrong in kind. Skipped as root,
         #    where chmod 000 does not stop a read -- the fixture would silently
         #    degrade into "a readable %!PS file" and test a different path.
         #    This tool's documented invocation is `sudo spool-audit.py`, and CI
@@ -265,7 +269,7 @@ def main() -> int:
             p = s / "tmp" / "secret.ps"
             p.write_bytes(b"%!PS\n")
             os.chmod(p, 0o000)
-            assert_invariant("unreadable report", s, expect=1)
+            assert_invariant("unreadable report", s, expect=2)
             os.chmod(p, 0o644)
         else:
             print("  note: running as root, unreadable-file fixture skipped")

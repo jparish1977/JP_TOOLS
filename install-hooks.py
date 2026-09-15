@@ -37,6 +37,7 @@ def _tools_dir() -> Path:
                 if (main / "check.py").exists():
                     return main
     except OSError:
+        # reason: git did not answer; this checkout is the main one, the usual case
         pass
     return here
 

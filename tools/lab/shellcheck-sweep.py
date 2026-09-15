@@ -34,6 +34,7 @@ def name_process() -> None:
         import ctypes
         ctypes.CDLL(None).prctl(15, b"shellcheck-swp", 0, 0, 0)
     except (OSError, AttributeError):
+        # reason: no libc or no prctl (named types): the process runs unnamed, which is never fatal
         pass
 
 
@@ -56,7 +57,10 @@ def shell_files(root: str) -> list[tuple[str, str]]:
                 try:
                     with open(p, "rb") as fh:
                         first = fh.readline(256)
-                except OSError:
+                except OSError as e:
+                    # Said, not skipped: a script left out of the sweep is a
+                    # script the sweep reports nothing about.
+                    print(f"shellcheck-sweep: {p} unreadable ({e}); NOT swept", file=sys.stderr)
                     continue
                 if (first.startswith(b"#!") and b"python" not in first
                         and (first.split(b"/")[-1].strip().startswith(b"sh") or b"bash" in first)):

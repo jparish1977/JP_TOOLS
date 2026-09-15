@@ -65,6 +65,7 @@ def run(*args: str, cwd: Path) -> tuple[int, dict[str, Any], str]:
                 doc = json.loads(line)
                 break
             except ValueError:
+                # reason: a line that is not the JSON document is skipped; the first one that is wins
                 continue
     return p.returncode, doc, p.stdout + p.stderr
 
