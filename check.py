@@ -220,6 +220,8 @@ def _count_eslint_suppressions(target: str) -> list[dict[str, Any]]:
                         "fixable":  False,
                     })
         except OSError:
+            # reason: a source file that cannot be read carries no acknowledged
+            # suppressions to list; the linter that reads it reports the read
             pass
     return suppressions
 
@@ -530,8 +532,11 @@ def run_pip_audit(target: str) -> dict[str, Any]:
                     "message":  f"{vuln.get('name')}=={vuln.get('version')}: {v.get('description', v.get('id', ''))}",
                     "fixable":  bool(v.get("fix_versions")),
                 })
-    except (json.JSONDecodeError, TypeError):
-        pass
+    except (json.JSONDecodeError, TypeError) as e:
+        # An audit whose output did not parse did not run, and a check that
+        # did not run is not a pass (#59).
+        return {"tool": "pip-audit", "status": "error", "issues": [],
+                "note": f"pip-audit's output was not the JSON expected: {e}"}
     return {"tool": "pip-audit", "status": _status(issues), "issues": issues}
 
 
@@ -560,8 +565,10 @@ def run_npm_audit(target: str) -> dict[str, Any]:
                 "message":  f"{name}: {adv.get('title', adv.get('severity', 'vulnerability'))} (via {', '.join(adv.get('via', []) if isinstance(adv.get('via', [None])[0], str) else [v.get('title','?') for v in adv.get('via',[])])})",
                 "fixable":  adv.get("fixAvailable", False) is not False,
             })
-    except (json.JSONDecodeError, TypeError, IndexError):
-        pass
+    except (json.JSONDecodeError, TypeError, IndexError) as e:
+        # As pip-audit: not parsed is not run, and not run is not a pass (#59).
+        return {"tool": "npm-audit", "status": "error", "issues": [],
+                "note": f"npm audit's output was not the JSON expected: {e}"}
     return {"tool": "npm-audit", "status": _status(issues), "issues": issues}
 
 
@@ -602,8 +609,10 @@ def run_composer_audit(target: str) -> dict[str, Any]:
                     "message":  f"{pkg}: {adv.get('title', 'security advisory')}",
                     "fixable":  False,
                 })
-    except (json.JSONDecodeError, TypeError):
-        pass
+    except (json.JSONDecodeError, TypeError) as e:
+        # As pip-audit: not parsed is not run, and not run is not a pass (#59).
+        return {"tool": "composer-audit", "status": "error", "issues": [],
+                "note": f"composer audit's output was not the JSON expected: {e}"}
     return {"tool": "composer-audit", "status": _status(issues), "issues": issues}
 
 
@@ -697,6 +706,8 @@ def _shebang_lang(p: Path) -> str | None:
         with p.open("rb") as fh:
             first = fh.readline(256)
     except OSError:
+        # reason: a file that cannot be read has no shebang to read; the
+        # language then comes from the suffix, and a linter reports the read
         return None
     if not first.startswith(b"#!"):
         return None
@@ -740,7 +751,7 @@ def _symlink_kind(link: Path, top: Path) -> str | None:
     try:
         target = link.resolve(strict=True)
     except (OSError, RuntimeError):
-        return "(broken symlink)"
+        return "(broken symlink)"     # reason: the string IS the verdict the report shows
     if target.is_relative_to(top):
         return "(symlink inside the tree, measured at its target)"
     return "(symlink out of the tree, not this repo's file)"
@@ -1135,6 +1146,182 @@ def run_no_cover(target: str) -> dict[str, Any]:
     return {"tool": "no-cover", "status": _status(issues), "issues": issues}
 
 
+# ── suppress-reason ───────────────────────────────────────────────────────────
+# A swallowed exception is a decision that a failure does not matter here, and
+# the decision is invisible unless the line says why. Joe, 2026-09-14: "the
+# damned good reasons need to be damned good reasons, not an easy escape
+# route." On 2026-09-15 projectbook was found naming 109 scripts' processes
+# under `try/except ImportError: pass` and `contextlib.suppress(ImportError)`,
+# so a script that failed to name itself ran on quietly, and the fix that
+# followed added the same blanket to 30 more. Nothing refused any of it.
+#
+# The rule is the no-cover rule's: not "no suppression", but that one must SAY
+# WHY, on the line, where a reader and this check can see it:
+#
+#     with contextlib.suppress(OSError):                    # flagged
+#     with contextlib.suppress(OSError):  # reason: a stale cache is a miss
+#     except OSError:                                       # then pass, continue,
+#         pass                                              #   or return <default>: flagged
+#     except OSError:  # reason: no ledger dir means no ledger; the caller says so
+#         return None
+#
+# A handler that DOES something (logs, re-raises, sets state and carries on) is
+# a decision the code shows and is not this check's business. The reason may
+# sit on the `except`/`with` line or on any line of the handler's own body.
+#
+# TWO THINGS THIS DOES NOT DO, both from #58 and jp-tools' review of the
+# first draft (2026-09-15):
+#   * A reason does NOT satisfy a BLIND catch. `except Exception`,
+#     `except BaseException`, a bare `except:` or `suppress(Exception)` that
+#     swallows silently is flagged whatever the comment says; the fix is to
+#     log it (logging.exception, or exc_info=True) or re-raise, which ruff
+#     already accepts as not blind.
+#   * It does not double-count what ruff already reports: a bare or blind
+#     `except: pass` is S110, and a typed `except X: pass` on a one-statement
+#     try is SIM105 (which pushes code into the suppress() form this rule
+#     then sees). The new reach is suppress(...) and a handler that returns a
+#     default, continues, breaks, or passes after a longer try body.
+_SILENT_RETURNS = (ast.Constant, ast.Name)
+_BLIND_NAMES = {"Exception", "BaseException"}
+
+
+def _is_suppress_call(node: ast.expr) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    fn = node.func
+    name = fn.attr if isinstance(fn, ast.Attribute) else fn.id if isinstance(fn, ast.Name) else ""
+    return name == "suppress"
+
+
+def _names_blind(node: ast.expr | None) -> bool:
+    """True for a bare except, or one naming Exception/BaseException anywhere."""
+    if node is None:
+        return True
+    for n in ast.walk(node):
+        name = n.attr if isinstance(n, ast.Attribute) else n.id if isinstance(n, ast.Name) else ""
+        if name in _BLIND_NAMES:
+            return True
+    return False
+
+
+def _handler_is_silent(h: ast.ExceptHandler) -> bool:
+    """True when the handler's body only passes, continues, breaks or returns a
+    constant or a bare name: nothing is recorded and nothing is decided."""
+    for stmt in h.body:
+        if isinstance(stmt, (ast.Pass, ast.Continue, ast.Break)):
+            continue
+        if isinstance(stmt, ast.Return) and (stmt.value is None or isinstance(stmt.value, _SILENT_RETURNS)):
+            continue
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+            continue                                         # a docstring-shaped string
+        return False
+    return True
+
+
+def silent_catches(path: Path) -> list[dict[str, Any]]:
+    """Every contextlib.suppress and every silent except handler in one file,
+    with whether a `reason:` is stated within its span. The inventory, not the
+    violations, the same split as coverage_exemptions()."""
+    try:
+        src = path.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(src)
+    except (OSError, SyntaxError, ValueError):  # reason: ruff reports an unparseable file; twice is one problem looking like two
+        return []
+    comments: dict[int, str] = {}
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            if tok.type == tokenize.COMMENT:
+                comments[tok.start[0]] = comments.get(tok.start[0], "") + tok.string
+    except (tokenize.TokenError, IndentationError, SyntaxError):  # reason: as above, ruff's to report
+        return []
+
+    def reason_in(begin: int, end: int) -> str:
+        for row in range(begin, end + 1):
+            m = _HAS_REASON.search(comments.get(row, ""))
+            if m:
+                return comments[row].split("reason:", 1)[1].strip()
+        return ""
+
+    found: list[dict[str, Any]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            found.extend(_suppress_entries(path, node, reason_in))
+        elif isinstance(node, ast.Try):
+            found.extend(_handler_entries(path, node, reason_in))
+    return found
+
+
+def _suppress_entries(path: Path, node: ast.With | ast.AsyncWith,
+                      reason_in: Any) -> list[dict[str, Any]]:
+    calls = [i.context_expr for i in node.items if _is_suppress_call(i.context_expr)]
+    if not calls:
+        return []
+    first_body = min(s.lineno for s in node.body)
+    return [{
+        "file": str(path), "line": node.lineno,
+        "what": ", ".join(ast.unparse(c) for c in calls),
+        "blind": any(_names_blind(a) for c in calls if isinstance(c, ast.Call) for a in c.args),
+        "ruffs": False,
+        "reason": reason_in(node.lineno, first_body - 1),
+    }]
+
+
+def _handler_entries(path: Path, node: ast.Try, reason_in: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for h in node.handlers:
+        if not _handler_is_silent(h):
+            continue
+        blind = _names_blind(h.type)
+        pass_only = len(h.body) == 1 and isinstance(h.body[0], ast.Pass)
+        out.append({
+            "file": str(path), "line": h.lineno,
+            "what": "except " + (ast.unparse(h.type) if h.type is not None else "<bare>"),
+            "blind": blind,
+            # S110 owns a blind except-pass; SIM105 owns a typed one on a
+            # one-statement try. Both are ruff errors already.
+            "ruffs": pass_only and (blind or len(node.body) == 1),
+            "reason": reason_in(h.lineno, h.end_lineno or h.lineno),
+        })
+    return out
+
+
+def _unreasoned_catches(path: Path) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for e in silent_catches(path):
+        if e["ruffs"] or (e["reason"] and not e["blind"]):
+            continue
+        if e["blind"]:
+            message = (f"'{e['what']}' is blind and swallows the failure. No "
+                       "reason excuses a blind catch: log it "
+                       "(logging.exception, or exc_info=True) or re-raise")
+        else:
+            message = (f"'{e['what']}' swallows the failure and says nothing. A "
+                       "suppression is a claim that this failure does not "
+                       "matter here. State the claim on the line, "
+                       "'# reason: ...', or let it raise")
+        out.append({
+            "file":     e["file"],
+            "line":     e["line"],
+            "col":      1,
+            "severity": "error",
+            "rule":     "suppress-reason",
+            "message":  message,
+            "fixable":        False,
+            "fixable_unsafe": False,
+        })
+    return out
+
+
+def run_suppress_reason(target: str) -> dict[str, Any]:
+    p = Path(target)
+    files = ([f for f in sorted(p.rglob("*.py")) if is_project_file(f, p)]
+             if p.is_dir() else [p])
+    issues: list[dict[str, Any]] = []
+    for f in files:
+        issues.extend(_unreasoned_catches(f))
+    return {"tool": "suppress-reason", "status": _status(issues), "issues": issues}
+
+
 # ── smells (#55) ──────────────────────────────────────────────────────────────
 # Joe, 2026-09-14: "a 1000 line file is a stink... a 100 line fucntion is a
 # stink... compexity of a function is a stink... complexity of a file is a
@@ -1378,6 +1565,7 @@ TOOL_RUNNERS = {
     "cppcheck":       run_cppcheck,
     "shellcheck":     run_shellcheck,
     "no-cover":       run_no_cover,
+    "suppress-reason": run_suppress_reason,
     "smells":         run_smells,
     "ruff":           run_ruff,
     "mypy":           run_mypy,
@@ -1393,7 +1581,7 @@ TOOL_RUNNERS = {
 }
 
 DEFAULT_TOOLS = {
-    "python": ["ruff", "mypy", "no-cover", "smells"],
+    "python": ["ruff", "mypy", "no-cover", "suppress-reason", "smells"],
     "js":     ["eslint", "prettier"],
     "css":    ["stylelint", "prettier"],
     "html":   ["eslint", "stylelint", "prettier"],
@@ -1409,8 +1597,8 @@ AUDIT_TOOLS = {
 }
 
 # Tools that accept directories natively (pass the dir, not individual files)
-_DIR_CAPABLE = {"ruff", "mypy", "no-cover", "smells", "phpstan", "phpcs", "rector",
-                "pip-audit", "npm-audit", "composer-audit"}
+_DIR_CAPABLE = {"ruff", "mypy", "no-cover", "suppress-reason", "smells", "phpstan", "phpcs",
+                "rector", "pip-audit", "npm-audit", "composer-audit"}
 # cppcheck is deliberately not in _DIR_CAPABLE: the .ino suppression is decided
 # per file, and passing a directory would apply sketch rules to every .cpp.
 
@@ -1463,6 +1651,8 @@ def lab_claim(p: Path) -> bool:
         with p.open(encoding="utf-8", errors="replace") as fh:
             head = fh.read(4000)
     except OSError:
+        # reason: a file that cannot be read cannot claim the exemption; it
+        # is held to zero like any other file
         return False
     return ("ANSWERS" in head and "NOT TESTED AGAINST" in head
             and _LAB_TESTED.search(head) is not None)
@@ -1559,6 +1749,8 @@ def _tool_version(name: str) -> str:
         r = subprocess.run(cmd, capture_output=True, text=True,
                            check=False, timeout=30)
     except (OSError, subprocess.SubprocessError):
+        # reason: no version to print; the tool's row shows without one, and
+        # the tool's own run reports what is wrong with it
         return ""
     m = _VERSION_RE.search(f"{r.stdout} {r.stderr}")
     return m.group(0) if m else ""
@@ -1581,7 +1773,7 @@ def _repo_root(target: str) -> Path:
     try:
         r = _git(["rev-parse", "--show-toplevel"], start)
     except _NoGitError:
-        return start
+        return start      # reason: with no git there is no repo; the start directory is the root
     if r.returncode == 0 and r.stdout.strip():
         return Path(r.stdout.strip())
     return start
