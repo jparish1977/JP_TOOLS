@@ -380,6 +380,19 @@ def shim_cases(tmp: Path) -> None:
     check("CONTROL: a tree found by the search, at its origin/master, runs the checks",
           r.returncode == 0 and "staged file(s) checked" in out, out)
 
+    # In a linked worktree git runs the hook with GIT_DIR set to that
+    # worktree's gitdir, which outranks `git -C` on the JP_TOOLS tree, so a
+    # plain read gets the committing repo's HEAD and master. A commit in the
+    # main checkout moves master past the worktree's HEAD, so those two differ
+    # there, as they do in any repo whose worktree is behind.
+    wt = tmp / "repo-worktree"
+    git(repo, "worktree", "add", "-q", "-b", "wt", str(wt))
+    commit_with_env(repo, "w0.py", CLEAN_PY, env)
+    r = commit_with_env(wt, "w1.py", CLEAN_PY, env)
+    out = r.stdout + r.stderr
+    check("a commit from a LINKED WORKTREE finds the same tree at master and runs the checks",
+          r.returncode == 0 and "staged file(s) checked" in out and "BROKEN" not in out, out)
+
     git(tree, "checkout", "-q", "-b", "feature/x")
     (tree / "x.txt").write_text("x\n", encoding="utf-8")
     git(tree, "add", "x.txt")
