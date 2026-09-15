@@ -2,12 +2,10 @@
 # JP_TOOLS pre-commit TEMPLATE. Run by the shim that install-hooks.py writes
 # into each repo's .git/hooks/pre-commit, never installed itself.
 #
-# ONE COPY, HERE. The installed hook used to be a full copy of this, taken at
-# install time, and every change to it needed a reinstall in every repo that
-# nothing prompted: on 2026-09-14 all three JP_TOOLS hooks on joe-MacBookAir
-# were stale twice in one day. The shim now runs this file from the JP_TOOLS
-# tree it resolved, so a fix here reaches every repo at its next commit. The
-# design, voted unanimously, is on JP_TOOLS #65. #65 part 3.
+# ONE COPY, HERE. The installed hook is a shim that runs this file from the
+# JP_TOOLS tree it resolved, so a change here reaches every repo at its next
+# commit with no reinstall. A copy taken at install time would go stale with
+# nothing to say so. The design is on JP_TOOLS #65.
 #
 # INTERFACE: the shim exports TOOLS_DIR (the tree it checked) and
 # JP_TOOLS_HOOK_API. A shim from another interface is refused, never guessed at.
@@ -71,19 +69,17 @@ if [ -n "$MISSING" ]; then
         "git -C \"$TOOLS_DIR\" pull --ff-only"
 fi
 
-# NO NEW EM-DASHES, Joe's rule (CLAUDE.md, 2026-04-17). Only the lines this
-# commit ADDS are checked, so a dated record is never retrofitted, and the fix
-# is mechanical, so the refusal gives the one command that does it.
-# JP_TOOLS_ALLOW_EMDASH=1 lets through a commit that genuinely needs one
-# (Joe: "itll need a flag to allow instances where its actually a thing we
-# need to do"), and it is announced every time, because an exported variable
-# outlives the commit it was set for.
+# NO NEW EM-DASHES (the fleet's rule, in CLAUDE.md). Only the lines this commit
+# ADDS are checked, so text already there is never retrofitted, and the
+# refusal gives the one command that fixes them.
+# JP_TOOLS_ALLOW_EMDASH=1 lets through a commit that genuinely needs one, and
+# it is announced every time, because an exported variable outlives the
+# commit it was set for.
 # It runs BEFORE the STAGED list below, which is ACM for check.py: a commit
-# that only renames files would exit there, and a rename can add lines
-# (claude-config, reviewing #84). fix-dashes.py finds its own files.
-# FAILS CLOSED: --check exits 0 (none) or 1 (listed); anything else means the
-# check did not run, and a crash that printed nothing used to read as clean.
-# Joe: "if we need the tool to pass then we cant pass without the fucking tool".
+# that only renames files would exit there, and a rename can add lines.
+# fix-dashes.py finds its own files.
+# FAILS CLOSED: --check exits 0 (none) or 1 (listed). Anything else means the
+# check did not run, which is BROKEN, never clean.
 if [ -n "$JP_TOOLS_ALLOW_EMDASH" ]; then
     echo "JP_TOOLS hook: JP_TOOLS_ALLOW_EMDASH is set; em-dashes are allowed in this commit." >&2
 else

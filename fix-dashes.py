@@ -3,11 +3,9 @@
 JP_TOOLS/fix-dashes.py
 No NEW em-dashes: find them in the lines a commit adds, and fix those lines only.
 
-Joe's rule (2026-04-17, in CLAUDE.md): no em-dashes, anywhere. Checking by
-hand kept costing time: dynatext-tools held #34 for one, the section 10 draft
-carried 42. Joe, 2026-09-14: "appeasing the fickle joe is only worth it if this
-does the trcik, if it doesnt and it keeps wasting time then ill just drop the
-damned ban". So the check is mechanical and the fix is one command.
+The fleet's rule (CLAUDE.md) is no em-dashes. This makes it mechanical: the
+pre-commit hook refuses a commit whose added lines hold one, and the fix is one
+command.
 
 ONLY ADDED LINES ARE TOUCHED. A dated record, a session report say, is
 history and is not retrofitted, and text a commit did not write is not that
@@ -50,8 +48,8 @@ def git(*args: str) -> subprocess.CompletedProcess[str]:
 def staged_files() -> list[list[str]]:
     """Each staged added, modified or renamed file, as the paths its diff needs:
     [path], or [old, new] for a rename, so the lines a moved file carries are
-    not read as added (claude-config's second review of #84). NUL-separated, so
-    git does not quote a non-ASCII name the way it does in a diff header."""
+    not read as added. NUL-separated, so git does not quote a non-ASCII name
+    the way it does in a diff header."""
     out = git("diff", "--cached", "--name-status", "-z", "-M", "--diff-filter=ACMR").stdout
     fields = out.split("\0")
     entries: list[list[str]] = []
@@ -68,8 +66,8 @@ def added_dashes(diff: str) -> list[int]:
 
     `diff` is ONE file's `git diff -U0`. Everything before the first hunk is
     header; after it every "+" row is content, even one reading "+++ ", which
-    is what an added line starting "++ " looks like (claude-config's review of
-    #84: taking it for a header left the rest of the file unchecked)."""
+    is what an added line starting "++ " looks like. Read as a header, it
+    would leave the rest of the file unchecked."""
     found: list[int] = []
     line = 0
     in_hunk = False
