@@ -285,7 +285,7 @@ Joe, 2026-09-15: **"our methodology really needs a clean up after yourself sesti
 6. **A scratch script either earns a place in `tools/lab` (§2.9) or is deleted.** Check each one against the repositories before deleting it: a draft of something that already landed goes, and anything that exists only in the scratchpad is read before it goes.
 7. **Before you stop, list what you created and account for each item:** temporary directories, worktrees, background jobs, board claims, branches. Remove each one or hand it off, and say which you did. For a test, the check is one command: list `/tmp` for your fixture prefixes after the suite has run, and expect nothing.
 
-**Status per §1.** The evidence is one evening across four seats, all of it from the same round. Rule 1 has been measured: thirteen tests changed to register their cleanup at creation all pass, and they leave nothing under their prefixes afterwards. Rule 2 has not been closed. It is a proposal to the mutation runner's owner, and until it lands a killed run can still leave its directory behind.
+**Status per §1.** The evidence is one evening across four seats, all of it from the same round. Rule 1 has been measured: thirteen tests changed to register their cleanup at creation all pass, and they leave nothing under their prefixes afterwards. Rule 2 is closed for the mutation runner, by dynatext-tools in claude-config `b91ab5e`. `tools/lab/mutate-on-target.py` now gives each test run its own `TMPDIR` and removes it whatever happens; at the timeout it kills the test's whole process group, so nothing it started lingers. Any other harness that can kill a run owes the same, and none has yet been checked.
 
 ---
 
