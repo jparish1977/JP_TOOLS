@@ -29,6 +29,8 @@ Nothing is executed: the input is read as bytes and never run.
 Needs `autoit-ripper` (pip install autoit-ripper) for the decoder.
 """
 import argparse
+import contextlib
+import ctypes
 import datetime
 import os
 import re
@@ -55,16 +57,29 @@ INDICATORS = [
 ]
 
 
+def set_proc_name(name: str) -> None:
+    """Name this process for btop and `pgrep -x`, per the fleet convention.
+
+    PR_SET_NAME is 15 and the kernel truncates to that. Named for what it IS,
+    never for the sample it is reading.
+    """
+    with contextlib.suppress(OSError, AttributeError):
+        ctypes.CDLL(None).prctl(15, name.encode()[:15], 0, 0, 0)
+
+
 def pe_facts(data: bytes) -> tuple[dict[str, Any], int] | None:
     """-> (dict, overlay_offset), or None if this is not a PE.
 
     One optional rather than a pair of them: returning (None, None) made
     every caller test the first half and then subtract the second.
     """
-    if data[:2] != b"MZ":
+    # Length-checked before every unpack, not just the magic. Truncated and
+    # carved samples are ordinary input here, and b"MZ" alone used to reach
+    # the e_lfanew read and raise struct.error where "not a PE file" was meant.
+    if data[:2] != b"MZ" or len(data) < 0x40:
         return None
     pe = struct.unpack_from("<I", data, 0x3C)[0]
-    if data[pe:pe + 4] != b"PE\0\0":
+    if data[pe:pe + 4] != b"PE\0\0" or len(data) < pe + 24:
         return None
     machine, nsec, stamp = struct.unpack_from("<HHI", data, pe + 4)
     opt_size = struct.unpack_from("<H", data, pe + 20)[0]
@@ -73,6 +88,8 @@ def pe_facts(data: bytes) -> tuple[dict[str, Any], int] | None:
     names = []
     for i in range(nsec):
         b = sect + 40 * i
+        if len(data) < b + 40:
+            break                     # section table truncated; report what we have
         names.append(data[b:b + 8].rstrip(b"\0").decode("latin1", "replace"))
         raw_size, raw_ptr = struct.unpack_from("<II", data, b + 16)
         end = max(end, raw_ptr + raw_size)
@@ -88,15 +105,22 @@ def pe_facts(data: bytes) -> tuple[dict[str, Any], int] | None:
     }, end
 
 
-def find_payload(data: bytes, overlay_at: int | None) -> tuple[bytes | None, str]:
-    """-> (bytes_after_header, where) or (None, reason)."""
+def find_payload(data: bytes, overlay_at: int | None) -> tuple[bytes | None, str, str]:
+    """-> (bytes_after_header, where, tag) or (None, reason, "").
+
+    The tag comes back as its own value. It used to be readable only by
+    finding "EA05" inside the human sentence, which is what decode() tested,
+    so rewording that message would have silently decoded every EA05 payload
+    as EA06 with nothing in either function saying the two were coupled.
+    """
     at = data.find(MARKER)
     if at < 0:
-        return None, "no AU3 marker anywhere in the file"
-    tag = data[at + 16:at + 24]
+        return None, "no AU3 marker anywhere in the file", ""
+    tag_text = data[at + 16:at + 24].decode("latin1", "replace")
     where = "overlay" if overlay_at and at >= overlay_at else "resource/section"
-    tag_text = tag.decode("latin1", "replace")
-    return data[at + HEADER:], f"{where} at offset {at}, tag {tag_text}"
+    return (data[at + HEADER:],
+            f"{where} at offset {at}, tag {tag_text}",
+            tag_text)
 
 
 def decode(payload: bytes, tag: str) -> list[tuple[str, bytes]]:
@@ -115,10 +139,15 @@ def scan(text: str) -> list[tuple[str, int, str]]:
     """-> [(kind, line_no, line)] for anything worth a human look."""
     hits = []
     for n, line in enumerate(text.splitlines(), 1):
-        # Aut2Exe inlines the whole standard UDF library, which is thousands of
-        # lines of someone else's code. Declarations and library internals are
-        # not what this tool is looking for.
-        if re.match(r"^\s*(Global Const|Func |EndFunc|;)", line):
+        # Aut2Exe inlines the whole standard UDF library, thousands of lines
+        # of someone else's code. Structure and comments are skipped; the
+        # CONSTANT TABLE is not, because that is where the URLs live.
+        # `Global Const $URL = "http://..."` is a common shape in compiled
+        # AutoIt and this filter used to drop it, showing the operator
+        # `InetGet($URL, ...)` with no way to see what $URL was -- the one
+        # fact they needed. The indicators are specific enough to be their own
+        # filter: a UDF constant matches none of them.
+        if re.match(r"^\s*(Func |EndFunc|;)", line):
             continue
         for kind, pattern in INDICATORS:
             if re.search(pattern, line, re.I):
@@ -128,6 +157,7 @@ def scan(text: str) -> list[tuple[str, int, str]]:
 
 
 def main() -> int:
+    set_proc_name("autoit-extract")
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("file")
     ap.add_argument("-o", "--outdir", default=".", help="where to write scripts")
@@ -147,12 +177,12 @@ def main() -> int:
         print(f"  {'overlay':<12} {len(data) - overlay_at} bytes")
         print()
 
-    payload, where = find_payload(data, overlay_at)
+    payload, where, tag = find_payload(data, overlay_at)
     if payload is None:
         sys.exit(f"  {where}")
     print(f"  payload: {where}")
 
-    records = decode(payload, where)
+    records = decode(payload, tag)
     if not records:
         sys.exit("  located the payload but could not decode it")
 
