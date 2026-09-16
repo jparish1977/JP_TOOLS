@@ -24,7 +24,10 @@ a throwaway qcow2 overlay, so a botched boot cannot damage the original.
 """
 import argparse
 import contextlib
+import ctypes
+import json
 import os
+import shutil
 import socket
 import struct
 import subprocess
@@ -44,6 +47,53 @@ VARS_CANDIDATES = [
     "/usr/share/OVMF/OVMF_VARS.fd",
     "/usr/share/edk2/ovmf/OVMF_VARS.fd",
 ]
+
+
+def set_proc_name(name: str) -> None:
+    """Name this process for btop and `pgrep -x`, per the fleet convention.
+
+    PR_SET_NAME is 15 and the kernel truncates to that. This one runs for
+    ninety seconds by default, so it is exactly the shape that otherwise shows
+    up as an anonymous `python3`. The qemu child names itself.
+    """
+    with contextlib.suppress(OSError, AttributeError):
+        ctypes.CDLL(None).prctl(15, name.encode()[:15], 0, 0, 0)
+
+
+def image_format(path: str) -> str:
+    """The image's real container format, asked of qemu-img rather than assumed.
+
+    Both disk paths used to hardcode `raw`: `-F raw` for the overlay's backing
+    format, and `format=raw` for the --writable attach. Against a qcow2 base
+    every layer reports success -- create is silent, `qemu-img check` finds no
+    errors -- and the guest's sector 0 is the base's `QFI\xfb` magic instead of
+    a boot sector, so the screenshot shows "no bootable device" and the image
+    reads as dead. --writable is worse: the guest then writes raw sectors over
+    qcow2 metadata. Same class as the two traps in the module docstring, a
+    working image that presents as a broken one.
+    """
+    out = subprocess.run(["qemu-img", "info", "--output=json", path],
+                         capture_output=True, text=True, check=False)
+    if out.returncode != 0:
+        sys.exit(f"qemu-img cannot read {path}: {out.stderr.strip()[:300]}")
+    try:
+        fmt = json.loads(out.stdout)["format"]
+    except (ValueError, KeyError):
+        sys.exit(f"qemu-img gave no format for {path}")
+    return str(fmt)
+
+
+def parse_forward(spec: str) -> tuple[int, int]:
+    """HOST:GUEST as two ports, refusing anything else by name.
+
+    `partition(":")` on a value with no colon yields an empty guest port and
+    builds `hostfwd=tcp:127.0.0.1:1234-:`, which qemu rejects at startup with
+    its own parse error rather than naming the argument that was wrong.
+    """
+    host, sep, guest = spec.partition(":")
+    if not sep or not host.isdigit() or not guest.isdigit():
+        sys.exit(f"--forward {spec}: expected HOST:GUEST, two port numbers")
+    return int(host), int(guest)
 
 
 def first_existing(paths: list[str]) -> str | None:
@@ -83,6 +133,18 @@ def ppm_to_png(ppm_path: str, png_path: str) -> tuple[int, int]:
     return width, height
 
 
+def drain_nonblocking(proc: "subprocess.Popen[bytes]") -> str:
+    """Whatever qemu has said so far, without blocking on a process still up.
+
+    Reading a live process's stderr to EOF hangs until it exits. Terminate
+    first, then read: this is only called on a path that is already failing.
+    """
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+        proc.terminate()
+        proc.wait(timeout=5)
+    return drain(proc.stderr)
+
+
 def drain(pipe: IO[bytes] | None) -> str:
     """Whatever a pipe has to say, as text. A closed pipe says nothing.
 
@@ -112,7 +174,10 @@ def screendump(monitor_path: str, out_ppm: str, timeout: int = 20) -> bool:
     return os.path.exists(out_ppm) and os.path.getsize(out_ppm) > 0
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Every option this tool takes. Lifted out so main reads as the
+    boot sequence it is, rather than opening with thirty lines of
+    argument declarations."""
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("image", help="disk image, or a block device")
     ap.add_argument("-w", "--wait", type=int, default=90,
@@ -130,12 +195,21 @@ def main() -> int:
     ap.add_argument("--writable", action="store_true",
                     help="write to the image directly. Default is a throwaway "
                          "overlay so the original cannot be damaged")
+    ap.add_argument("--vnc", default="1", metavar="DISPLAY",
+                    help="VNC display number on 127.0.0.1 (default 1, TCP "
+                         "5901). A second concurrent run needs its own.")
     ap.add_argument("--keep", action="store_true", help="leave the VM running")
-    args = ap.parse_args()
+    return ap
+
+
+def main() -> int:
+    set_proc_name("vm-image-boot")
+    args = build_parser().parse_args()
 
     if not os.path.exists(args.image):
         sys.exit(f"no such image: {args.image}")
 
+    base_format = image_format(args.image)
     workdir = tempfile.mkdtemp(prefix="vmboot-")
     monitor = os.path.join(workdir, "mon.sock")
     ppm = os.path.join(workdir, "screen.ppm")
@@ -144,8 +218,9 @@ def main() -> int:
         disk = args.image
     else:
         disk = os.path.join(workdir, "overlay.qcow2")
-        subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", "-F", "raw",
-                        "-b", os.path.abspath(args.image), disk], check=True)
+        subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2",
+                        "-F", base_format, "-b", os.path.abspath(args.image),
+                        disk], check=True)
 
     cmd = ["qemu-system-x86_64", "-enable-kvm",
            "-m", args.memory, "-smp", args.cpus, "-machine", "q35"]
@@ -161,19 +236,19 @@ def main() -> int:
         cmd += ["-drive", f"if=pflash,format=raw,readonly=on,file={code}",
                 "-drive", f"if=pflash,format=raw,file={nvram}"]
 
-    fmt = "raw" if args.writable else "qcow2"
+    fmt = base_format if args.writable else "qcow2"
     cmd += ["-drive", f"file={disk},format={fmt},id=disk0,if=none",
             "-device", "ahci,id=ahci",
             "-device", "ide-hd,drive=disk0,bus=ahci.0"]
 
     netdev = "user,id=n0"
     for f in args.forward:
-        host, _, guest = f.partition(":")
+        host, guest = parse_forward(f)
         netdev += f",hostfwd=tcp:127.0.0.1:{host}-:{guest}"
     cmd += ["-netdev", netdev, "-device", "virtio-net-pci,netdev=n0"]
 
     cmd += ["-device", args.vga] if "-" in args.vga else ["-vga", args.vga]
-    cmd += ["-vnc", "127.0.0.1:1",
+    cmd += ["-vnc", f"127.0.0.1:{args.vnc}",
             "-monitor", f"unix:{monitor},server,nowait"]
 
     print(f"  booting {args.image}")
@@ -188,7 +263,10 @@ def main() -> int:
             time.sleep(min(15, remaining))
 
         if not screendump(monitor, ppm):
-            sys.exit("  screendump produced nothing")
+            # Drain here too. qemu is still up on this path, so the early-exit
+            # read never ran, and this is the one moment a qemu message would
+            # explain why the framebuffer never arrived.
+            sys.exit(f"  screendump produced nothing\n{drain_nonblocking(proc)}")
         w, h = ppm_to_png(ppm, args.out)
         print(f"  wrote   {args.out}  ({w}x{h})")
         if args.forward:
@@ -203,6 +281,15 @@ def main() -> int:
                 proc.kill()
         elif args.keep:
             print(f"  VM left running (pid {proc.pid}), monitor at {monitor}")
+        # METHODOLOGY 2.11. The workdir holds the overlay qcow2, the copied
+        # OVMF_VARS.fd and a PPM that is about 6MB at 1920x1080, and nothing
+        # used to remove it on ANY path -- including the runs that worked. It
+        # stays only for --keep, where the VM is still using it, and then it is
+        # named on stdout so the operator can clear up after killing the VM.
+        if args.keep:
+            print(f"  workdir {workdir} (yours to remove)")
+        else:
+            shutil.rmtree(workdir, ignore_errors=True)
     return 0
 
 
