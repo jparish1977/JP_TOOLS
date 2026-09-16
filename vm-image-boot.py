@@ -202,6 +202,23 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def clean_workdir(workdir: str, keep: bool) -> None:
+    """Remove the scratch directory, or say why it could not be.
+
+    ignore_errors=True was a silent failure in a repo currently landing a rule
+    against silent failures (#58, PR #104). A workdir that cannot be removed is
+    a disk leak the operator should hear about once, so it prints and carries
+    on rather than either raising or saying nothing.
+    """
+    if keep:
+        print(f"  workdir {workdir} (yours to remove)")
+        return
+    try:
+        shutil.rmtree(workdir)
+    except OSError as exc:
+        print(f"  could not remove {workdir}: {exc}", file=sys.stderr)
+
+
 def main() -> int:
     set_proc_name("vm-image-boot")
     args = build_parser().parse_args()
@@ -210,10 +227,22 @@ def main() -> int:
         sys.exit(f"no such image: {args.image}")
 
     base_format = image_format(args.image)
+    # Everything from here on runs inside boot(), so that ONE finally covers
+    # every exit. The first version wrapped only the part after Popen, and a
+    # sys.exit before it -- OVMF missing, or --forward refused -- walked past
+    # the cleanup: three /tmp/vmboot-* directories from testing --forward are
+    # what found this, each holding an overlay and OVMF_VARS and no PPM.
+    # SystemExit is an exception, so a finally still runs on it.
     workdir = tempfile.mkdtemp(prefix="vmboot-")
-    monitor = os.path.join(workdir, "mon.sock")
-    ppm = os.path.join(workdir, "screen.ppm")
+    try:
+        return boot(args, base_format, workdir)
+    finally:
+        clean_workdir(workdir, args.keep)
 
+
+def build_command(args: argparse.Namespace, base_format: str,
+                  workdir: str, monitor: str) -> list[str]:
+    """The whole qemu invocation, including the overlay it may have to create."""
     if args.writable:
         disk = args.image
     else:
@@ -231,8 +260,8 @@ def main() -> int:
         if not code or not varsrc:
             sys.exit("OVMF firmware not found -- install ovmf, or pass --bios")
         nvram = os.path.join(workdir, "OVMF_VARS.fd")
-        with open(varsrc, "rb") as s, open(nvram, "wb") as d:
-            d.write(s.read())
+        with open(varsrc, "rb") as src, open(nvram, "wb") as dst:
+            dst.write(src.read())
         cmd += ["-drive", f"if=pflash,format=raw,readonly=on,file={code}",
                 "-drive", f"if=pflash,format=raw,file={nvram}"]
 
@@ -250,6 +279,14 @@ def main() -> int:
     cmd += ["-device", args.vga] if "-" in args.vga else ["-vga", args.vga]
     cmd += ["-vnc", f"127.0.0.1:{args.vnc}",
             "-monitor", f"unix:{monitor},server,nowait"]
+    return cmd
+
+
+def boot(args: argparse.Namespace, base_format: str, workdir: str) -> int:
+    """Run qemu against the image and screenshot where it got to."""
+    monitor = os.path.join(workdir, "mon.sock")
+    ppm = os.path.join(workdir, "screen.ppm")
+    cmd = build_command(args, base_format, workdir, monitor)
 
     print(f"  booting {args.image}")
     print(f"  gpu     {args.vga}")
@@ -281,15 +318,6 @@ def main() -> int:
                 proc.kill()
         elif args.keep:
             print(f"  VM left running (pid {proc.pid}), monitor at {monitor}")
-        # METHODOLOGY 2.11. The workdir holds the overlay qcow2, the copied
-        # OVMF_VARS.fd and a PPM that is about 6MB at 1920x1080, and nothing
-        # used to remove it on ANY path -- including the runs that worked. It
-        # stays only for --keep, where the VM is still using it, and then it is
-        # named on stdout so the operator can clear up after killing the VM.
-        if args.keep:
-            print(f"  workdir {workdir} (yours to remove)")
-        else:
-            shutil.rmtree(workdir, ignore_errors=True)
     return 0
 
 
