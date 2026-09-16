@@ -188,6 +188,38 @@ Nothing is executed; the input is read as bytes. Read the indicator lines
 rather than counting them — a device-flashing tool legitimately runs other
 binaries, and what matters is which ones and from where.
 
+### VM / Image Triage (Python)
+
+| Script | Purpose |
+|---|---|
+| `vm-image-boot.py` | Boot a disk image headless under KVM and screenshot what it does |
+
+For an image you cannot plug into anything: does it boot, how far does it get,
+and what is on screen when it stops. A serial console shows only what the guest
+chooses to log; the framebuffer shows what actually happened.
+
+```bash
+sudo apt install qemu-system-x86 qemu-utils ovmf
+python3 vm-image-boot.py disk.img -w 110 -o screen.png --forward 12340:1234
+```
+
+Three things it encodes, all learned the hard way, and all three read as a
+broken image when they are not:
+
+- **`virtio-vga`, not `-vga std`.** The default Bochs adapter has no
+  `/dev/dri/card0`, so any guest with a KMS-configured Xorg dies with
+  `no screens found`.
+- **A forwarded port proves nothing.** QEMU binds `hostfwd` ports on the *host*
+  immediately, whether or not the guest listens; the connect succeeds and then
+  resets. Judge a guest service by its reply.
+- **The container format is probed, never assumed.** Hardcoding `raw` against a
+  qcow2 base is silent at every layer -- create says nothing, `qemu-img check`
+  finds no errors -- and hands the guest the base's `QFI` magic where a boot
+  sector should be.
+
+Defaults to a throwaway qcow2 overlay, so a botched boot cannot damage the
+original image. PPM to PNG conversion is stdlib-only: no Pillow, no ImageMagick.
+
 ### Archive Management (Python)
 
 | Script | Purpose |
