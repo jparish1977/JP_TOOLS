@@ -89,27 +89,52 @@ PROFILES = {
 PROFILES["all"] = PROFILES["code"] + PROFILES["art"] + PROFILES["writing"] + PROFILES["roms"]
 
 
-# photorec file family names — maps our extensions to photorec's internal names
-# photorec uses its own naming; we generate the config to enable only what we want
+# Our extensions mapped to photorec FAMILY names, which are not extensions.
+#
+# A family is a first-level signature group. `txt` is one family and carries
+# 167 signatures -- html, php, py, xml, source of every kind -- so the right
+# mapping for a source file is `txt`, not its own suffix. photorec's published
+# format list (oob/photorec-file-formats/) documents what comes BACK, and
+# names all of those individually, which is what made this table look right.
+#
+# EVERY VALUE HERE MUST BE A FAMILY THE INSTALLED PHOTOREC ACCEPTS. One that
+# is not takes the whole /cmd line down with it: photorec answers `Syntax
+# error in command line`, recovers nothing, and exits 0. It does not skip the
+# bad name and carry on. tests/test_photorec_fileopt.py drives the installed
+# binary and fails on any value it refuses, because this list is version
+# specific and nothing in it is guessable.
+#
+# An extension with no family is dropped, not passed through. Most ROM formats
+# have no photorec signature at all -- it carves by content, and a .smc has no
+# header to carve on -- so `roms` resolves to the container families and txt.
 PHOTOREC_FAMILIES = {
-    "js": "txt", "html": "html", "htm": "html", "php": "php",
-    "py": "py", "json": "txt", "xml": "xml", "css": "txt",
-    "sql": "txt", "sh": "txt", "pl": "pl", "rb": "rb",
-    "java": "java", "c": "txt", "h": "txt", "cpp": "txt",
+    # Source, markup and config: all of it is the txt family.
+    "js": "txt", "html": "txt", "htm": "txt", "php": "txt",
+    "py": "txt", "json": "txt", "xml": "xml", "css": "txt",
+    "sql": "txt", "sh": "txt", "pl": "txt", "rb": "txt",
+    "java": "txt", "c": "txt", "h": "txt", "cpp": "txt",
     "cs": "txt", "ts": "txt", "jsx": "txt", "tsx": "txt",
     "vue": "txt", "yaml": "txt", "yml": "txt", "toml": "txt",
     "ini": "txt", "conf": "txt", "cfg": "txt", "env": "txt",
-    "gitignore": "txt",
+    "gitignore": "txt", "md": "txt", "txt": "txt",
+    # Images. svg is XML text, so it carves as text, not as a picture.
     "png": "png", "jpg": "jpg", "jpeg": "jpg", "tiff": "tif",
     "tif": "tif", "psd": "psd", "bmp": "bmp", "gif": "gif",
-    "svg": "svg", "webp": "webp", "xcf": "xcf", "raw": "raw",
-    "cr2": "cr2", "nef": "nef", "ico": "ico", "ai": "ai",
-    "eps": "eps",
-    "wpd": "wpd",
-    "txt": "txt", "pdf": "pdf", "doc": "doc", "docx": "docx",
-    "odt": "odt", "rtf": "rtf", "md": "txt", "tex": "tex",
-    "epub": "epub", "csv": "csv", "ods": "ods", "xlsx": "xlsx",
-    "xls": "xls", "pptx": "pptx",
+    "svg": "txt", "webp": "riff", "xcf": "xcf", "ico": "ico",
+    # Camera raw. cr2 and nef are TIFF-based and come back under raw.
+    "raw": "raw", "cr2": "raw", "nef": "raw",
+    # PostScript, which is what an .ai and an .eps both are.
+    "ai": "ps", "eps": "ps",
+    # Documents. The OLE2 container is `doc` and holds xls and ppt too;
+    # every OOXML and ODF format is a zip, and so is an epub.
+    "pdf": "pdf", "doc": "doc", "xls": "doc", "wpd": "wpd",
+    "docx": "zip", "xlsx": "zip", "pptx": "zip",
+    "odt": "zip", "ods": "zip", "epub": "zip",
+    "rtf": "txt", "tex": "txt", "csv": "txt",
+    # Archives and disc images, which is most of what the roms profile can
+    # actually ask for.
+    "zip": "zip", "7z": "7z", "rar": "rar", "gz": "gz",
+    "iso": "iso", "bin": "bin", "nes": "nes", "nds": "nds",
 }
 
 
@@ -293,6 +318,30 @@ def resolve_source(source):
     return source
 
 
+def fileopt_command(profile_name, extensions):
+    """The `/cmd` string photorec is driven with, and the types line printed.
+
+    photorec's fileopt list is a sequence of PAIRS: every family name is
+    followed by its own toggle, so three families are six tokens. A family
+    name with no toggle after it is not "enabled by the next one" -- photorec
+    7.1 refuses the whole line with `Syntax error in command line: ...` and
+    recovers nothing, exit 0. A run that found no files and a run that was
+    never parsed look identical to the caller.
+
+    That is what made this worth a named function rather than a fixed line:
+    the wrong form is only wrong for TWO OR MORE families, so `roms` (one
+    family) and `full` (no list at all) worked throughout, and the default
+    profile did not.
+    """
+    if profile_name == "full":
+        return "everything,enable", "fileopt,everything,enable,search"
+    families = sorted({
+        PHOTOREC_FAMILIES[ext] for ext in extensions if ext in PHOTOREC_FAMILIES
+    })
+    enable_line = ",".join(f"{family},enable" for family in families)
+    return enable_line, f"fileopt,everything,disable,{enable_line},search"
+
+
 def run_photorec(photorec_cmd, source, output_dir, profile_name, extensions, dry_run=False):
     """Run photorec with the given parameters."""
     output_path = Path(output_dir).resolve()
@@ -309,14 +358,7 @@ def run_photorec(photorec_cmd, source, output_dir, profile_name, extensions, dry
     else:
         photorec_output = str(output_path)
 
-    if profile_name == "full":
-        enable_line = "everything,enable"
-    else:
-        families = set()
-        for ext in extensions:
-            if ext in PHOTOREC_FAMILIES:
-                families.add(PHOTOREC_FAMILIES[ext])
-        enable_line = ",".join(sorted(families)) + ",enable"
+    enable_line, cmd_str = fileopt_command(profile_name, extensions)
 
     print(f"{'[DRY RUN] ' if dry_run else ''}Recovery scan")
     print(f"  Source:    {source}")
@@ -337,13 +379,7 @@ def run_photorec(photorec_cmd, source, output_dir, profile_name, extensions, dry
         elevate_and_rerun()
         sys.exit(0)
 
-    # Build photorec command
-    # photorec /d <output> /cmd <source> fileopt,everything,disable,<families>,enable,search
-    if profile_name == "full":
-        cmd_str = "fileopt,everything,enable,search"
-    else:
-        cmd_str = f"fileopt,everything,disable,{enable_line},search"
-
+    # photorec /d <output> /cmd <source> fileopt,everything,disable,jpg,enable,png,enable,...,search
     cmd = photorec_cmd + [
         "/d", photorec_output + "/",
         "/cmd", source,
