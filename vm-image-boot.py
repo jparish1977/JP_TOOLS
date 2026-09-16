@@ -56,7 +56,7 @@ def set_proc_name(name: str) -> None:
     ninety seconds by default, so it is exactly the shape that otherwise shows
     up as an anonymous `python3`. The qemu child names itself.
     """
-    with contextlib.suppress(OSError, AttributeError):
+    with contextlib.suppress(OSError, AttributeError):  # reason: named types, no libc or no prctl; unnamed is never fatal
         ctypes.CDLL(None).prctl(15, name.encode()[:15], 0, 0, 0)
 
 
@@ -139,7 +139,7 @@ def drain_nonblocking(proc: "subprocess.Popen[bytes]") -> str:
     Reading a live process's stderr to EOF hangs until it exits. Terminate
     first, then read: this is only called on a path that is already failing.
     """
-    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):  # reason: qemu already gone or too slow; either way stderr is what we came for
         proc.terminate()
         proc.wait(timeout=5)
     return drain(proc.stderr)
@@ -161,7 +161,7 @@ def screendump(monitor_path: str, out_ppm: str, timeout: int = 20) -> bool:
     sock.settimeout(timeout)
     sock.connect(monitor_path)
     time.sleep(1)
-    with contextlib.suppress(OSError):
+    with contextlib.suppress(OSError):  # reason: the monitor banner is optional; screendump is sent either way
         sock.recv(65536)                      # banner
     sock.sendall(b"screendump " + out_ppm.encode() + b"\n")
     deadline = time.time() + timeout
