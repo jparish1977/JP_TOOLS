@@ -66,7 +66,7 @@ def find_fixture(suffix: str) -> Path | None:
             try:
                 if candidate.is_file() and 0 < candidate.stat().st_size < 200_000:
                     return candidate
-            except OSError:
+            except OSError:  # reason: an unreadable candidate is just not a fixture
                 continue
     return None
 
@@ -166,7 +166,7 @@ def main() -> int:
     try:
         recover.fileopt_command("code", ["smc", "gb"])
         check(False, "an empty family set built a /cmd line instead of refusing")
-    except ValueError:
+    except ValueError:  # reason: the refusal IS the assertion; check() above is the failure
         pass
     checks += 1
 
