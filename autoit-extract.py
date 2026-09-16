@@ -63,7 +63,7 @@ def set_proc_name(name: str) -> None:
     PR_SET_NAME is 15 and the kernel truncates to that. Named for what it IS,
     never for the sample it is reading.
     """
-    with contextlib.suppress(OSError, AttributeError):
+    with contextlib.suppress(OSError, AttributeError):  # reason: named types, no libc or no prctl; unnamed is never fatal
         ctypes.CDLL(None).prctl(15, name.encode()[:15], 0, 0, 0)
 
 
