@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 # check.py keeps its argparse behind a main guard, so importing is safe.
-import check  # noqa: E402
+import check  # noqa: E402 -- after the sys.path insert above, by construction
 
 # Two findings at level 8, neither of them at level 5: an unspecified iterable
 # value type, and a property with no declared type.

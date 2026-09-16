@@ -1259,12 +1259,16 @@ def silent_catches(path: Path) -> list[dict[str, Any]]:
                 return comments[row].split("reason:", 1)[1].strip()
         return ""
 
+    # See `ruffs` in _handler_entries: the deferral assumes ruff is reporting,
+    # and a noqa is how that assumption stops being true.
+    hushed = hushed_lines(path)
+
     found: list[dict[str, Any]] = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.With, ast.AsyncWith)):
             found.extend(_suppress_entries(path, node, reason_in))
         elif isinstance(node, ast.Try):
-            found.extend(_handler_entries(path, node, reason_in))
+            found.extend(_handler_entries(path, node, reason_in, hushed))
     return found
 
 
@@ -1283,7 +1287,8 @@ def _suppress_entries(path: Path, node: ast.With | ast.AsyncWith,
     }]
 
 
-def _handler_entries(path: Path, node: ast.Try, reason_in: Any) -> list[dict[str, Any]]:
+def _handler_entries(path: Path, node: ast.Try, reason_in: Any,
+                     hushed: set[int] | None = None) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for h in node.handlers:
         if not _handler_is_silent(h):
@@ -1295,8 +1300,13 @@ def _handler_entries(path: Path, node: ast.Try, reason_in: Any) -> list[dict[str
             "what": "except " + (ast.unparse(h.type) if h.type is not None else "<bare>"),
             "blind": blind,
             # S110 owns a blind except-pass; SIM105 owns a typed one on a
-            # one-statement try. Both are ruff errors already.
-            "ruffs": pass_only and (blind or len(node.body) == 1),
+            # one-statement try. Both are ruff errors already -- UNLESS a noqa
+            # on that line has switched ruff off, which is how this deferral
+            # measured 0 errors on a blind swallow that is 2 without the
+            # comment (#58, 2026-09-16). A deferral to a tool that is not
+            # running is not a deferral.
+            "ruffs": (pass_only and (blind or len(node.body) == 1)
+                      and h.lineno not in (hushed or set())),
             "reason": reason_in(h.lineno, h.end_lineno or h.lineno),
         })
     return out
@@ -1337,6 +1347,208 @@ def run_suppress_reason(target: str) -> dict[str, Any]:
     for f in files:
         issues.extend(_unreasoned_catches(f))
     return {"tool": "suppress-reason", "status": _status(issues), "issues": issues}
+
+
+# ── noqa inventory (#58) ──────────────────────────────────────────────────────
+# A branchy `# pragma: no cover` has to say why, and `list-exemptions.py` lists
+# every one, so a coverage exemption is a claim someone can disagree with. A
+# `# noqa` had neither: it suppressed a finding with nothing required of it and
+# nothing listing it. Joe, 2026-09-14: "noqa===no-no without a damned good
+# reason", and "the damned good reasons need to be damned good reasons, not an
+# easy escape route."
+#
+# WHY THIS IS THE LOAD-BEARING HALF rather than a report nicety. Measured on
+# the suppress-reason branch this sits on, 2026-09-16: a blind
+# `except Exception: pass` is 2 errors, ruff's S110 and BLE001, and one
+# `# noqa: BLE001,S110` takes it to 0 from all five tools. suppress-reason is
+# among the five, because it defers that exact shape to ruff on the grounds
+# that ruff owns it, and a noqa is how you stop ruff owning it. So whatever
+# rule lands, a noqa turns it off until the noqa itself is visible.
+#
+# THIS REFUSES AND DOES NOT LIST. #58 asked for an inventory beside
+# `list-exemptions.py`, and the first version of this check also emitted every
+# marker as a warning, the way `_count_eslint_suppressions` does for the JS
+# side. Joe's call, 2026-09-16, on the measurement rather than on the idea:
+# listing costs 157 warning lines on another repo, 123 of them structural E402
+# on imports after a run-time `sys.path` insert that will never change, and it
+# fails nothing. The argument for keeping it was that reasons rot unread -- but
+# `noqa-no-reason` already forces a reason at the moment it is written, and a
+# warning scrolling past 157 times is not anybody checking it. Diligence that
+# only looks like diligence is worth less than the noise it costs.
+#
+# So the rules below are the whole of it. The JS side keeps its warnings,
+# because nobody has complained about those and consistency is not a reason to
+# change working behaviour.
+#
+# THREE THINGS FAIL, and they are deliberately not one rule:
+#   * A marker with no reason. For a structural suppression the sentence IS the
+#     evidence: `E402` on an import after a run-time `sys.path` insert is a
+#     claim about layout that a reader checks by looking, and no amount of
+#     logging can express it.
+#   * A BLANKET `# noqa` carrying no codes. It suppresses every rule on the
+#     line, including ones nobody has written yet, and it cannot be inventoried
+#     by code because it names none.
+#   * `BLE001` and `S110`, under any reason at all. #58's ruling, and
+#     another repo' argument for it: a reason on the line does not make a
+#     blind catch less blind, and the same handler still swallows a `NameError`
+#     as an empty result. Ruff treats `logging.exception`, `exc_info=True` and
+#     `raise` as not-blind, so the stronger evidence is available and a
+#     sentence is not accepted in its place.
+#
+# `# type: ignore` IS PARSED AND NEVER FAILS. #58 leaves whether it belongs
+# here an open question, and with the listing dropped there is nothing for it
+# to belong TO, so this answers nothing about it on purpose. It is read only
+# because the same scan reads both, and reading one shape and not the other
+# would cost a second parser.
+_NOQA_RE = re.compile(
+    r"#\s*noqa\b(?::\s*(?P<codes>[A-Za-z]+[0-9]+(?:\s*,\s*[A-Za-z]+[0-9]+)*))?(?P<rest>.*)$")
+_TYPE_IGNORE_RE = re.compile(
+    r"#\s*type:\s*ignore(?:\[(?P<codes>[^\]]*)\])?(?P<rest>.*)$")
+# Prose after `--` (the eslint convention this file already reads) or after
+# `reason:` (the no-cover and suppress-reason convention). Both are accepted
+# because both are already in use across the fleet, and inventing a third
+# spelling would make every existing marker a finding on the day this lands.
+_NOQA_REASON_RE = re.compile(r"(?:--|reason:)\s*(?P<why>\S.*)$")
+_NOT_EXPLAINABLE = {"BLE001", "S110"}
+# The codes silent_catches stands aside for, on the grounds that ruff reports
+# them. A noqa naming any of these is how ruff stops reporting them.
+_DEFERRED_TO_RUFF = {"S110", "SIM105", "BLE001"}
+
+
+def _marker_from_comment(tok: tokenize.TokenInfo) -> dict[str, Any] | None:
+    """One comment token to a marker, or None when it is not one.
+
+    Split out from noqa_markers so that function stays under the complexity
+    smell -- which this file's own `smells` check caught on the first run of
+    this code, at 13 against a bar of 11.
+    """
+    if not tok.line[:tok.start[1]].strip():
+        return None                       # a standalone comment: prose, not a directive
+    for kind, rx in (("noqa", _NOQA_RE), ("type-ignore", _TYPE_IGNORE_RE)):
+        m = rx.search(tok.string)
+        if m is None:
+            continue
+        why = _NOQA_REASON_RE.search(m.group("rest") or "")
+        return {
+            "kind":   kind,
+            "line":   tok.start[0],
+            "col":    tok.start[1] + 1,
+            "codes":  [c.strip().upper()
+                       for c in (m.group("codes") or "").split(",") if c.strip()],
+            "reason": why.group("why").strip() if why else "",
+        }
+    return None
+
+
+def hushed_lines(path: Path) -> set[int]:
+    """Lines where a noqa has switched ruff off for a code silent_catches defers to."""
+    return {m["line"] for m in noqa_markers(path)
+            if m["kind"] == "noqa" and (not m["codes"]
+                                        or set(m["codes"]) & _DEFERRED_TO_RUFF)}
+
+
+def noqa_markers(path: Path) -> list[dict[str, Any]]:
+    """Every `# noqa` and `# type: ignore` in one file: codes, reason, line.
+
+    The markers, not the violations, the same split as coverage_exemptions()
+    and silent_catches(). Two callers: the rules below, and hushed_lines(),
+    which is what stops suppress-reason deferring to a silenced ruff.
+
+    READ FROM COMMENT TOKENS, NEVER FROM RAW LINES, AND ONLY TRAILING ONES.
+    Both halves were measured rather than reasoned, and the second half was
+    found by this check firing on the paragraph above it.
+
+    A line scan matches the marker inside a string literal, and this repo's
+    tests carry those by the dozen as fixtures: over this tree, 20 markers by
+    line scan against 9 real ones.
+
+    Tokenizing is not enough on its own, because PROSE ABOUT A MARKER IS ALSO A
+    COMMENT. The block above this function mentions `# noqa` four times to
+    explain it, and the first run of this check reported three errors against
+    its own documentation. A suppression only suppresses on the line it trails,
+    so a comment with nothing but whitespace before it is discussion, never a
+    directive, and ruff would ignore it too.
+
+    NOT COVERED, said rather than left to be discovered: a file-level
+    `# ruff: noqa`, which disables a whole file and does not match this shape.
+    It is the largest blanket there is and it is not inventoried here.
+    """
+    try:
+        src = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        # Said, not skipped: a file left out of an inventory makes the
+        # inventory shorter than the truth and nothing says which file.
+        print(f"check.py: {path} unreadable ({e}); NOT inventoried", file=sys.stderr)
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            if tok.type != tokenize.COMMENT:
+                continue
+            marker = _marker_from_comment(tok)
+            if marker is not None:
+                out.append(marker)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        # reason: ruff reports a file that will not tokenize, and twice is one
+        # problem looking like two; same call as silent_catches makes
+        return []
+    return out
+
+
+def _noqa_issues(path: Path) -> list[dict[str, Any]]:
+    # WHICH LINES ACTUALLY SWALLOW, so `noqa-not-explainable` fires on a hidden
+    # swallow and not on every blind catch. #58's argument is that the evidence
+    # for a broad catch is THE EXCEPTION RECORDED rather than a sentence -- so a
+    # handler that records it has already met that bar, whatever ruff's BLE001
+    # thinks of its breadth. Measured against another repo, 2026-09-16: the
+    # literal reading ("no BLE001 noqa, ever") fires on 17 sites, every one of
+    # them a test harness whose handler returns `f"{type(e).__name__}: {e}"` as
+    # the failure it reports. Refusing those buys nothing and spends the gate's
+    # credibility, which METHODOLOGY 9.1 says is how --no-verify becomes a
+    # habit. With this, the same tree is 0 and the motivating case still fires.
+    silent = {e["line"] for e in silent_catches(path)}
+    issues: list[dict[str, Any]] = []
+    for m in noqa_markers(path):
+        codes = m["codes"]
+        label = ",".join(codes) if codes else "(every rule)"
+        base = {"file": str(path), "line": m["line"], "col": m["col"],
+                "fixable": False, "fixable_unsafe": False}
+        if m["kind"] == "type-ignore":
+            continue
+        banned = sorted(set(codes) & _NOT_EXPLAINABLE) if m["line"] in silent else []
+        if banned:
+            issues.append({**base, "severity": "error", "rule": "noqa-not-explainable",
+                           "message": f"'# noqa: {','.join(banned)}' is not available under "
+                                      "any reason: a sentence does not make a blind catch "
+                                      "less blind, and the handler still swallows a NameError. "
+                                      "Record the exception (logging.exception, or "
+                                      "exc_info=True) or re-raise, both of which ruff accepts"})
+        elif not codes:
+            issues.append({**base, "severity": "error", "rule": "noqa-blanket",
+                           "message": "a bare '# noqa' suppresses every rule on this line, "
+                                      "including ones not written yet, and names none for an "
+                                      "inventory to list. Name the codes it is for"})
+        elif not m["reason"]:
+            issues.append({**base, "severity": "error", "rule": "noqa-no-reason",
+                           "message": f"'# noqa: {label}' suppresses a finding and states no "
+                                      "reason. A suppression is a claim that the rule is wrong "
+                                      "HERE. State it on the line, "
+                                      f"'# noqa: {label} -- why', or remove the marker"})
+    return issues
+
+
+def run_noqa(target: str) -> dict[str, Any]:
+    p = Path(target)
+    files = ([f for f in sorted(p.rglob("*.py")) if is_project_file(f, p)]
+             if p.is_dir() else [p])
+    issues: list[dict[str, Any]] = []
+    for f in files:
+        issues.extend(_noqa_issues(f))
+    # Every issue this emits is an error today, so _status() would do. Said by
+    # severity anyway, because the day something here warns is the day a silent
+    # `_status()` would start failing runs that should pass.
+    status = "fail" if any(i["severity"] == "error" for i in issues) else "pass"
+    return {"tool": "noqa", "status": status, "issues": issues}
 
 
 # ── smells (#55) ──────────────────────────────────────────────────────────────
@@ -1584,6 +1796,7 @@ TOOL_RUNNERS = {
     "shellcheck":     run_shellcheck,
     "no-cover":       run_no_cover,
     "suppress-reason": run_suppress_reason,
+    "noqa":           run_noqa,
     "smells":         run_smells,
     "ruff":           run_ruff,
     "mypy":           run_mypy,
@@ -1599,7 +1812,7 @@ TOOL_RUNNERS = {
 }
 
 DEFAULT_TOOLS = {
-    "python": ["ruff", "mypy", "no-cover", "suppress-reason", "smells"],
+    "python": ["ruff", "mypy", "no-cover", "suppress-reason", "noqa", "smells"],
     "js":     ["eslint", "prettier"],
     "css":    ["stylelint", "prettier"],
     "html":   ["eslint", "stylelint", "prettier"],
@@ -1615,8 +1828,8 @@ AUDIT_TOOLS = {
 }
 
 # Tools that accept directories natively (pass the dir, not individual files)
-_DIR_CAPABLE = {"ruff", "mypy", "no-cover", "suppress-reason", "smells", "phpstan", "phpcs",
-                "rector", "pip-audit", "npm-audit", "composer-audit"}
+_DIR_CAPABLE = {"ruff", "mypy", "no-cover", "suppress-reason", "noqa", "smells", "phpstan",
+                "phpcs", "rector", "pip-audit", "npm-audit", "composer-audit"}
 # cppcheck is deliberately not in _DIR_CAPABLE: the .ino suppression is decided
 # per file, and passing a directory would apply sketch rules to every .cpp.
 
