@@ -31,6 +31,7 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `test-against-ref-as-run.sh` | AS RUN: the first draft of `test-against-ref.sh`, which produced its recorded numbers | all three fields |
 | `shellcheck-sweep.py` | how much would a shellcheck gate find across a tree of repos, by level and by repo (#57's measurement) | all three fields |
 | `ast-before-after.py` | which functions a cleanup restructured between two refs, drawn before and after, with complexity and check.py findings by rule | all three fields |
+| `prune-merged-branches.py` | which remote branches hold nothing the base does not already have, and which only LOOK unmerged because they landed rebased | all three fields |
 
 **The `forged-verdict-probe.py` row is stated rather than fixed.** The tool is `another repo-advisor`'s
 and its docstring is theirs to complete; editing another seat's header to satisfy
