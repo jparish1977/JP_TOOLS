@@ -137,6 +137,19 @@ PHOTOREC_FAMILIES = {
     "iso": "iso", "bin": "bin", "nes": "nes", "nds": "nds",
 }
 
+# One flat table cannot serve two profiles that spell the same extension
+# differently. `md` is Markdown in `writing` and Sega Mega Drive in `roms`, and
+# the table can only hold one of them: mapping it to `txt` turned a ROM
+# recovery into a carve of every text file on the volume, arriving in output
+# that looks like a successful ROM scan. Found in review, 2026-09-16.
+#
+# None means "this extension has no photorec family IN THIS PROFILE", which is
+# the same state `smc`, `gb` and the rest of the ROM formats are already in --
+# photorec carves by content and a bare ROM has no signature to carve on.
+PROFILE_FAMILY_OVERRIDES = {
+    "roms": {"md": None},
+}
+
 
 def create_disk_image(source, output_img, dry_run=False):
     """Create a raw disk image from a drive letter or device.
@@ -332,13 +345,29 @@ def fileopt_command(profile_name, extensions):
     the wrong form is only wrong for TWO OR MORE families, so `roms` (one
     family) and `full` (no list at all) worked throughout, and the default
     profile did not.
+
+    Raises ValueError when no extension resolves to a family, because the
+    empty case rebuilds the same broken line through a different door:
+    `fileopt,everything,disable,,search`, whose empty slot photorec refuses
+    exactly as it refuses a missing toggle. No profile reaches it today and
+    `--profile` is choices-restricted, so this is a door being shut before
+    someone adds `--ext` and walks through it.
     """
     if profile_name == "full":
         return "everything,enable", "fileopt,everything,enable,search"
-    families = sorted({
-        PHOTOREC_FAMILIES[ext] for ext in extensions if ext in PHOTOREC_FAMILIES
-    })
-    enable_line = ",".join(f"{family},enable" for family in families)
+    overrides = PROFILE_FAMILY_OVERRIDES.get(profile_name, {})
+    resolved = set()
+    for ext in extensions:
+        family = overrides[ext] if ext in overrides else PHOTOREC_FAMILIES.get(ext)
+        if family is not None:
+            resolved.add(family)
+    if not resolved:
+        raise ValueError(
+            f"profile {profile_name!r} resolves to no photorec family, and an "
+            f"empty fileopt list is refused by photorec rather than meaning "
+            f"'everything'"
+        )
+    enable_line = ",".join(f"{family},enable" for family in sorted(resolved))
     return enable_line, f"fileopt,everything,disable,{enable_line},search"
 
 

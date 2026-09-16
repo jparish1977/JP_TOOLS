@@ -151,6 +151,25 @@ def main() -> int:
               f"profile {profile}: malformed /cmd {cmd_str!r}")
         checks += 3
 
+    # `md` is Markdown in the table and Sega Mega Drive in the roms profile.
+    # Resolving it to `txt` turned a ROM recovery into a carve of every text
+    # file on the volume, arriving in output that looks like a ROM scan.
+    roms_line, _ = recover.fileopt_command("roms", recover.PROFILES["roms"])
+    check("txt" not in roms_line.split(","),
+          f"the roms profile enables the txt family: {roms_line!r}")
+    checks += 1
+
+    # An empty family set builds `fileopt,everything,disable,,search`, whose
+    # empty slot photorec refuses exactly as it refuses a missing toggle. The
+    # same failure through a different door, so it is shut rather than left
+    # merely unreached.
+    try:
+        recover.fileopt_command("code", ["smc", "gb"])
+        check(False, "an empty family set built a /cmd line instead of refusing")
+    except ValueError:
+        pass
+    checks += 1
+
     if shutil.which("photorec") is None:
         print(f"SKIP: photorec not installed; {checks} string checks ran")
         return report(failures)
