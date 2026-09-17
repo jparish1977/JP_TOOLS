@@ -1471,9 +1471,14 @@ def noqa_markers(path: Path) -> list[dict[str, Any]]:
     Tokenizing is not enough on its own, because PROSE ABOUT A MARKER IS ALSO A
     COMMENT. The block above this function mentions `# noqa` four times to
     explain it, and the first run of this check reported three errors against
-    its own documentation. A suppression only suppresses on the line it trails,
-    so a comment with nothing but whitespace before it is discussion, never a
-    directive, and ruff would ignore it too.
+    its own documentation.
+
+    So only a marker TRAILING code counts, and that is a SCOPING CHOICE rather
+    than a claim about ruff. The first draft of this paragraph said ruff
+    ignores a standalone marker; jp-tools measured otherwise reviewing #109,
+    with ERA001 as the control. What a standalone marker cannot do is suppress
+    anything for the code around it, so requiring a reason on one would refuse
+    every sentence anyone writes about the subject.
 
     NOT COVERED, said rather than left to be discovered: a file-level
     `# ruff: noqa`, which disables a whole file and does not match this shape.
@@ -1525,10 +1530,11 @@ def _noqa_issues(path: Path) -> list[dict[str, Any]]:
         if banned:
             issues.append({**base, "severity": "error", "rule": "noqa-not-explainable",
                            "message": f"'# noqa: {','.join(banned)}' is not available under "
-                                      "any reason: a sentence does not make a blind catch "
-                                      "less blind, and the handler still swallows a NameError. "
+                                      "any reason: this handler swallows the failure, and a "
+                                      "sentence is not evidence that it does not matter. "
                                       "Record the exception (logging.exception, or "
-                                      "exc_info=True) or re-raise, both of which ruff accepts"})
+                                      "exc_info=True), re-raise, or do something with it -- "
+                                      "ruff accepts all three, and a narrower except as well"})
         elif not codes:
             issues.append({**base, "severity": "error", "rule": "noqa-blanket",
                            "message": "a bare '# noqa' suppresses every rule on this line, "
