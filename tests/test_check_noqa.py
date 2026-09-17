@@ -144,6 +144,20 @@ def test_a_noqa_cannot_hide_a_swallow_from_suppress_reason() -> None:
           suppress_rules_for(hushed), ["suppress-reason"])
 
 
+def test_the_marker_is_matched_case_insensitively() -> None:
+    # ruff's directive is case-insensitive, so every rule here has to be too.
+    # Matched case-sensitively, `# NOQA: BLE001,S110` over a blind swallow read
+    # 0 from every tool: the hole this check exists to close, reopened by
+    # holding shift. jp-tools' review of #109.
+    check("NOQA over a swallow is still refused",
+          errors_for(SWALLOW.replace("noqa", "NOQA").format(why="x")),
+          ["noqa-not-explainable"])
+    check("a bare NOQA is still a blanket",
+          errors_for("import dt  # NOQA -- it is fine\n"), ["noqa-blanket"])
+    check("NOQA with no reason is still refused",
+          errors_for("import dt  # NOQA: E402\n"), ["noqa-no-reason"])
+
+
 def test_a_marker_that_is_not_a_marker_is_not_counted() -> None:
     check("inside a string literal",
           errors_for('SAMPLE = "x = 1  # noqa"\n'), [])

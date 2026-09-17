@@ -1400,8 +1400,14 @@ def run_suppress_reason(target: str) -> dict[str, Any]:
 # to belong TO, so this answers nothing about it on purpose. It is read only
 # because the same scan reads both, and reading one shape and not the other
 # would cost a second parser.
+# IGNORECASE because ruff's directive is case-insensitive: `# NOQA: BLE001,S110`
+# suppresses exactly as `# noqa` does. Matched case-sensitively, this rule read
+# 0 on a blind swallow that it is built to refuse, which is the measurement in
+# the comment above reproduced by holding shift. Found by jp-tools reviewing
+# this PR.
 _NOQA_RE = re.compile(
-    r"#\s*noqa\b(?::\s*(?P<codes>[A-Za-z]+[0-9]+(?:\s*,\s*[A-Za-z]+[0-9]+)*))?(?P<rest>.*)$")
+    r"#\s*noqa\b(?::\s*(?P<codes>[A-Za-z]+[0-9]+(?:\s*,\s*[A-Za-z]+[0-9]+)*))?(?P<rest>.*)$",
+    re.IGNORECASE)
 _TYPE_IGNORE_RE = re.compile(
     r"#\s*type:\s*ignore(?:\[(?P<codes>[^\]]*)\])?(?P<rest>.*)$")
 # Prose after `--` (the eslint convention this file already reads) or after
