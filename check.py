@@ -1480,9 +1480,11 @@ def noqa_markers(path: Path) -> list[dict[str, Any]]:
     anything for the code around it, so requiring a reason on one would refuse
     every sentence anyone writes about the subject.
 
-    NOT COVERED, said rather than left to be discovered: a file-level
-    `# ruff: noqa`, which disables a whole file and does not match this shape.
-    It is the largest blanket there is and it is not inventoried here.
+    NOT COVERED, said rather than left to be discovered: the file-level forms,
+    `# ruff: noqa`, `# flake8: noqa` and `# ruff: noqa: CODES`. Each disables a
+    whole file, none matches this trailing shape, and jp-tools measured all
+    three taking a swallow to "All checks passed!" on this head. They are the
+    largest blanket there is and they want a rule of their own.
     """
     try:
         src = path.read_text(encoding="utf-8", errors="replace")
