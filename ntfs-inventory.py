@@ -5,10 +5,14 @@ The lightest operation available on a failing drive: directory entries only, no
 file data. Written incrementally per top-level directory and resumable, so a
 disconnect costs the directory in progress rather than the run.
 """
+from __future__ import annotations
+
+import contextlib
 import os
 import re
 import subprocess
 import sys
+from typing import TextIO
 
 LISTING = re.compile(r"^\s*(\d+)\s+\w+\s+\d+\s+[\d:]+\s+\d{4}\s+(.*)$")
 
@@ -30,11 +34,36 @@ DEV, OUT = sys.argv[1], sys.argv[2]
 ONLY = sys.argv[3:] or None
 
 
-def as_root(cmd):
-    return cmd if os.geteuid() == 0 else ["sudo", "-n"] + cmd
+def as_root(cmd: list[str]) -> list[str]:
+    """One sudo for the whole run, not one per directory.
+
+    walk() calls listdir() once per directory, so unprivileged this becomes a
+    sudo invocation per directory. On a failing 2TB drive that was 285,471 of
+    them, three auth.log lines each: 857k lines, and /var/log/auth.log reached
+    145 MB over 2026-08-04/05. sudo's credential cache does not help -- every
+    invocation is logged whether or not it re-authenticates, and ntfsls was
+    NOPASSWD there so none of them even prompted.
+
+    Running the script itself under sudo makes this a no-op:
+
+        sudo ./ntfs-inventory.py /dev/sdb1 out.tsv
+
+    `ntfsls -R` would also collapse the calls, but it is the wrong trade: the
+    per-directory walk is what makes this resumable on a drive that disconnects.
+    (Ported 2026-09-22 from a consuming repo's copy, a consuming repo ee7148b.)
+    """
+    return cmd if os.geteuid() == 0 else ["sudo", "-n", *cmd]
 
 
-def listdir(path):
+def restore_owner(path: str) -> None:
+    """Hand the output back to the invoking user when run under sudo."""
+    uid, gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
+    if uid and gid:
+        with contextlib.suppress(OSError):  # reason: a root-owned TSV is still a correct inventory; ownership is a convenience
+            os.chown(path, int(uid), int(gid))
+
+
+def listdir(path: str) -> list[tuple[int, str, bool]]:
     try:
         r = subprocess.run(as_root(["ntfsls", "-l", "-F", "-p", path, DEV]),
                            capture_output=True, text=True, timeout=90, check=False)
@@ -56,7 +85,7 @@ def listdir(path):
     return rows
 
 
-def walk(path, out, depth=0, maxdepth=8):
+def walk(path: str, out: TextIO, depth: int = 0, maxdepth: int = 8) -> tuple[int, int]:
     n = b = 0
     for size, name, is_dir in listdir(path):
         child = path.rstrip("/") + "/" + name
@@ -72,18 +101,25 @@ def walk(path, out, depth=0, maxdepth=8):
                 print(f"  ! depth limit {maxdepth} reached, "
                       f"not descending into {child}", file=sys.stderr)
         else:
-            out.write("%s\t%d\n" % (child, size))
+            out.write(f"{child}\t{size}\n")
             n += 1
             b += size
     out.flush()
     return n, b
 
 
-done = set()
+if os.geteuid() != 0:
+    print("warning: unprivileged -- this runs one 'sudo ntfsls' PER DIRECTORY.\n"
+          "         A full walk did 285,471 of them and grew auth.log to 145 MB.\n"
+          f"         Re-run as: sudo {sys.argv[0]} {' '.join(sys.argv[1:])}",
+          file=sys.stderr)
+
+done: set[str] = set()
 if os.path.exists(OUT):
-    for line in open(OUT, encoding="utf-8", errors="replace"):
-        if not line.startswith("#"):
-            done.add(line.split("\t")[0].lstrip("/").split("/", 1)[0])
+    with open(OUT, encoding="utf-8", errors="replace") as prior:
+        for line in prior:
+            if not line.startswith("#"):
+                done.add(line.split("\t")[0].lstrip("/").split("/", 1)[0])
     if done:
         print("resuming -- done: {}".format(", ".join(sorted(done))))
 
@@ -95,13 +131,14 @@ if ONLY:
 with open(OUT, "a", encoding="utf-8") as out:
     if not done:
         out.write("#path\tsize\n")
+    restore_owner(OUT)   # do it now, so an interrupted run still leaves it usable
     for size, name, is_dir in tops:
         if name in done:
             continue
         if not is_dir:
-            out.write("/%s\t%d\n" % (name, size))
-            print("  %-24s %7d files %8.1f GB" % (name, 1, size / 1e9))
+            out.write(f"/{name}\t{size}\n")
+            print(f"  {name:<24} {1:7d} files {size / 1e9:8.1f} GB")
             continue
         n, b = walk("/" + name, out)
-        print("  %-24s %7d files %8.1f GB" % (name[:24], n, b / 1e9))
+        print(f"  {name[:24]:<24} {n:7d} files {b / 1e9:8.1f} GB")
 print(f"wrote {OUT}")
