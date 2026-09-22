@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import shlex
 import subprocess
 import sys
 from typing import TextIO
@@ -38,11 +39,9 @@ def as_root(cmd: list[str]) -> list[str]:
     """One sudo for the whole run, not one per directory.
 
     walk() calls listdir() once per directory, so unprivileged this becomes a
-    sudo invocation per directory. On a failing 2TB drive that was 285,471 of
-    them, three auth.log lines each: 857k lines, and /var/log/auth.log reached
-    145 MB over 2026-08-04/05. sudo's credential cache does not help -- every
-    invocation is logged whether or not it re-authenticates, and ntfsls was
-    NOPASSWD there so none of them even prompted.
+    sudo invocation per directory: hundreds of thousands on a full drive, each
+    logging three auth.log lines. sudo's credential cache does not help --
+    every invocation is logged whether or not it re-authenticates.
 
     Running the script itself under sudo makes this a no-op:
 
@@ -50,7 +49,6 @@ def as_root(cmd: list[str]) -> list[str]:
 
     `ntfsls -R` would also collapse the calls, but it is the wrong trade: the
     per-directory walk is what makes this resumable on a drive that disconnects.
-    (Ported 2026-09-22 from a consuming repo's copy, a consuming repo ee7148b.)
     """
     return cmd if os.geteuid() == 0 else ["sudo", "-n", *cmd]
 
@@ -109,9 +107,14 @@ def walk(path: str, out: TextIO, depth: int = 0, maxdepth: int = 8) -> tuple[int
 
 
 if os.geteuid() != 0:
+    # sys.executable and an absolute script path, so the command works however
+    # this was started: `python3 ntfs-inventory.py` gives a bare argv[0] that
+    # sudo would look up on PATH and not find.
+    rerun = shlex.join(["sudo", sys.executable, os.path.abspath(sys.argv[0]),
+                        *sys.argv[1:]])
     print("warning: unprivileged -- this runs one 'sudo ntfsls' PER DIRECTORY.\n"
           "         A full walk did 285,471 of them and grew auth.log to 145 MB.\n"
-          f"         Re-run as: sudo {sys.argv[0]} {' '.join(sys.argv[1:])}",
+          f"         Re-run as: {rerun}",
           file=sys.stderr)
 
 done: set[str] = set()
