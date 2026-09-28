@@ -20,7 +20,7 @@
 #        - name: Switch to VCS repos for CI
 #          run: |
 #            sed -i 's|"type": "path"|"type": "vcs"|g' composer.json
-#            sed -i 's|"url": "../iteration8-core"|"url": "https://github.com/owner/iteration8-core.git"|g' composer.json
+#            sed -i 's|"url": "../shared-lib"|"url": "https://github.com/owner/shared-lib.git"|g' composer.json
 
 name: Code Quality
 
@@ -38,14 +38,13 @@ jobs:
       matrix:
         # Every language check.py covers here. One this repo has no files of
         # is detected and skipped, with a message, so nothing needs deleting.
-        # That matters because check.py exits 2 when a check could not run
-        # (#29): an entry left running over a language with no files would go
-        # red, where it used to go green having checked nothing.
+        # That matters because check.py exits 2 when a check could not run:
+        # an entry left running over a language with no files would go red.
         lang: [python, js, php, shell]
 
     steps:
       # Full history: the smells arm reads the PR's base commit, and a shallow
-      # clone does not have it (#55).
+      # clone does not have it.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -95,7 +94,7 @@ jobs:
         run: git clone --depth 1 https://github.com/jparish1977/JP_TOOLS.git ../JP_TOOLS
 
       # From JP_TOOLS' own manifests, because that is where check.py looks:
-      #   requirements-dev.txt  pinned ruff and mypy
+      #   requirements-dev.txt  pinned ruff, mypy, pip-audit and coverage
       #   package.json          eslint and its plugins, prettier, stylelint.
       #                         jp_eslint.mjs imports them from
       #                         ../JP_TOOLS/node_modules; a global npm install
@@ -120,14 +119,15 @@ jobs:
               shellcheck --version ;;
           esac
 
-      # Shell is checked one file at a time: shellcheck does not take a
-      # directory, so `--lang shell` on `.` could only exit 2 as not run.
+      # Shell is checked one file at a time: --lang has no shell choice (a
+      # directory run detects shell on its own, alongside every other
+      # language), so each .sh/.bash file is handed to check.py by name.
       - name: Run check
         if: steps.present.outputs.found == 'yes'
         env:
           SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          # The smells arm (#55) fails a smell that is NEW against --smells-base
+          # The smells arm fails a smell that is NEW against --smells-base
           # and warns on one that existed. Its default, HEAD, is the commit under
           # test here, so without this a new smell only ever warned. The base is
           # the PR's, or on a push the commit before it; a first push has none

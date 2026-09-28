@@ -6,105 +6,36 @@ on:
   pull_request:
     branches: [master]
 
+# Every tracked file of each language is checked, by listing them from git:
+# a hand-kept list lets a new file go unchecked while the build is green.
+# rc accumulates in every loop, so one failure never hides the files after it.
+#
+# The smells arm fails a smell that is NEW against --smells-base and warns on
+# one that existed. The base is the PR's, or on a push the commit before it;
+# a first push has none (all zeros), which falls back to HEAD and says so,
+# since against HEAD a new smell only warns.
+
 jobs:
   python:
-    name: Python (ruff + mypy)
+    name: Python and shell (ruff, mypy, shellcheck, suites, coverage)
     runs-on: ubuntu-latest
     steps:
-      # Full history: the smells arm reads the PR's base commit, and a shallow
-      # clone does not have it (#55).
+      # Full history: the smells arm reads the base commit.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      # Pinned deliberately. Unpinned, this said `pip install ruff mypy`, and the
-      # build went red in August against code that had not changed since April —
-      # new linter releases added rules while the source stood still. Bump these
-      # on purpose, with the fixes in the same commit, rather than discovering it
-      # in whichever unrelated PR happens to be open.
-      - run: pip install ruff==0.16.1 mypy==2.3.0 coverage==7.15.4
-      - name: Self-check Python files
-        env:
-          SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          # No `set -e` reliance: the runner aborts the loop on the first
-          # failure, which hid every problem after the first file.
-          # This list is manual, which means a new tool is not checked until
-          # someone remembers to add it. spool-audit.py was merged-ready with a
-          # green badge while no job in this file touched it, so "CI green" was
-          # true and said nothing about the code. Add new scripts here.
-          #
-          # The smells arm (#55) fails a smell that is NEW against --smells-base
-          # and warns on one that existed. Its default, HEAD, is the commit under
-          # test here, so without this a new smell only ever warned. The base is
-          # the PR's, or on a push the commit before it; a first push has none
-          # (all zeros), which falls back to HEAD and says so.
-          base="$SMELLS_BASE"
-          case "$base" in *[!0]*) ;; *) base="" ;; esac
-          if [ -z "$base" ]; then
-            echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
-            base=HEAD
-          fi
-          rc=0
-          for f in check.py jpcheck/*.py fix.py install-hooks.py init-ci.py spool-audit.py spoolaudit/*.py chd.py chdtool/*.py chd-hunkmap.py chdmap/*.py recover.py recovery/*.py image-disk.py platformtools/*.py diff-functions.py snapshot-test.py count-callers.py list-exemptions.py; do
-            echo "--- $f ---"
-            python check.py "$f" --pretty --smells-base "$base" || rc=1
-          done
-          exit $rc
-      - name: Report which Python files are NOT checked
-        if: always()
-        run: |
-          # The list above is manual and cannot become a glob today: 17 of the
-          # repo's 22 root scripts have pre-existing findings (127 in total),
-          # so `for f in *.py` would turn this build red for reasons unrelated
-          # to any diff. Silently excluding them is how spool-audit.py reached
-          # a PR with a green badge that said nothing about it, so the gap is
-          # printed instead of hidden. Not a failure; a standing reminder.
-          checked="check.py fix.py install-hooks.py init-ci.py spool-audit.py chd.py chd-hunkmap.py recover.py image-disk.py diff-functions.py snapshot-test.py count-callers.py list-exemptions.py"
-          echo "Linted: $checked"
-          echo "NOT linted:"
-          for f in *.py; do
-            case " $checked " in *" $f "*) ;; *) echo "  $f" ;; esac
-          done
-          # tests/ too, and NO test file is linted by any job here. The suites
-          # are what stands between this toolbox and a green badge that means
-          # nothing -- they caught a --purge that had been deleted, a guard
-          # that hung instead of failing, and an exemption region holding 51
-          # branches -- and nothing checks them at all. Measured 2026-08-14:
-          # 31 findings across nine suites, 21 of them in test_spool_audit.py
-          # and none newer than that date, so gating here would be red for
-          # reasons unrelated to any diff, exactly like the root-script list
-          # above. Seven of the nine sit at 0-2. See issue #30.
-          #
-          # Printing is not gating, on purpose. The version of this that says
-          # "so let us not mention it" is how spool-audit.py reached a PR with
-          # a green badge and no job touching it. Run `python check.py <file>`
-          # on any of these to see what is actually in them.
-          echo "NOT linted, in tests/ (nothing here is checked by any job):"
-          for f in tests/test_*.py tests/test_*.sh; do
-            [ -e "$f" ] && echo "  $f"
-          done
-      # The PHP tools live in vendor/, so without this every phpstan assertion
-      # in tests/ skips, and a skip is indistinguishable from a pass in the log.
-      # test_check_phpstan.py pins a bug that reported the repo directory as
-      # the filename for every finding; it is worth nothing if it never runs.
-      #
-      # PHP and composer are installed EXPLICITLY. GitHub's ubuntu-latest
-      # happens to ship both; the act image behind the iteration8 Forgejo
-      # runner ships neither, so `composer install` exited 127 ("command not
-      # found") and this job was red on every Forgejo head (#64). Skipping
-      # the step when composer is absent would make the phpstan suites skip,
-      # which reads as a pass: the shape #59 removed. 8.3 because phpunit
-      # ^12.5 in composer.json requires it, and 8.3 is what Ubuntu 24.04's apt
-      # ships.
-      #
-      # apt, not shivammathur/setup-php: the Forgejo runner resolves every
-      # `uses:` through its data.forgejo.org mirror, which does not carry
-      # setup-php ("remote: Not found", task 272), and GitHub does not accept
-      # a full URL in `uses:`. An install that fails fails this step.
-      - name: PHP and composer (the Forgejo runner image has neither)
+      # Pinned from requirements-dev.txt, so a linter release that adds rules
+      # is taken on purpose, with its fixes, not found in an unrelated PR.
+      - run: pip install -r requirements-dev.txt
+      # PHP and composer are installed explicitly: the Forgejo runner image
+      # has neither, and without the PHP tools the phpstan suites would skip,
+      # which reads as a pass. apt, not setup-php, because the Forgejo runner
+      # cannot resolve that action. 8.3 is what phpunit ^12.5 needs and what
+      # Ubuntu 24.04 ships.
+      - name: PHP and composer
         run: |
           if ! command -v composer >/dev/null 2>&1; then
             SUDO=$(command -v sudo || true)
@@ -113,9 +44,9 @@ jobs:
           fi
           php --version
           composer --version
-      # shellcheck, declared in requirements-system.txt, so the shell arm's
-      # finding cases run here rather than skip (tests/test_check_shell.py).
-      - name: shellcheck (declared in requirements-system.txt)
+      # Declared in requirements-system.txt; the shell arm's finding cases
+      # need it rather than skip.
+      - name: shellcheck
         run: |
           if ! command -v shellcheck >/dev/null 2>&1; then
             SUDO=$(command -v sudo || true)
@@ -124,39 +55,42 @@ jobs:
           shellcheck --version
       - name: Install PHP tools
         run: composer install --no-interaction --no-progress
+      - name: Check every Python and shell file
+        env:
+          SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base="$SMELLS_BASE"
+          case "$base" in *[!0]*) ;; *) base="" ;; esac
+          if [ -z "$base" ]; then
+            echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
+            base=HEAD
+          fi
+          rc=0
+          for f in $(git ls-files '*.py' '*.sh' '*.bash'); do
+            echo "--- $f ---"
+            python check.py "$f" --pretty --smells-base "$base" || rc=1
+          done
+          exit $rc
       - name: Run test suites
         if: always()
         run: |
-          # Nothing ran tests/ at all before. A suite that CI never executes is
-          # documentation, not a gate. Each suite skips rather than fails when
-          # its environment is unavailable, so this stays green on the runner.
-          # Suites run UNDER coverage, so they are measured on the same pass
-          # rather than run twice. Subprocess tracing needs this .pth AND
-          # COVERAGE_PROCESS_START: two suites drive the tool as a subprocess,
-          # and without tracing them spool-audit.py measured 71% instead of 82%.
-          # Eleven points of real testing would have read as a gap, and the
-          # obvious fix for a gap is to add a pragma, which is how code stops
-          # being looked at in the first place.
+          # Under coverage, so the suites are measured on the one pass.
+          # Subprocess tracing needs this .pth AND COVERAGE_PROCESS_START:
+          # several suites drive a tool as a subprocess, and untraced, that
+          # tested code reads as a gap.
           site=$(python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
           echo "import coverage; coverage.process_startup()" > "$site/zz-subprocess-coverage.pth"
           export COVERAGE_PROCESS_START="$PWD/.coveragerc"
           rm -f .coverage .coverage.*
           rc=0
           for t in tests/test_*.py; do
-            [ -e "$t" ] || continue
             echo "--- $t ---"
             python -m coverage run "$t" || rc=1
           done
-          # .sh as well as .py. The acceptance suite is the black-box half of
-          # the coverage and it is a shell script, so a *.py glob ran every
-          # unit test and silently skipped the only suite that drives the real
-          # CLI -- documentation rather than a gate, which is the exact thing
-          # this step was added to stop.
+          # The shell suites too: the acceptance suite drives the real CLI.
+          # PYTHON=python so it runs the interpreter the .pth is installed in.
           for t in tests/test_*.sh; do
-            [ -e "$t" ] || continue
             echo "--- $t ---"
-            # PYTHON=python so the shell suite drives the SAME interpreter the
-            # .pth was installed into. Hardcoded python3 would run untraced.
             PYTHON=python bash "$t" || rc=1
           done
           python -m coverage combine || true
@@ -164,29 +98,23 @@ jobs:
       - name: Coverage
         if: always()
         run: |
-          # Gated per file, not repo-wide. Most root scripts have no suite at
-          # all, so a repo-wide threshold would be red on day one for reasons
-          # unrelated to any diff, and a gate that is red for unrelated reasons
-          # gets ignored and then removed.
-          #
-          # .coveragerc does NOT honour `pragma: no cover`, on purpose. The
-          # pragma buys no better number here; it is a documented claim,
-          # policed by check.py's no-cover check and read with
-          # list-exemptions.py. See docs/coverage.md.
+          # Gated where a threshold has been earned, printed everywhere else.
+          # .coveragerc does not honour `pragma: no cover`: the pragma is a
+          # documented claim, policed by check.py's no-cover check and listed by
+          # list-exemptions.py, and it buys no better number. See docs/coverage.md.
           echo "GATED (must not regress):"
-          python -m coverage report --include='spool-audit.py' --fail-under=90
+          python -m coverage report --include='spool-audit.py,spoolaudit/*' --fail-under=90
           echo
-          echo "NOT gated, printed so the gap is visible rather than hidden:"
+          echo "Everything measured:"
           python -m coverage report || true
           echo
           echo "Coverage exemptions, which coverage does not hide:"
           python list-exemptions.py . || true
 
   js:
-    name: JS (eslint)
+    name: JS (eslint, prettier)
     runs-on: ubuntu-latest
     steps:
-      # Full history, as in the Python job: the base must be in the clone.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -197,14 +125,10 @@ jobs:
         with:
           node-version: '22'
       - run: npm install
-      - name: Self-check JS files
+      - name: Check every JS file
         env:
           SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          # rc accumulates, as in the Python job. Without it the step took
-          # the LAST file's exit code, so a failure on jp_eslint.mjs was
-          # hidden by a clean jp_stylelint.mjs.
-          # The base, as in the Python job: the PR's, or the push's before.
           base="$SMELLS_BASE"
           case "$base" in *[!0]*) ;; *) base="" ;; esac
           if [ -z "$base" ]; then
@@ -212,7 +136,7 @@ jobs:
             base=HEAD
           fi
           rc=0
-          for f in jp_eslint.mjs jp_stylelint.mjs; do
+          for f in $(git ls-files '*.js' '*.mjs' '*.cjs'); do
             echo "--- $f ---"
             python check.py "$f" --pretty --smells-base "$base" || rc=1
           done
