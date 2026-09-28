@@ -153,7 +153,8 @@ def _mypy_config_args(target: str) -> list[str]:
     """
     if _find_project_config(target, ["mypy.ini", ".mypy.ini", "setup.cfg",
                                      "pyproject.toml"],
-                            {"setup.cfg": "mypy", "pyproject.toml": "tool.mypy"}):
+                            {"setup.cfg": "mypy", "pyproject.toml": "tool.mypy"},
+                            stop_at_repo_root=True):
         return []
     shared = Path(__file__).parent / "configs" / "mypy.ini"
     return ["--config-file", str(shared)] if shared.exists() else []
@@ -375,7 +376,8 @@ def _declares_section(path: Path, section: str) -> bool:
 
 
 def _find_project_config(target: str, filenames: list[str],
-                         sections: dict[str, str] | None = None) -> Path | None:
+                         sections: dict[str, str] | None = None,
+                         stop_at_repo_root: bool = False) -> Path | None:
     """Walk up from target looking for a project-local config file.
 
     A file named in SECTIONS counts only if it carries that section, which is
@@ -383,17 +385,36 @@ def _find_project_config(target: str, filenames: list[str],
     with no [tool.ruff] and mypy a setup.cfg with no [mypy]. Counting such a
     file would hand the tool no config at all and switch off every rule the
     JP_TOOLS defaults add.
+
+    STOP_AT_REPO_ROOT ends the walk at the first directory holding .git or .hg,
+    which is where mypy stops looking; ruff does not stop there. Measured
+    2026-09-28, mypy 2.3.0 and ruff 0.16.1, with a [tool.mypy]/[tool.ruff]
+    pyproject.toml one level ABOVE a git repo: ruff used it, mypy ran its bare
+    "Default", and this walk found it -- so the gate passed mypy no config at
+    all and the JP_TOOLS defaults were silently off. Without .git both tools
+    used it.
     """
     sections = sections or {}
     p = Path(target).resolve()
     start = p if p.is_dir() else p.parent
     for directory in (start, *start.parents):
-        for name in filenames:
-            candidate = directory / name
-            if candidate.exists() and (name not in sections
-                                       or _declares_section(candidate, sections[name])):
-                return candidate
+        hit = next((directory / name for name in filenames
+                    if _is_config(directory / name, sections.get(name))), None)
+        if hit:
+            return hit
+        if stop_at_repo_root and _is_repo_root(directory):
+            break
     return None
+
+
+def _is_config(candidate: Path, section: str | None) -> bool:
+    """The file exists and, if it is shared by several tools, carries SECTION."""
+    return candidate.exists() and (section is None or _declares_section(candidate, section))
+
+
+def _is_repo_root(directory: Path) -> bool:
+    """Where mypy stops walking up: a directory holding .git or .hg."""
+    return (directory / ".git").exists() or (directory / ".hg").exists()
 
 
 def run_phpstan(target: str) -> dict[str, Any]:

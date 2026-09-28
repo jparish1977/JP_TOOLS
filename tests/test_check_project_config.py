@@ -14,6 +14,10 @@ THE GAP THIS PINS DOWN
     N802 and C416 reported without a pyproject.toml, only I001 with a
     three-line [project] one.
 
+AND mypy stops looking at the repository root (.git or .hg) where ruff does
+not, so a [tool.mypy] above a repo is not that repo's config: counting it
+handed mypy nothing, the same silent loss of the defaults one level up.
+
 The config choice is checked directly, and once end to end through ruff.
 The end-to-end part skips when ruff is missing.
 
@@ -131,6 +135,29 @@ def main() -> int:
               check_mod._mypy_config_args(str(t)) == [])
         t = tree(base, {"mypy.ini": "[mypy]\n"})
         check("a mypy.ini is the project's own",
+              check_mod._mypy_config_args(str(t)) == [])
+        # mypy STOPS AT THE REPOSITORY ROOT and ruff does not. Measured
+        # 2026-09-28 with mypy 2.3.0 and ruff 0.16.1: a [tool.mypy] one level
+        # above a git repo, mypy ran "Default", ruff used the file, and this
+        # walk found it, so mypy got no config at all.
+        above = BARE_PYPROJECT + "\n[tool.mypy]\nstrict = true\n\n[tool.ruff]\nline-length = 90\n"
+        t = tree(base, {"pyproject.toml": above, "sub/.git/HEAD": "ref: refs/heads/main\n",
+                        "sub/m.py": "x = 1\n"})
+        check("a [tool.mypy] ABOVE a git repo is not the repo's: still the JP_TOOLS defaults",
+              uses_defaults(check_mod._mypy_config_args(str(t))))
+        check("...while ruff, which walks past the repo root, still counts it",
+              check_mod._ruff_config_args(str(t)) == [])
+        t = tree(base, {"pyproject.toml": above, "sub/.hg/requires": "store\n",
+                        "sub/m.py": "x = 1\n"})
+        check("the same above an hg repo",
+              uses_defaults(check_mod._mypy_config_args(str(t))))
+        t = tree(base, {"pyproject.toml": above, "sub/m.py": "x = 1\n"})
+        check("control: with no repo root between, mypy's walk reaches it",
+              check_mod._mypy_config_args(str(t)) == [])
+        t = tree(base, {"sub/.git/HEAD": "ref: refs/heads/main\n",
+                        "sub/pyproject.toml": BARE_PYPROJECT + "\n[tool.mypy]\n",
+                        "sub/m.py": "x = 1\n"})
+        check("a [tool.mypy] AT the repo root is the project's own",
               check_mod._mypy_config_args(str(t)) == [])
 
         print("\nEnd to end:")
