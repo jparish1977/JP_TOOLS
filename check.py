@@ -13,7 +13,7 @@ Exit codes:
     2  - usage or path error, OR a check that could not run: a tool that is
          unavailable, a tool that exited abnormally, or no runner for a
          requested tool. Each one is named on stderr. A check that did not
-         run is not a pass (#29).
+         run is not a pass.
 """
 
 import argparse
@@ -98,21 +98,16 @@ def run_ruff(target: str) -> dict[str, Any]:
     ]
     # The return code is read, not discarded. ruff exits 0 clean, 1 for
     # findings, and 2 when it could not run -- a config that fails to load
-    # writes to stderr and leaves stdout empty, so without the code this
-    # published "pass" with 0 issues. That is exactly how a ruff.toml extending
-    # ../JP_TOOLS read clean when CI cloned JP_TOOLS to /tmp instead.
+    # writes to stderr and leaves stdout empty, so without the code this would
+    # publish "pass" with 0 issues.
     return {"tool": "ruff", "status": _status(issues, result.returncode),
             "issues": issues}
 
 
 # Tools honour FORCE_COLOR/CLICOLOR_FORCE even when their output is captured,
-# and ANSI escapes then break every line-oriented parser here. Measured
-# 2026-08-12: with FORCE_COLOR=3 in the environment, mypy emitted
-# "\x1b[1m\x1b[31merror:" and check.py reported 0 issues on a file mypy was
-# failing with 2 -- the same "reported a pass on a failing file" bug this
-# module's mypy parser comment already documents, arriving by a different
-# route. CI has no FORCE_COLOR, so the build went red while the local gate
-# stayed green.
+# and ANSI escapes then break every line-oriented parser here: with
+# FORCE_COLOR set, mypy emits "\x1b[1m\x1b[31merror:", the parser matches
+# nothing, and a failing file reads as a pass.
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\([A-Z]")
 
 
@@ -131,11 +126,8 @@ def strip_ansi(text: str) -> str:
 
 
 # mypy prints "file:line: severity: message [code]", optionally with a column,
-# and on Windows the path carries a drive letter. The previous parser split on
-# ":" with maxsplit=3, which put the severity in one field and then searched a
-# different field for it. It therefore classified EVERY error as a note and
-# dropped it: check.py reported "mypy pass" on a file mypy was failing.
-# Verified 2026-08-12 against a deliberate type error.
+# and on Windows the path carries a drive letter, so splitting on ":" puts
+# the severity in the wrong field and every error reads as a note.
 _MYPY_LINE = re.compile(
     r"^(?P<file>(?:[A-Za-z]:)?[^:]+):(?P<line>\d+):(?:(?P<col>\d+):)?\s*"
     r"(?P<sev>error|warning|note):\s*(?P<msg>.*)$"
@@ -315,10 +307,10 @@ def _node_bin(name: str) -> str | None:
     """Resolve an npm bin from JP_TOOLS' own node_modules, falling back to PATH.
 
     package.json declares prettier, and `npm install` puts it in
-    node_modules/.bin, which is not on PATH. Resolving through PATH alone meant
-    the manifest was satisfied while the gate still called the tool unavailable
-    (METHODOLOGY, "Declare the instrument's own dependencies"). fix.py already
-    looks here; this is the same lookup, in the same order.
+    node_modules/.bin, which is not on PATH. Resolving through PATH alone would
+    leave the manifest satisfied while the gate called the tool unavailable
+    (METHODOLOGY, "Declare the instrument's own dependencies"). fix.py uses the
+    same lookup, in the same order.
     """
     local_bin = Path(__file__).parent / "node_modules" / ".bin"
     for ext in (".cmd", ""):
@@ -336,8 +328,7 @@ def _node_runner_failed(tool: str,
     linted, lint findings included. Any other exit means they did not: node
     could not load eslint or stylelint (ERR_MODULE_NOT_FOUND, exit 1), or the
     runner refused (exit 2). stdout is then empty, and `result.stdout or "[]"`
-    read that as a clean pass. Measured 2026-09-14: a file holding `var` and
-    `==`, no node_modules, reported eslint "pass" and exit 0.
+    would read that as a clean pass.
     """
     if result.returncode == 0:
         return None
@@ -540,8 +531,7 @@ def run_prettier(target: str) -> dict[str, Any]:
             # prettier ends --check with a summary on its own [warn] line:
             # "Code style issues found in the above file. Run Prettier with
             # --write to fix." (prettier 2: "... Forgot to run Prettier?").
-            # Read as a filename, it counted every unformatted file twice --
-            # seen in CI on PR #59, the first run where prettier ran at all.
+            # Read as a filename, it would count every unformatted file twice.
             if fp.startswith("Code style issues"):
                 continue
             issues.append({
@@ -593,7 +583,7 @@ def run_pip_audit(target: str) -> dict[str, Any]:
                 })
     except (json.JSONDecodeError, TypeError) as e:
         # An audit whose output did not parse did not run, and a check that
-        # did not run is not a pass (#59).
+        # did not run is not a pass.
         return {"tool": "pip-audit", "status": "error", "issues": [],
                 "note": f"pip-audit's output was not the JSON expected: {e}"}
     return {"tool": "pip-audit", "status": _status(issues), "issues": issues}
@@ -625,7 +615,7 @@ def run_npm_audit(target: str) -> dict[str, Any]:
                 "fixable":  adv.get("fixAvailable", False) is not False,
             })
     except (json.JSONDecodeError, TypeError, IndexError) as e:
-        # As pip-audit: not parsed is not run, and not run is not a pass (#59).
+        # As pip-audit: not parsed is not run, and not run is not a pass.
         return {"tool": "npm-audit", "status": "error", "issues": [],
                 "note": f"npm audit's output was not the JSON expected: {e}"}
     return {"tool": "npm-audit", "status": _status(issues), "issues": issues}
@@ -669,7 +659,7 @@ def run_composer_audit(target: str) -> dict[str, Any]:
                     "fixable":  False,
                 })
     except (json.JSONDecodeError, TypeError) as e:
-        # As pip-audit: not parsed is not run, and not run is not a pass (#59).
+        # As pip-audit: not parsed is not run, and not run is not a pass.
         return {"tool": "composer-audit", "status": "error", "issues": [],
                 "note": f"composer audit's output was not the JSON expected: {e}"}
     return {"tool": "composer-audit", "status": _status(issues), "issues": issues}
@@ -700,11 +690,10 @@ _RAN = ("pass", "fail", "skip")
 def _exit_code(summary: dict[str, Any], checks: list[dict[str, Any]]) -> int:
     """0 clean, 1 errors found, 2 a check could not run.
 
-    This used to be `1 if errors else 0`, and errors are counted from issues,
-    so no tool status could ever fail a run: ruff and mypy off PATH on a file
-    with two real errors reported "unavailable" and exited 0 (#29). A check
-    that did not run is not a pass, so it gets its own code, and it is named
-    on stderr so a blocked commit says what to install.
+    Errors are counted from issues, so `1 if errors else 0` alone would let a
+    run whose tools were all unavailable exit 0 on a file with real errors. A
+    check that did not run is not a pass, so it gets its own code, and it is
+    named on stderr so a blocked commit says what to install.
 
     Findings win over not-run: 1 is already a failure, and the not-run tools
     are still named.
@@ -731,13 +720,10 @@ _EXT_TO_LANG = {
     ".css":  "css", ".scss": "css", ".less": "css",
     ".html": "html", ".htm": "html",
     ".php":  "php",
-    # C/C++ and Arduino. .ino is a C++ sketch; the extension is the only thing
-    # that differs, and it was the gap that made this toolbox look inapplicable
-    # to an embedded project.
+    # C/C++ and Arduino. .ino is a C++ sketch; only the extension differs.
     ".c":    "cpp", ".h":   "cpp", ".cpp": "cpp",
     ".hpp":  "cpp", ".cc":  "cpp", ".ino": "cpp",
-    # Shell, backed by shellcheck. #57: 261 shell files across 18 fleet repos
-    # and no gate read any of them.
+    # Shell, backed by shellcheck.
     ".sh":   "shell", ".bash": "shell",
 }
 
@@ -750,13 +736,12 @@ _SKIP_DIRS = {"node_modules", "vendor", "__pycache__", ".git", ".venv", "venv",
 
 
 def _shebang_lang(p: Path) -> str | None:
-    """The language a script's #! line names, for a file with NO suffix. #57.
+    """The language a script's #! line names, for a file with NO suffix.
 
-    Suffix-only detection left every extensionless script unchecked: the hook
-    passes --skip-unsupported, so `bin/tool` went through as "cannot detect
-    language" while ruff and mypy both check such a file fine when named
-    (measured 2026-09-14: F401 and an assignment error found). Reads one line.
-    Python, and shell now that shellcheck backs it: `#!/bin/sh`, `#!/bin/bash`
+    Suffix-only detection would leave every extensionless script unchecked:
+    the hook passes --skip-unsupported, so `bin/tool` would go through as
+    "cannot detect language", while ruff and mypy both check such a file when
+    it is named. Reads one line. Python and shell: `#!/bin/sh`, `#!/bin/bash`
     and `#!/usr/bin/env bash` alike, since `env` names the interpreter next.
     """
     if p.suffix:
@@ -798,7 +783,7 @@ _UNREMARKABLE = {
 def _symlink_kind(link: Path, top: Path) -> str | None:
     """Which kind of symlink LINK is, as a skipped label; None for a plain file.
 
-    A SYMLINKED FILE IS NOT COLLECTED (#99). Findings are keyed by the resolved
+    A SYMLINKED FILE IS NOT COLLECTED. Findings are keyed by the resolved
     path, so a file reached through N links was measured N+1 times under one
     key, and its baseline came out N+1 times too loose. A link inside the tree
     loses nothing, since its target is collected directly. One pointing out of
@@ -845,9 +830,9 @@ def _collect_files(directory: str) -> tuple[dict[str, list[str]], dict[str, int]
     return groups, skipped
 
 
-# ── content this repo does not own (#90) ──────────────────────────────────────
-# Joe, 2026-09-14: "we cant control the quality of vendor tools". A repo lists
-# such paths in a committed .jp-tools-ignore at its root, one entry per line:
+# ── content this repo does not own ────────────────────────────────────────────
+# Vendor code is not the repo's to fix. A repo lists such paths in a committed
+# .jp-tools-ignore at its root, one entry per line:
 #
 #     oob/*.html   # byte-exact vendor pages kept as provenance
 #
@@ -924,10 +909,9 @@ def _drop_ignored_issues(result: dict[str, Any], root: Path, ignores: list[Ignor
 # as a bitwise-or on an integer unless the analyser can see the overload. It
 # cannot: cppcheck's preprocessor fails on ArduinoJson's version-namespace
 # macros with "Invalid ## usage", and a failed parse yields an EMPTY report that
-# looks exactly like a clean one. Measured 2026-08-12 on cam2135/CYD-Deck:
-# without the header, cppcheck flagged 8 false badBitmaskCheck but did catch an
-# injected out-of-bounds write and buffer overflow; with the header it caught
-# nothing at all, injected bugs included.
+# looks exactly like a clean one. Without the header, cppcheck reports false
+# badBitmaskCheck findings but still catches real out-of-bounds writes; with
+# the header it catches nothing at all.
 #
 # So the headers are deliberately NOT supplied, and this one rule is suppressed
 # for sketches instead. Do not "improve" this by adding -I paths: that silently
@@ -959,7 +943,7 @@ def run_cppcheck(target: str) -> dict[str, Any]:
         suppress += _INO_SUPPRESS
         # Required, not cosmetic: cppcheck does not know the .ino extension, and
         # without this it reports a syntaxError at the first sketch construct and
-        # analyses nothing. Measured. Not forced for .c/.cpp/.h, where cppcheck
+        # analyses nothing. Not forced for .c/.cpp/.h, where cppcheck
         # infers correctly and forcing C++ on a C file would be wrong.
         lang_args = ["--language=c++"]
     args = [
@@ -991,16 +975,13 @@ def run_cppcheck(target: str) -> dict[str, Any]:
 
 
 def run_shellcheck(target: str) -> dict[str, Any]:
-    """Shell scripts, by shellcheck. #57.
+    """Shell scripts, by shellcheck.
 
     Exit codes are READ, not discarded: 0 clean, 1 findings, 2 or more means it
     could not run (a bad argument, an unreadable file), and that must not read
-    as a pass (#29, and the ruff returncode fix). Levels map like cppcheck's:
-    error and warning block; info and style are reported as warnings.
-
-    Measured before this became a gate, as #57 asked: 261 shell files across
-    18 fleet repos, 118 clean; error 5, warning 106, style 141, info 477.
-    tools/lab/shellcheck-sweep.py re-measures it.
+    as a pass. Levels map like cppcheck's: error and warning block; info and
+    style are reported as warnings. tools/lab/shellcheck-sweep.py measures what
+    the arm finds across a set of repos.
     """
     if not shutil.which("shellcheck"):
         return _tool_missing("shellcheck (apt install shellcheck)")
@@ -1031,17 +1012,9 @@ def run_shellcheck(target: str) -> dict[str, Any]:
 # A coverage exemption is a CLAIM: that the function is a thin wrapper with
 # nothing in it worth testing. Nothing rechecks that claim, so it goes stale
 # silently as the function grows, and the exempt region becomes the region
-# nobody looks at.
-#
-# Measured on spool-audit.py, 2026-08-13: `# pragma: no cover` covered 430 lines
-# of 1350, 32% of the file, holding 51 branch, loop and try statements. A thin
-# wrapper has none. Every serious defect on that branch came from inside that
-# region, and ruff and mypy together caught 0 of 112 findings. This check exists
-# because the gate had no opinion about the one region that mattered.
-#
-# Worse, nothing in this repo measures coverage at all, so these pragmas never
-# suppressed a measurement. They only ever told a reader not to look. See
-# docs/coverage.md.
+# nobody looks at. A thin wrapper has no branches; an exempt region full of
+# branches, loops and try blocks is untested decision-making, which ruff and
+# mypy do not see. See docs/coverage.md.
 #
 # The rule is not "no exemptions". It is that an exemption must SAY WHY, so the
 # claim is visible and can be disagreed with:
@@ -1061,19 +1034,16 @@ def coverage_exemptions(path: Path) -> list[dict[str, Any]]:
 
     The inventory, not the violations. Both the `no-cover` check and
     list-exemptions.py read this, so there is ONE implementation of "what
-    counts as an exemption" rather than two that must agree, which is this
-    repo's most repeated defect.
+    counts as an exemption" rather than two that must agree.
 
-    Reporting only violations is not enough on its own. On 2026-08-13 the check
-    reported "0 unjustified" on a file whose inventory immediately showed two
-    reasons that were three words long and justified nothing.
+    Reporting only violations is not enough on its own: a check can report
+    "0 unjustified" over reasons three words long that justify nothing, and
+    only the inventory shows them to a reader.
 
-    EVERY pragma line is scanned, not just function signatures. The first
-    version walked FunctionDef only, so a pragma on a class, on a bare
-    statement, or at module level was invisible to the gate AND to the
-    inventory, which then printed "No coverage exemptions" as though it had
-    looked. A checker that silently cannot see a construct is the same failure
-    it was written to catch.
+    EVERY pragma line is scanned, not just function signatures, so a pragma on
+    a class, on a bare statement or at module level is seen by the gate and
+    the inventory alike. A checker that silently cannot see a construct would
+    print "No coverage exemptions" as though it had looked.
     """
     try:
         src = path.read_text(encoding="utf-8", errors="replace")
@@ -1083,11 +1053,9 @@ def coverage_exemptions(path: Path) -> list[dict[str, Any]]:
         # Not this check's job to report unparseable files; ruff already does,
         # and reporting it twice makes one problem look like two.
         return []
-    # Only a trailing comment on a LINE OF CODE is a directive. A line scan
-    # flagged this very function, because the comment block above documents the
-    # pragma and prose about a directive is not a directive. Tokenising also
-    # excludes docstrings for free, which matters in a repo that explains this
-    # marker in several files.
+    # Only a trailing comment on a LINE OF CODE is a directive: prose that
+    # documents the pragma, like the comment block above, is not one.
+    # Tokenising also excludes docstrings.
     code_rows: set[int] = set()
     comments: list[tuple[int, str]] = []
     try:
@@ -1210,12 +1178,8 @@ def run_no_cover(target: str) -> dict[str, Any]:
 
 # ── suppress-reason ───────────────────────────────────────────────────────────
 # A swallowed exception is a decision that a failure does not matter here, and
-# the decision is invisible unless the line says why. Joe, 2026-09-14: "the
-# damned good reasons need to be damned good reasons, not an easy escape
-# route." On 2026-09-15 another repo was found naming 109 scripts' processes
-# under `try/except ImportError: pass` and `contextlib.suppress(ImportError)`,
-# so a script that failed to name itself ran on quietly, and the fix that
-# followed added the same blanket to 30 more. Nothing refused any of it.
+# the decision is invisible unless the line says why. A reason has to be a real
+# reason, not an easy escape route.
 #
 # The rule is the no-cover rule's: not "no suppression", but that one must SAY
 # WHY, on the line, where a reader and this check can see it:
@@ -1231,8 +1195,7 @@ def run_no_cover(target: str) -> dict[str, Any]:
 # a decision the code shows and is not this check's business. The reason may
 # sit on the `except`/`with` line or on any line of the handler's own body.
 #
-# TWO THINGS THIS DOES NOT DO, both from #58 and jp-tools' review of the
-# first draft (2026-09-15):
+# TWO THINGS THIS DOES NOT DO:
 #   * A reason does NOT satisfy a BLIND catch. `except Exception`,
 #     `except BaseException`, a bare `except:` or `suppress(Exception)` that
 #     swallows silently is flagged whatever the comment says; the fix is to
@@ -1267,9 +1230,8 @@ def _names_blind(node: ast.expr | None) -> bool:
 
 def _is_literal(node: ast.expr) -> bool:
     """A value written out in full: a constant, `[]`, `{}`, `()`, `-1`, a
-    list of constants. jp-tools' review of the first draft: `return []` and
-    `return -1` are the commonest silent defaults and a Constant-only test
-    let every one of them through."""
+    list of constants. `return []` and `return -1` are the commonest silent
+    defaults, and a Constant-only test would let them through."""
     try:
         ast.literal_eval(node)
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
@@ -1360,10 +1322,8 @@ def _handler_entries(path: Path, node: ast.Try, reason_in: Any,
             "blind": blind,
             # S110 owns a blind except-pass; SIM105 owns a typed one on a
             # one-statement try. Both are ruff errors already -- UNLESS a noqa
-            # on that line has switched ruff off, which is how this deferral
-            # measured 0 errors on a blind swallow that is 2 without the
-            # comment (#58, 2026-09-16). A deferral to a tool that is not
-            # running is not a deferral.
+            # on that line has switched ruff off. A deferral to a tool that is
+            # not running is not a deferral.
             "ruffs": (pass_only and (blind or len(node.body) == 1)
                       and h.lineno not in (hushed or set())),
             "reason": reason_in(h.lineno, h.end_lineno or h.lineno),
@@ -1408,36 +1368,22 @@ def run_suppress_reason(target: str) -> dict[str, Any]:
     return {"tool": "suppress-reason", "status": _status(issues), "issues": issues}
 
 
-# ── noqa inventory (#58) ──────────────────────────────────────────────────────
-# A branchy `# pragma: no cover` has to say why, and `list-exemptions.py` lists
-# every one, so a coverage exemption is a claim someone can disagree with. A
-# `# noqa` had neither: it suppressed a finding with nothing required of it and
-# nothing listing it. Joe, 2026-09-14: "noqa===no-no without a damned good
-# reason", and "the damned good reasons need to be damned good reasons, not an
-# easy escape route."
+# ── noqa rules ────────────────────────────────────────────────────────────────
+# A branchy `# pragma: no cover` has to say why, so a coverage exemption is a
+# claim someone can disagree with. A `# noqa` is held to the same bar: no
+# suppression without a real reason.
 #
-# WHY THIS IS THE LOAD-BEARING HALF rather than a report nicety. Measured on
-# the suppress-reason branch this sits on, 2026-09-16: a blind
-# `except Exception: pass` is 2 errors, ruff's S110 and BLE001, and one
-# `# noqa: BLE001,S110` takes it to 0 from all five tools. suppress-reason is
-# among the five, because it defers that exact shape to ruff on the grounds
-# that ruff owns it, and a noqa is how you stop ruff owning it. So whatever
-# rule lands, a noqa turns it off until the noqa itself is visible.
+# WHY THIS IS LOAD-BEARING: a blind `except Exception: pass` is two ruff errors
+# (S110 and BLE001), and one `# noqa: BLE001,S110` takes it to zero from every
+# tool, suppress-reason included, because suppress-reason defers that shape to
+# ruff. So whatever rule exists, a noqa turns it off unless the noqa itself is
+# checked.
 #
-# THIS REFUSES AND DOES NOT LIST. #58 asked for an inventory beside
-# `list-exemptions.py`, and the first version of this check also emitted every
-# marker as a warning, the way `_count_eslint_suppressions` does for the JS
-# side. Joe's call, 2026-09-16, on the measurement rather than on the idea:
-# listing costs 157 warning lines on another repo, 123 of them structural E402
-# on imports after a run-time `sys.path` insert that will never change, and it
-# fails nothing. The argument for keeping it was that reasons rot unread -- but
-# `noqa-no-reason` already forces a reason at the moment it is written, and a
-# warning scrolling past 157 times is not anybody checking it. Diligence that
-# only looks like diligence is worth less than the noise it costs.
-#
-# So the rules below are the whole of it. The JS side keeps its warnings,
-# because nobody has complained about those and consistency is not a reason to
-# change working behaviour.
+# THIS REFUSES AND DOES NOT LIST. A warning per marker would scroll past by the
+# hundred on a large repo (structural E402s on imports after a `sys.path`
+# insert, for one) and fail nothing. `noqa-no-reason` forces the reason at the
+# moment the marker is written, which is when someone reads it. The JS side
+# keeps its per-suppression warnings.
 #
 # THREE THINGS FAIL, and they are deliberately not one rule:
 #   * A marker with no reason. For a structural suppression the sentence IS the
@@ -1447,23 +1393,16 @@ def run_suppress_reason(target: str) -> dict[str, Any]:
 #   * A BLANKET `# noqa` carrying no codes. It suppresses every rule on the
 #     line, including ones nobody has written yet, and it cannot be inventoried
 #     by code because it names none.
-#   * `BLE001` and `S110`, under any reason at all. #58's ruling, and
-#     another repo' argument for it: a reason on the line does not make a
-#     blind catch less blind, and the same handler still swallows a `NameError`
-#     as an empty result. Ruff treats `logging.exception`, `exc_info=True` and
+#   * `BLE001` and `S110`, under any reason at all. A reason on the line does
+#     not make a blind catch less blind, and the same handler still swallows a
+#     `NameError` as an empty result. Ruff treats `logging.exception`, `exc_info=True` and
 #     `raise` as not-blind, so the stronger evidence is available and a
 #     sentence is not accepted in its place.
 #
-# `# type: ignore` IS PARSED AND NEVER FAILS. #58 leaves whether it belongs
-# here an open question, and with the listing dropped there is nothing for it
-# to belong TO, so this answers nothing about it on purpose. It is read only
-# because the same scan reads both, and reading one shape and not the other
-# would cost a second parser.
+# `# type: ignore` IS PARSED AND NEVER FAILS. Whether it should be held to the
+# same rules is undecided; it is read only because the same scan reads both.
 # IGNORECASE because ruff's directive is case-insensitive: `# NOQA: BLE001,S110`
-# suppresses exactly as `# noqa` does. Matched case-sensitively, this rule read
-# 0 on a blind swallow that it is built to refuse, which is the measurement in
-# the comment above reproduced by holding shift. Found by jp-tools reviewing
-# this PR.
+# suppresses exactly as `# noqa` does, so a case-sensitive match would miss it.
 _NOQA_RE = re.compile(
     r"#\s*noqa\b(?::\s*(?P<codes>[A-Za-z]+[0-9]+(?:\s*,\s*[A-Za-z]+[0-9]+)*))?(?P<rest>.*)$",
     re.IGNORECASE)
@@ -1471,8 +1410,8 @@ _TYPE_IGNORE_RE = re.compile(
     r"#\s*type:\s*ignore(?:\[(?P<codes>[^\]]*)\])?(?P<rest>.*)$")
 # Prose after `--` (the eslint convention this file already reads) or after
 # `reason:` (the no-cover and suppress-reason convention). Both are accepted
-# because both are already in use across the fleet, and inventing a third
-# spelling would make every existing marker a finding on the day this lands.
+# because both are in use, and a third spelling would make every existing
+# marker a finding.
 _NOQA_REASON_RE = re.compile(r"(?:--|reason:)\s*(?P<why>\S.*)$")
 _NOT_EXPLAINABLE = {"BLE001", "S110"}
 # The codes silent_catches stands aside for, on the grounds that ruff reports
@@ -1484,8 +1423,7 @@ def _marker_from_comment(tok: tokenize.TokenInfo) -> dict[str, Any] | None:
     """One comment token to a marker, or None when it is not one.
 
     Split out from noqa_markers so that function stays under the complexity
-    smell -- which this file's own `smells` check caught on the first run of
-    this code, at 13 against a bar of 11.
+    smell.
     """
     if not tok.line[:tok.start[1]].strip():
         return None                       # a standalone comment: prose, not a directive
@@ -1520,30 +1458,20 @@ def noqa_markers(path: Path) -> list[dict[str, Any]]:
     which is what stops suppress-reason deferring to a silenced ruff.
 
     READ FROM COMMENT TOKENS, NEVER FROM RAW LINES, AND ONLY TRAILING ONES.
-    Both halves were measured rather than reasoned, and the second half was
-    found by this check firing on the paragraph above it.
+    A line scan matches the marker inside a string literal, and tests carry
+    those as fixtures. Tokenizing is not enough on its own, because prose
+    about a marker is also a comment: the block above this function mentions
+    `# noqa` to explain it.
 
-    A line scan matches the marker inside a string literal, and this repo's
-    tests carry those by the dozen as fixtures: over this tree, 20 markers by
-    line scan against 9 real ones.
+    So only a marker TRAILING code counts. That is a scoping choice, not a
+    claim about ruff: a standalone marker cannot suppress anything for the
+    code around it, and requiring a reason on one would refuse every sentence
+    written about the subject.
 
-    Tokenizing is not enough on its own, because PROSE ABOUT A MARKER IS ALSO A
-    COMMENT. The block above this function mentions `# noqa` four times to
-    explain it, and the first run of this check reported three errors against
-    its own documentation.
-
-    So only a marker TRAILING code counts, and that is a SCOPING CHOICE rather
-    than a claim about ruff. The first draft of this paragraph said ruff
-    ignores a standalone marker; jp-tools measured otherwise reviewing #109,
-    with ERA001 as the control. What a standalone marker cannot do is suppress
-    anything for the code around it, so requiring a reason on one would refuse
-    every sentence anyone writes about the subject.
-
-    NOT COVERED, said rather than left to be discovered: the file-level forms,
-    `# ruff: noqa`, `# flake8: noqa` and `# ruff: noqa: CODES`. Each disables a
-    whole file, none matches this trailing shape, and jp-tools measured all
-    three taking a swallow to "All checks passed!" on this head. They are the
-    largest blanket there is and they want a rule of their own.
+    NOT COVERED: the file-level forms, `# ruff: noqa`, `# flake8: noqa` and
+    `# ruff: noqa: CODES`. Each disables a whole file and none matches this
+    trailing shape. They are the largest blanket there is and want a rule of
+    their own.
     """
     try:
         src = path.read_text(encoding="utf-8", errors="replace")
@@ -1569,15 +1497,12 @@ def noqa_markers(path: Path) -> list[dict[str, Any]]:
 
 def _noqa_issues(path: Path) -> list[dict[str, Any]]:
     # WHICH LINES ACTUALLY SWALLOW, so `noqa-not-explainable` fires on a hidden
-    # swallow and not on every blind catch. #58's argument is that the evidence
-    # for a broad catch is THE EXCEPTION RECORDED rather than a sentence -- so a
-    # handler that records it has already met that bar, whatever ruff's BLE001
-    # thinks of its breadth. Measured against another repo, 2026-09-16: the
-    # literal reading ("no BLE001 noqa, ever") fires on 17 sites, every one of
-    # them a test harness whose handler returns `f"{type(e).__name__}: {e}"` as
-    # the failure it reports. Refusing those buys nothing and spends the gate's
-    # credibility, which METHODOLOGY 9.1 says is how --no-verify becomes a
-    # habit. With this, the same tree is 0 and the motivating case still fires.
+    # swallow and not on every blind catch. The evidence for a broad catch is
+    # THE EXCEPTION RECORDED rather than a sentence, so a handler that records
+    # it (a test harness returning `f"{type(e).__name__}: {e}"` as its failure,
+    # say) has met that bar, whatever ruff's BLE001 thinks of its breadth.
+    # Refusing those buys nothing and spends the gate's credibility, which
+    # METHODOLOGY 9.1 says is how --no-verify becomes a habit.
     silent = {e["line"] for e in silent_catches(path)}
     issues: list[dict[str, Any]] = []
     for m in noqa_markers(path):
@@ -1624,11 +1549,9 @@ def run_noqa(target: str) -> dict[str, Any]:
     return {"tool": "noqa", "status": status, "issues": issues}
 
 
-# ── smells (#55) ──────────────────────────────────────────────────────────────
-# Joe, 2026-09-14: "a 1000 line file is a stink... a 100 line fucntion is a
-# stink... compexity of a function is a stink... complexity of a file is a
-# stink", then "fail on new warn on existing" and "the base 0 fro... well...
-# thats new": the base is TODAY. A smell that was not there before this change
+# ── smells ────────────────────────────────────────────────────────────────────
+# Four smells: a long file, a long function, a complex function, a complex
+# file. The base is today: a smell that was not there before this change
 # FAILS; one that was there already WARNS. "Before" is the file at the smells
 # base: HEAD by default, which is the last commit when the pre-commit hook runs;
 # CI on a pull request passes the PR's base with --smells-base.
@@ -1684,7 +1607,7 @@ def _smell_measure(src: str) -> tuple[int, dict[str, tuple[int, int, int]]]:
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     # A hook exports GIT_DIR and GIT_INDEX_FILE relative to the committing
-    # repo, which points at the wrong place for a `git -C` elsewhere (#54).
+    # repo, which points at the wrong place for a `git -C` elsewhere.
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
         return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True,
@@ -1737,8 +1660,8 @@ def _renamed_from(root: Path, base: str, rel: str) -> str | None:
 
 def _function_elsewhere(root: Path, base: str, name: str) -> tuple[int, int, int]:
     """A function's size and complexity at the base in ANY file, for one that
-    moved: splitting a smelly file moves its smells, it does not add them
-    (a reviewer, reviewing #82). The largest measure found wins."""
+    moved: splitting a smelly file moves its smells, it does not add them.
+    The largest measure found wins."""
     leaf = name.rsplit(".", 1)[-1]
     hits = _git(["grep", "-l", "-E", f"def {leaf}\\(", base, "--", "*.py"], root).stdout
     best = (0, 0, 0)
@@ -1858,7 +1781,7 @@ def run_smells(target: str) -> dict[str, Any]:
                         "cannot be told from an existing one"}
     except _NoGitError:
         # Without git there is no history, so new cannot be told from
-        # existing: a check that did not run, never a pass (#59).
+        # existing: a check that did not run, never a pass.
         return _tool_missing("git (the smells arm reads history to tell new from existing)")
     status = "fail" if any(i["severity"] == "error" for i in issues) else "pass"
     return {"tool": "smells", "status": status, "issues": issues}
@@ -1922,11 +1845,10 @@ def _run_tools(tool_names: list[str], target: str) -> list[dict[str, Any]]:
 # A LAB FILE IS HELD TO ITS HEADER, NOT TO ZERO. METHODOLOGY 2.9: a tools/lab
 # instrument has no bar at entry ("dusty is fine, lost is not"); what it owes
 # is a header saying what it answers, what it was tested against, and what it
-# was NOT tested against. The gate held lab files to zero anyway, so editing
-# one with an old finding blocked the commit. #68. The rule is another repo's
-# ratchet's (Joe: "shape 2 it is"), with one hole closed: "TESTED AGAINST" is a
-# substring of "NOT TESTED AGAINST", so a plain `in` test accepted a header
-# missing the tested-against field. Exempt findings are still listed.
+# was NOT tested against. Holding lab files to zero would block any edit to one
+# with an old finding. "TESTED AGAINST" is a substring of "NOT TESTED AGAINST",
+# so a plain `in` test would accept a header missing the tested-against field;
+# hence the lookbehind. Exempt findings are still listed.
 _LAB_DIR = "lab"
 _LAB_TESTED = re.compile(r"(?<!NOT )TESTED AGAINST")
 _LAB_EXEMPT_REASON = "lab file under its METHODOLOGY 2.9 header"
@@ -1963,7 +1885,7 @@ def lab_claim(p: Path) -> bool:
 
 
 def _mark_lab_exempt(checks: list[dict[str, Any]]) -> None:
-    """Tag each issue in a lab file under its header as exempt. #68."""
+    """Tag each issue in a lab file under its header as exempt."""
     claims: dict[str, bool] = {}
     for c in checks:
         issues = c.get("issues", [])
@@ -1987,7 +1909,7 @@ def _summarize(checks: list[dict[str, Any]]) -> dict[str, Any]:
         "errors":   errors,
         "warnings": warnings,
         # Listed in "total" and in the issues, never counted as errors: a lab
-        # file under its 2.9 header (#68).
+        # file under its 2.9 header.
         "exempt":   len(all_issues) - len(counted),
         # Split deliberately: "fixable" is what `fix.py` applies now, and
         # "fixable_unsafe" is what `fix.py --unsafe` would additionally attempt.
@@ -2000,18 +1922,13 @@ def _summarize(checks: list[dict[str, Any]]) -> dict[str, Any]:
 # ── baseline ──────────────────────────────────────────────────────────────────
 #
 # A baseline is a stored per-file, per-tool count the gate compares against
-# instead of comparing against zero. Three things about it are load-bearing, and
-# all three were measured on a consuming repo on 2026-08-15 rather than reasoned:
+# instead of comparing against zero. Three things about it are load-bearing:
 #
-# MODE. A baseline must be measured the way the gate measures. That repo's was
-# recorded with a whole-repo run while the hook checks staged files one at a
-# time, and the two disagreed by +398 errors across seven files nobody had
-# touched since a week before. Only the tools that resolve ACROSS files moved --
-# mypy and phpstan -- while ruff, phpcs and rector were byte-identical on every
-# file. That partition is the signature of scope, not of drift, and it is why
-# the mode is recorded here and a mismatch is REFUSED rather than compared.
-# METHODOLOGY step 2 mandated the mismatch until this landed: it said to commit
-# "the output of a full run", which reads as whole-repo to most people.
+# MODE. A baseline must be measured the way the gate measures. A whole-repo run
+# and the hook's per-file runs disagree on the tools that resolve ACROSS files
+# (mypy, phpstan) while ruff, phpcs and rector agree exactly, and the
+# difference looks like drift in files nobody touched. So the mode is recorded
+# here and a mismatch is REFUSED rather than compared (METHODOLOGY step 2).
 #
 # TOOLS THAT DID NOT RUN. An unavailable tool reports zero issues. That reads as
 # an improvement, lets a real regression through, and then bakes a false zero
@@ -2073,7 +1990,7 @@ def _repo_root(target: str) -> Path:
     # Through _git, which drops the hook's GIT_* variables. In a linked
     # worktree a hook runs with GIT_DIR set and no GIT_WORK_TREE, and git then
     # answers the current directory as the top, so a file in a subdirectory
-    # would be keyed by its bare name and miss its baseline entry (#54).
+    # would be keyed by its bare name and miss its baseline entry.
     try:
         r = _git(["rev-parse", "--show-toplevel"], start)
     except _NoGitError:
@@ -2141,9 +2058,8 @@ def _dropped_entries(dest: str, files: dict[str, Any]) -> tuple[list[str], int, 
     exist drops nothing -- there is no prior measurement to lose.
 
     A destination that exists and CANNOT BE PARSED is a third state and is
-    reported as such, not folded into the first. Raised by a consuming repo
-    re-reviewing this guard, and it is the same overloaded empty the guard
-    exists to fix: a file that fails to parse did hold a measurement -- a
+    reported as such, not folded into the first, because treating it as
+    absent is the same overloaded empty the guard exists to fix: a file that fails to parse did hold a measurement -- a
     truncated write, conflict markers, a half-synced copy over a real baseline
     -- and its contents are precisely what nobody can recover. Treating it as
     absent destroys the one case where the prior numbers are unknown, which is
@@ -2287,7 +2203,7 @@ def compare_baseline(checks: list[dict[str, Any]], target: str,
     # A run measures only what it was pointed at. A baselined file outside that
     # was not looked at, so it is counted on one line rather than compared:
     # read as zero it would print as a gain that never happened, once per file,
-    # and the hook checks one staged file per run (#36). A measured file that
+    # and the hook checks one staged file per run. A measured file that
     # went clean has no findings in `now`, so the target itself is added.
     rel_target = _rel(target, root)
     if Path(target).is_dir():
@@ -2369,7 +2285,7 @@ def main() -> None:
                              "only when that loss is intended, such as after "
                              "deleting files.")
     parser.add_argument("--smells-base", metavar="REF", default="HEAD",
-                        help="What a smell is NEW against (#55): over its threshold "
+                        help="What a smell is NEW against: over its threshold "
                              "now and not at REF fails; already over at REF warns. "
                              "Default HEAD, the last commit, which is what the "
                              "pre-commit hook wants. CI on a pull request passes "
@@ -2384,7 +2300,7 @@ def main() -> None:
 
     is_dir = Path(target).is_dir()
 
-    # Read before any measuring, so a bad entry refuses every mode alike (#90).
+    # Read before any measuring, so a bad entry refuses every mode alike.
     root = _repo_root(target)
     try:
         ignores = load_ignores(root)
@@ -2426,7 +2342,7 @@ def main() -> None:
 
         checks = _run_tools(tool_names, target)
         # A directory named with --tools or --lang is handed to each tool whole,
-        # so ignored files are found there too: drop their findings (#90).
+        # so ignored files are found there too: drop their findings.
         if is_dir:
             for c in checks:
                 _drop_ignored_issues(c, root, ignores)
@@ -2477,7 +2393,7 @@ def main() -> None:
                 _drop_ignored_issues(result, root, ignores)
                 # ...by SUFFIX, so a script found by its shebang is not in it.
                 # Name each one to the tool and fold it into the same result,
-                # a not-run status included, so it cannot drop out. #57.
+                # a not-run status included, so it cannot drop out.
                 for fp in (f for f in files if not Path(f).suffix):
                     extra = runner(fp)
                     result["issues"] = result.get("issues", []) + extra.get("issues", [])
@@ -2490,9 +2406,8 @@ def main() -> None:
             else:
                 # Run per-file, merge issues into one result per tool.
                 # A runner that could not run on a file did not run for this
-                # language. The merge used to keep only "fail" and fold every
-                # other status into "pass", so eslint with no node on PATH
-                # read as a clean pass -- #29 one level down.
+                # language. Keeping only "fail" and folding every other status
+                # into "pass" would read eslint with no node on PATH as clean.
                 merged_issues: list[dict[str, Any]] = []
                 statuses: set[str] = set()
                 note = ""
@@ -2530,7 +2445,7 @@ def main() -> None:
         # rather than an absence the reader has to infer.
         "skipped":    [{"extension": e, "file_count": n}
                        for e, n in sorted(skipped.items(), key=lambda kv: -kv[1])],
-        # Every file .jp-tools-ignore left out, with the entry that did it (#90).
+        # Every file .jp-tools-ignore left out, with the entry that did it.
         "ignored":    ignored,
         "checks":     all_checks,
         "summary":    summary,
