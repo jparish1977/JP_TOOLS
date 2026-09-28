@@ -217,7 +217,7 @@ original image. PPM to PNG conversion is stdlib-only: no Pillow, no ImageMagick.
 | Script | Purpose |
 |---|---|
 | `chd.py` | CHD archive management: create, verify, extract, import, delta, merge, batch |
-| `chd-hunkmap.py` | CHD hunk map analysis — block-level dedup intelligence |
+| `chd-hunkmap.py` | CHD v5 hunk map: how each hunk is stored, duplicates, and the tar members they belong to |
 
 ### Deployment
 

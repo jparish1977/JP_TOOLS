@@ -11,12 +11,15 @@ Needs chdman on PATH (Debian/Ubuntu: mame-tools). Without it this prints
 SKIP and runs nothing.
 """
 
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 from _harness import check, check_true, run
 from chd_support import cli
+from chdmap.header import read_header
+from chdmap.hunkmap import Kind, read_map
 from chdtool.tools import find_tool
 
 SECTOR = 2048
@@ -55,6 +58,40 @@ def test_delta_then_merge_round_trip() -> None:
         check("extract", cli("extract", str(w / "m.chd"), str(w / "m.img"))[0], 0)
         check_true("merged bytes", (w / "m.img").read_bytes() == bytes(changed))
         check("parent and child differ", cli("compare", str(w / "a.chd"), str(w / "m.chd"))[0], 1)
+
+
+def _chdman_table(chd: Path) -> dict[str, int]:
+    """chdman info's hunk table: {type name: hunks}."""
+    out = subprocess.run(["chdman", "info", "--verbose", "--input", str(chd)],
+                         capture_output=True, text=True, check=True).stdout
+    table = out.split("-----\n", 1)[-1] if "-----" in out else ""
+    rows = (line.split(None, 2) for line in table.splitlines() if line.strip())
+    return {r[2].strip(): int(r[0].replace(",", "")) for r in rows if len(r) == 3}
+
+
+def _decoded(chd: Path) -> tuple[int, int]:
+    """(self references, parent references) as chdmap decodes them."""
+    with chd.open("rb") as f:
+        hunks = read_map(f, read_header(f))
+    return (sum(h.kind is Kind.SELF for h in hunks), sum(h.kind is Kind.PARENT for h in hunks))
+
+
+def test_hunkmap_agrees_with_chdman() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        w = Path(tmp)
+        blocks = [_image(w / f"b{k}", 2, k + 11) for k in range(4)]
+        (w / "d.img").write_bytes(b"".join(blocks[i] for i in (0, 1, 0, 0, 2, 1, 3, 3, 0)))
+        cli("create", str(w / "d.img"), str(w / "d.chd"))
+        changed = bytearray((w / "d.img").read_bytes())
+        changed[:7] = b"changed"
+        (w / "e.img").write_bytes(changed)
+        cli("delta", str(w / "d.chd"), str(w / "e.img"), str(w / "e.chd"))
+        for name in ("d.chd", "e.chd"):
+            table = _chdman_table(w / name)
+            check(f"{name} self and parent",
+                  _decoded(w / name),
+                  (table.get("Copy from self", 0), table.get("Copy from parent", 0)))
+        check_true("the image did have duplicates", _decoded(w / "d.chd")[0] > 0)
 
 
 def test_cd_extracts_to_a_cue_sheet() -> None:
