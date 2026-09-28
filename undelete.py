@@ -1,12 +1,15 @@
-#!/usr/bin/env python
-"""
-JP_TOOLS/undelete.py
-Recover deleted files from NTFS or ext3/ext4 filesystems.
+#!/usr/bin/env python3
+"""Recover deleted files from NTFS or ext3/ext4 filesystems.
 
-Unlike photorec (which carves raw data by signature), this tool uses
-filesystem metadata to find recently deleted files with their original
-names and directory structure intact. Works best on recently deleted files
-before the space has been overwritten.
+Unlike photorec (which carves raw data by signature), this uses filesystem
+metadata to find recently deleted files with their original names and
+directory structure. Works best on recently deleted files, before the space
+has been overwritten.
+
+NTFS uses ntfsundelete (ntfs-3g): listing and recovery both honour --match,
+a glob such as "*.js". ext3/ext4 lists with fls (sleuthkit), filtered by
+--match, and recovers with extundelete, which restores everything and takes
+no pattern: --match with an ext recovery is refused rather than ignored.
 
 Usage:
     python undelete.py <device-or-image> <output-dir> [--type ntfs|ext] [--list-only] [--match <pattern>]
@@ -16,191 +19,117 @@ Examples:
     python undelete.py /dev/sdb1 ./recovered --type ntfs --match "*.js"
     python undelete.py disk.img ./recovered --type ext
     python undelete.py /dev/sdb1 ./recovered --list-only
+
+Exit status: the recovery tool's, 1 when the filesystem cannot be detected
+or the arguments cannot be honoured, 2 when a required tool is missing.
 """
 
-import sys
-import shutil
-import subprocess
 import argparse
+import fnmatch
+import subprocess
+import sys
+import time
 from pathlib import Path
-from datetime import datetime
+
+from platformtools.tools import ToolMissingError, find_tool
+from platformtools.windows import wsl_path
+
+LISTED = 100
+
+HINTS = {
+    "ntfsundelete": "install ntfs-3g",
+    "fls": "install sleuthkit",
+    "extundelete": "install extundelete",
+    "blkid": "install util-linux",
+}
 
 
-def find_tool(name):
-    """Find a tool, checking local installs, PATH, then WSL."""
-    # Check native Windows tool locations
-    if sys.platform == 'win32':
-        win_paths = [
-            Path.home() / "tools" / "sleuthkit" / "sleuthkit-4.14.0-win32" / "bin" / f"{name}.exe",
-            Path.home() / "tools" / "sleuthkit" / "bin" / f"{name}.exe",
-        ]
-        for p in win_paths:
-            if p.exists():
-                return [str(p)]
-
-    # Check PATH
-    path = shutil.which(name)
-    if path:
-        return [path]
-
-    # Try WSL only on Windows
-    if sys.platform == 'win32':
-        try:
-            result = subprocess.run(
-                ["wsl", "which", name],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return ["wsl", result.stdout.strip()]
-        except FileNotFoundError:
-            # reason: no wsl on this box; the search moves to the next candidate, and None is the answer
-            pass
-
-    return None
+def _windows_sleuthkit(name: str) -> tuple[Path, ...]:
+    """Where the sleuthkit Windows download usually lands; it puts nothing on PATH."""
+    root = Path.home() / "tools" / "sleuthkit"
+    return (root / "sleuthkit-4.14.0-win32" / "bin" / f"{name}.exe", root / "bin" / f"{name}.exe")
 
 
-def win_to_wsl_path(win_path):
-    p = str(win_path)
-    if len(p) >= 2 and p[1] == ":":
-        return f"/mnt/{p[0].lower()}/{p[2:].replace(chr(92), '/')}"
-    return p.replace("\\", "/")
+def tool(name: str) -> list[str]:
+    """NAME's argv prefix, under sudo inside WSL. Raises ToolMissingError."""
+    prefix = find_tool(name, _windows_sleuthkit(name))
+    if prefix is None:
+        raise ToolMissingError(name, HINTS.get(name, f"install {name}"))
+    return ["wsl", "sudo", *prefix[1:]] if prefix[0] == "wsl" else prefix
 
 
-def detect_fs_type(source):
-    """Try to detect filesystem type."""
-    cmd = find_tool("blkid")
-    if not cmd:
+def _path_for(prefix: list[str], path: Path) -> str:
+    return wsl_path(path) if prefix[0] == "wsl" else str(path)
+
+
+def detect_fs_type(source: str) -> str | None:
+    """"ntfs" or "ext" from blkid, or None when blkid is missing or says neither."""
+    try:
+        prefix = tool("blkid")
+    except ToolMissingError:
+        # reason: None is "could not detect", which main() reports and asks for --type
         return None
-
-    if cmd[0] == "wsl":
-        cmd = ["wsl", "sudo", "blkid", source]
-    else:
-        cmd = cmd + [source]
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    output = result.stdout.lower()
-
+    output = subprocess.run([*prefix, source], capture_output=True, text=True, check=False).stdout.lower()
     if "ntfs" in output:
         return "ntfs"
-    elif "ext4" in output or "ext3" in output:
-        return "ext"
-    return None
+    return "ext" if "ext4" in output or "ext3" in output else None
 
 
-def list_deleted_ntfs(source, match=None):
-    """List deleted files on NTFS using ntfsundelete."""
-    tool = find_tool("ntfsundelete")
-    if not tool:
-        print("Error: ntfsundelete not found. Install ntfs-3g.")
-        sys.exit(2)
+def ntfs_command(source: str, output: Path | None, match: str | None) -> list[str]:
+    """ntfsundelete: a scan (OUTPUT None) or a recovery into OUTPUT."""
+    prefix = tool("ntfsundelete")
+    if output is None:
+        return [*prefix, source, "--scan", *(["--match", match] if match else [])]
+    return [*prefix, source, "--undelete", "--destination", _path_for(prefix, output),
+            "--match", match or "*"]
 
-    cmd = tool[:]
-    if tool[0] == "wsl":
-        cmd = ["wsl", "sudo", "ntfsundelete", source, "--scan"]
-    else:
-        cmd = tool + [source, "--scan"]
 
+def ext_recover_command(source: str, output: Path) -> list[str]:
+    prefix = tool("extundelete")
+    return [*prefix, source, "--restore-all", "--output-dir", _path_for(prefix, output)]
+
+
+def list_ext(source: str, match: str | None) -> int:
+    """Deleted entries on ext3/ext4 from fls, filtered by MATCH; the first 100 printed."""
+    result = subprocess.run([*tool("fls"), "-r", "-d", source], capture_output=True, text=True, check=False)
+    lines = result.stdout.strip().splitlines()
     if match:
-        cmd.extend(["--match", match])
-
-    print(f"Scanning for deleted files on {source}...")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    print(result.stdout)
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
-    return result.returncode
-
-
-def recover_ntfs(source, output_dir, match=None):
-    """Recover deleted files from NTFS using ntfsundelete."""
-    tool = find_tool("ntfsundelete")
-    if not tool:
-        print("Error: ntfsundelete not found. Install ntfs-3g.")
-        sys.exit(2)
-
-    output_path = Path(output_dir).resolve()
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    if tool[0] == "wsl":
-        wsl_output = win_to_wsl_path(output_path)
-        cmd = ["wsl", "sudo", "ntfsundelete", source,
-               "--undelete", "--destination", wsl_output]
-    else:
-        cmd = tool + [source, "--undelete",
-                      "--destination", str(output_path)]
-
-    if match:
-        cmd.extend(["--match", match])
-    else:
-        cmd.extend(["--match", "*"])
-
-    print(f"Recovering deleted files from {source}...")
-    print(f"Output: {output_path}")
-    print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd)
-    return result.returncode
-
-
-def list_deleted_ext(source, match=None):
-    """List deleted files on ext3/ext4 using sleuthkit fls."""
-    tool = find_tool("fls")
-    if not tool:
-        print("Error: fls not found. Install sleuthkit.")
-        sys.exit(2)
-
-    if tool[0] == "wsl":
-        cmd = ["wsl", "sudo", "fls", "-r", "-d", source]
-    else:
-        cmd = tool + ["-r", "-d", source]
-
-    print(f"Scanning for deleted files on {source}...")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
-
-    if match:
-        import fnmatch
-        lines = [entry for entry in lines if fnmatch.fnmatch(entry.lower(), f"*{match.lower()}*")]
-
-    for line in lines[:100]:
+        lines = [e for e in lines if fnmatch.fnmatch(e.lower(), f"*{match.lower()}*")]
+    for line in lines[:LISTED]:
         print(line)
-
-    if len(lines) > 100:
-        print(f"... and {len(lines) - 100} more")
-
+    if len(lines) > LISTED:
+        print(f"... and {len(lines) - LISTED} more")
     print(f"\nTotal deleted entries found: {len(lines)}")
     return result.returncode
 
 
-def recover_ext(source, output_dir, match=None):
-    """Recover deleted files from ext3/ext4 using extundelete."""
-    tool = find_tool("extundelete")
-    if not tool:
-        print("Error: extundelete not found. Install extundelete.")
-        sys.exit(2)
-
-    output_path = Path(output_dir).resolve()
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    if tool[0] == "wsl":
-        wsl_output = win_to_wsl_path(output_path)
-        cmd = ["wsl", "sudo", "extundelete", source,
-               "--restore-all", "--output-dir", wsl_output]
-    else:
-        cmd = tool + [source, "--restore-all",
-                      "--output-dir", str(output_path)]
-
-    print(f"Recovering deleted files from {source}...")
-    print(f"Output: {output_path}")
+def _run(cmd: list[str], capture: bool) -> int:
     print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, capture_output=capture, text=True, check=False)
+    if capture:
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
     return result.returncode
 
 
-def main():
+def undelete(args: argparse.Namespace, fs_type: str) -> int:
+    """List or recover, for FS_TYPE. Raises ToolMissingError."""
+    output = None if args.list_only else Path(args.output).resolve()
+    print(f"{'Scanning' if output is None else 'Recovering'} deleted files on {args.source}...")
+    if output is not None:
+        output.mkdir(parents=True, exist_ok=True)
+        print(f"Output: {output}")
+    if fs_type == "ntfs":
+        return _run(ntfs_command(args.source, output, args.match), capture=output is None)
+    if output is None:
+        return list_ext(args.source, args.match)
+    return _run(ext_recover_command(args.source, output), capture=False)
+
+
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Recover deleted files from NTFS or ext3/ext4 filesystems.",
-    )
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("source", help="Device or disk image to scan")
     parser.add_argument("output", nargs="?", help="Output directory for recovered files")
     parser.add_argument("--type", choices=["ntfs", "ext"],
@@ -208,38 +137,32 @@ def main():
     parser.add_argument("--list-only", action="store_true",
                         help="List deleted files without recovering them")
     parser.add_argument("--match", metavar="PATTERN",
-                        help="Filename pattern to match (e.g., '*.js', '*.psd')")
-    args = parser.parse_args()
+                        help="Filename pattern to match (e.g. '*.js', '*.psd')")
+    return parser
 
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _parser()
+    args = parser.parse_args(argv)
     if not args.list_only and not args.output:
         parser.error("output directory is required unless using --list-only")
-
-    # Detect filesystem type
-    fs_type = args.type
+    fs_type = args.type or detect_fs_type(args.source)
     if not fs_type:
-        fs_type = detect_fs_type(args.source)
-        if not fs_type:
-            print("Could not auto-detect filesystem type. Use --type ntfs or --type ext")
-            sys.exit(1)
-        print(f"Detected filesystem: {fs_type}")
-
-    start = datetime.now()
-
-    if args.list_only:
-        if fs_type == "ntfs":
-            rc = list_deleted_ntfs(args.source, args.match)
-        else:
-            rc = list_deleted_ext(args.source, args.match)
-    else:
-        if fs_type == "ntfs":
-            rc = recover_ntfs(args.source, args.output, args.match)
-        else:
-            rc = recover_ext(args.source, args.output, args.match)
-
-    elapsed = (datetime.now() - start).total_seconds()
-    print(f"\nElapsed: {round(elapsed, 1)}s")
-    sys.exit(rc)
+        print("Could not auto-detect filesystem type. Use --type ntfs or --type ext")
+        return 1
+    if fs_type == "ext" and args.match and not args.list_only:
+        print("Error: extundelete restores everything and takes no pattern; "
+              "use --list-only with --match to find files, or drop --match")
+        return 1
+    start = time.monotonic()
+    try:
+        rc = undelete(args, fs_type)
+    except ToolMissingError as exc:
+        print(f"Error: {exc.name} not found; {exc.hint}.")
+        return 2
+    print(f"\nElapsed: {time.monotonic() - start:.1f}s")
+    return rc
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
