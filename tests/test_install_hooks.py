@@ -347,10 +347,11 @@ def fake_jp_tools(at: Path, with_template: bool = True, git_repo: bool = True) -
 
 
 def shim_cases(tmp: Path) -> None:
-    """The shim's acceptance cases: a feature-branch tree found by the search, and a shim from an older interface, each print
-    BROKEN, with master as the control. Plus: an explicit JP_TOOLS_DIR runs on
-    any branch and says so; a tree with no template and a named tree that is
-    not there both refuse, never falling through to another candidate.
+    """The shim's acceptance cases: a feature-branch tree found by the search,
+    and a shim from an older interface, each print BROKEN, with master as the
+    control. Plus: an explicit JP_TOOLS_DIR runs on any branch and says so; a
+    tree with no template and a named tree that is not there both refuse,
+    never falling through to another candidate.
     """
     print("\nThe shim:")
     home = tmp / "home"
@@ -359,14 +360,31 @@ def shim_cases(tmp: Path) -> None:
     env["HOME"] = str(home)
     repo, _ = build_repo(tmp)
     hook = repo / ".git" / "hooks" / "pre-commit"
+    text = hook.read_text(encoding="utf-8")
     check("the installed hook is the shim, not a copy of the template",
-          "exec sh" in hook.read_text(encoding="utf-8")
-          and "--skip-unsupported" not in hook.read_text(encoding="utf-8"))
-
-    r = commit_with_env(repo, "c1.py", CLEAN_PY, env)
+          "exec sh" in text and "--skip-unsupported" not in text)
+    _shim_search(tmp, tree, env, repo)
+    _shim_refusals(tmp, env, repo)
+    git(tree, "checkout", "-q", "master")
+    hook.write_text(hook.read_text(encoding="utf-8").replace(
+        "JP_TOOLS_HOOK_API=1", "JP_TOOLS_HOOK_API=0"), encoding="utf-8")
+    r = commit_with_env(repo, "c6.py", CLEAN_PY, env)
     out = r.stdout + r.stderr
+    check("a shim from an older interface is refused against a newer template",
+          r.returncode != 0 and "BROKEN" in out and "interface" in out, out)
+
+
+def _ran(r: subprocess.CompletedProcess[str]) -> bool:
+    """The commit went through the checks and succeeded."""
+    out = r.stdout + r.stderr
+    return r.returncode == 0 and "staged file(s) checked" in out and "BROKEN" not in out
+
+
+def _shim_search(tmp: Path, tree: Path, env: dict[str, str], repo: Path) -> None:
+    """The tree found by the search: used at master, refused on a feature branch."""
+    r = commit_with_env(repo, "c1.py", CLEAN_PY, env)
     check("CONTROL: a tree found by the search, at its origin/master, runs the checks",
-          r.returncode == 0 and "staged file(s) checked" in out, out)
+          _ran(r), r.stdout + r.stderr)
 
     # In a linked worktree git runs the hook with GIT_DIR set to that
     # worktree's gitdir, which outranks `git -C` on the JP_TOOLS tree, so a
@@ -377,9 +395,8 @@ def shim_cases(tmp: Path) -> None:
     git(repo, "worktree", "add", "-q", "-b", "wt", str(wt))
     commit_with_env(repo, "w0.py", CLEAN_PY, env)
     r = commit_with_env(wt, "w1.py", CLEAN_PY, env)
-    out = r.stdout + r.stderr
     check("a commit from a LINKED WORKTREE finds the same tree at master and runs the checks",
-          r.returncode == 0 and "staged file(s) checked" in out and "BROKEN" not in out, out)
+          _ran(r), r.stdout + r.stderr)
 
     git(tree, "checkout", "-q", "-b", "feature/x")
     (tree / "x.txt").write_text("x\n", encoding="utf-8")
@@ -397,6 +414,9 @@ def shim_cases(tmp: Path) -> None:
     check("an EXPLICIT JP_TOOLS_DIR on that feature branch runs, and announces itself",
           r.returncode == 0 and "JP_TOOLS_DIR is set; running" in out and "feature/x" in out, out)
 
+
+def _shim_refusals(tmp: Path, env: dict[str, str], repo: Path) -> None:
+    """Trees the shim must refuse, never falling through to another candidate."""
     old = fake_jp_tools(tmp / "old-jp-tools", with_template=False)
     r = commit_with_env(repo, "c4.py", CLEAN_PY, dict(env, JP_TOOLS_DIR=str(old)))
     out = r.stdout + r.stderr
@@ -424,14 +444,6 @@ def shim_cases(tmp: Path) -> None:
     out = r.stdout + r.stderr
     check("... and naming that copy on purpose runs it, saying it is not a git checkout",
           r.returncode == 0 and "(not a git checkout)" in out, out)
-
-    git(tree, "checkout", "-q", "master")
-    hook.write_text(hook.read_text(encoding="utf-8").replace(
-        "JP_TOOLS_HOOK_API=1", "JP_TOOLS_HOOK_API=0"), encoding="utf-8")
-    r = commit_with_env(repo, "c6.py", CLEAN_PY, env)
-    out = r.stdout + r.stderr
-    check("a shim from an older interface is refused against a newer template",
-          r.returncode != 0 and "BROKEN" in out and "interface" in out, out)
 
 
 def main() -> int:
