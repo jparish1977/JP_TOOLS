@@ -1,14 +1,12 @@
 #!/bin/bash
-# JP_TOOLS recovery tools installer
-# Installs data recovery and forensics tools.
-# Run directly on Linux, or via WSL on Windows.
+# JP_TOOLS recovery tools installer: data recovery, imaging and forensics tools.
+# Run directly on Linux, or inside WSL on Windows. apt installs everything the
+# recovery scripts use; dnf, pacman and brew install the core set.
 set -e
 
 echo "==> Installing recovery & forensics tools"
 
-# Detect package manager
 if command -v apt &>/dev/null; then
-    PKG="apt"
     sudo apt update -qq
 
     echo ""
@@ -19,12 +17,12 @@ if command -v apt &>/dev/null; then
 
     echo ""
     echo "--- Disk imaging ---"
-    sudo apt install -y gddrescue      # ddrescue — fault-tolerant dd
+    sudo apt install -y gddrescue      # ddrescue: fault-tolerant dd, for image-disk.py
 
     echo ""
     echo "--- Filesystem recovery ---"
-    sudo apt install -y ntfs-3g        # ntfsundelete, and ntfsls/ntfscat for ntfs-extract.py
-    sudo apt install -y extundelete 2>/dev/null || echo "    extundelete not available in this repo — skipping"
+    sudo apt install -y ntfs-3g        # ntfsundelete, and ntfsls/ntfscat for the ntfs-* scripts
+    sudo apt install -y extundelete 2>/dev/null || echo "    extundelete not available in this repo; skipping"
 
     echo ""
     echo "--- Analysis / forensics ---"
@@ -33,27 +31,23 @@ if command -v apt &>/dev/null; then
 
     echo ""
     echo "--- Compressed storage ---"
-    sudo apt install -y mame-tools     # chdman — CHD create/verify/extract/diff
+    sudo apt install -y mame-tools     # chdman: CHD create/verify/extract
 
     echo ""
-    echo "--- Format converters (for CHD import pipeline) ---"
+    echo "--- Format converters (for chd.py import) ---"
     sudo apt install -y nrg2iso        # Nero image converter
     sudo apt install -y mdf2iso        # Alcohol 120% image converter
     sudo apt install -y ecm            # ECM error code modeler (ecm2bin)
     sudo apt install -y p7zip-full     # 7z archive extraction
-    sudo apt install -y ffmpeg         # audio/video format conversion
-    sudo apt install -y maxcso 2>/dev/null || echo "    maxcso not in repo — install from github.com/unknownbrackets/maxcso"
+    sudo apt install -y maxcso 2>/dev/null || echo "    maxcso not in repo; install from github.com/unknownbrackets/maxcso"
 
 elif command -v dnf &>/dev/null; then
-    PKG="dnf"
     sudo dnf install -y testdisk foremost ddrescue ntfs-3g sleuthkit binwalk
 
 elif command -v pacman &>/dev/null; then
-    PKG="pacman"
     sudo pacman -S --noconfirm testdisk foremost ddrescue ntfs-3g sleuthkit binwalk
 
 elif command -v brew &>/dev/null; then
-    PKG="brew"
     brew install testdisk foremost ddrescue sleuthkit binwalk
 
 else
@@ -62,34 +56,34 @@ else
 fi
 
 echo ""
-echo "==> Windows-native tools"
-# Check if we're in WSL and native testdisk exists
-WIN_TESTDISK="$HOME/tools/testdisk/testdisk-7.1/photorec_win.exe"
-if [ -f "/mnt/c/Users/jpari/tools/testdisk/testdisk-7.1/photorec_win.exe" ]; then
-    echo "    Native Windows photorec found at ~/tools/testdisk/"
-elif [ -f "$WIN_TESTDISK" ]; then
-    echo "    Native Windows photorec found at $WIN_TESTDISK"
+echo "==> Windows-native photorec (reads a Windows drive letter directly)"
+found=""
+for candidate in "$HOME"/tools/testdisk/testdisk-*/photorec_win.exe \
+                 /mnt/c/Users/*/tools/testdisk/testdisk-*/photorec_win.exe; do
+    if [ -f "$candidate" ]; then
+        found="$candidate"
+        break
+    fi
+done
+if [ -n "$found" ]; then
+    echo "    found at $found"
 else
-    echo "    Native Windows photorec not found."
-    echo "    Download from: https://www.cgsecurity.org/wiki/TestDisk_Download"
-    echo "    Extract to: ~/tools/testdisk/"
+    echo "    not found. Download from: https://www.cgsecurity.org/wiki/TestDisk_Download"
+    echo "    and extract to ~/tools/testdisk/ in your Windows home"
 fi
 
 echo ""
 echo "==> Verifying installed tools"
-TOOLS="photorec testdisk foremost ddrescue ntfsundelete fls binwalk chdman nrg2iso mdf2iso ecm2bin 7z ffmpeg"
-for tool in $TOOLS; do
+for tool in photorec testdisk foremost ddrescue ntfsundelete ntfsls ntfscat fls binwalk chdman nrg2iso mdf2iso ecm2bin 7z; do
     if command -v "$tool" &>/dev/null; then
-        echo "    ✓ $tool"
+        echo "    + $tool"
     else
-        echo "    ✗ $tool (not found)"
+        echo "    x $tool (not found)"
     fi
 done
-
-# Optional: scalpel, extundelete
-for tool in scalpel extundelete; do
+for tool in scalpel extundelete maxcso; do
     if command -v "$tool" &>/dev/null; then
-        echo "    ✓ $tool"
+        echo "    + $tool"
     else
         echo "    - $tool (optional, not installed)"
     fi
@@ -99,6 +93,6 @@ echo ""
 echo "Done. Recovery tools ready."
 echo ""
 echo "Usage:"
-echo "  python recover.py <source> <output> --profile <code|art|writing|roms|all|full>"
-echo "  python recover.py <source> --image <output.img>"
-echo "  python recover.py --list-profiles"
+echo "  python3 image-disk.py <device> <output.img>"
+echo "  python3 recover.py <source> <output> --profile <code|art|writing|roms|all|full>"
+echo "  python3 recover.py --list-profiles"
