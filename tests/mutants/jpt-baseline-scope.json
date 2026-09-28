@@ -1,5 +1,5 @@
 {
- "about": "JP_TOOLS #36: check.py compare_baseline compares only the paths a run measured, and counts the unmeasured baselined files on one line instead of printing them as improved to zero. Test: tests/test_check_baseline.py (scope_case). The directory-target prefix branch is not mutated: record-baseline always writes mode=per-file and a directory run is whole-repo, so that pairing is refused before the scope is used, and no test reaches it.",
+ "about": "JP_TOOLS #36: check.py compare_baseline compares only the paths a run measured, and counts the unmeasured baselined files on one line instead of printing them as improved to zero. Test: tests/test_check_baseline.py (scope_case). The directory-target prefix branch is not mutated: record-baseline always writes mode=per-file and a directory run is whole-repo, so that pairing is refused before the scope is used, and no test reaches it. Run: tools/lab/mutate-on-target.py JPT_TREE check.py tests/test_check_baseline.py tests/mutants/jpt-baseline-scope.json.",
  "mutants": [
   {"name": "compare-every-baselined-path",
    "edits": [["    for path in sorted(compared):", "    for path in sorted(set(now) | set(was)):"]],

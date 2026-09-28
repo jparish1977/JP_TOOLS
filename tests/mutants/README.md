@@ -21,11 +21,11 @@ To see whether a change has stranded a spec (seconds, changes nothing):
 
     ~/projects/another repo/tools/lab/port-mutant-spec.py JPT_TREE tests/mutants/<spec>.json
 
-## State when they arrived (master bfc51b5)
+## State (master bfc51b5, 2026-09-28)
 
-- `jpt-ignore` (11) and `jpt-symlink-once` (6): every mutant still anchors.
-- `jpt-suppress-reason`: 4 anchor; "a bare except-pass is counted here as
-  well as by ruff" no longer matches check.py.
-- `jpt-baseline-scope`: its `about` has no run line, so the tools cannot tell
-  its target and test (#36; its test is tests/test_check_baseline.py).
-None was re-run here; the last two need porting before they can run.
+All four run, and every mutant is killed on target, run on the build server:
+`jpt-baseline-scope` 4/4, `jpt-ignore` 11/11, `jpt-suppress-reason` 5/5,
+`jpt-symlink-once` 6/6. Two needed fixing first: `jpt-suppress-reason`'s
+"a bare except-pass is counted here as well as by ruff" re-anchored to the
+two-line `ruffs` expression #58 made (`reanchor/jpt-suppress-reason.json`),
+and `jpt-baseline-scope` gained the run line its `about` lacked.
