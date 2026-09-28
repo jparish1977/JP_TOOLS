@@ -20,6 +20,11 @@ def drive_letter(source: str) -> str | None:
     return None
 
 
+def is_system_area(name: str) -> bool:
+    """A Windows system entry, never inventoried or recovered: `$...` and System Volume Information."""
+    return name.startswith("$") or name == "System Volume Information"
+
+
 def disk_number(letter: str) -> int | None:
     """The physical disk holding drive LETTER, as PowerShell reports it, or None."""
     result = subprocess.run(

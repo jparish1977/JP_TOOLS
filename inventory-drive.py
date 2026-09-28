@@ -6,12 +6,9 @@ Records path, size and mtime only (no file contents are read), so it costs
 directory seeks rather than a full transfer, which matters when the drive is
 failing and every read is borrowed.
 
-Written incrementally and flushed per directory. Each top-level entry that
-finishes gets a `#done<TAB>name` line; a re-run skips those, and drops the
-rows of any entry that started but has no `#done` (a disconnect mid-way)
-before recording it again, so an interrupted entry is re-read whole, never
-left half-recorded. An inventory with no `#done` lines at all predates the
-markers: every entry in it counts as finished, as it always did.
+Written incrementally and flushed per directory, and resumable per top-level
+entry (inventory/resume.py): an entry cut off by a disconnect is re-read
+whole on the next run, never left half-recorded.
 
 Entries whose names start with `$`, and "System Volume Information", are
 Windows system areas and are skipped at every depth.
@@ -40,9 +37,11 @@ import sys
 import time
 from typing import TextIO
 
+from inventory.resume import mark_done, resume_state
+from platformtools.windows import is_system_area
+
 WIN_DRIVE = re.compile(r"^([A-Za-z]):[\\/]?$")
 HEADER = "#path\tsize\tmtime\n"
-DONE = "#done\t"
 
 
 def win_to_wsl_path(win_path: str) -> str:
@@ -54,40 +53,6 @@ def win_to_wsl_path(win_path: str) -> str:
         rest = win_path[2:].replace("\\", "/").lstrip("/")
         return "/mnt/" + win_path[0].lower() + "/" + rest
     return win_path
-
-
-def _skipped(name: str) -> bool:
-    return name.startswith("$") or name == "System Volume Information"
-
-
-def _top(row: str) -> str:
-    return row.split("\t", 1)[0].split("/", 1)[0]
-
-
-def _drop_unfinished(path: str, lines: list[str], done: set[str]) -> None:
-    """Rewrite PATH without the rows of entries not in DONE, when it has any."""
-    kept = [line for line in lines if line.startswith("#") or _top(line) in done]
-    if len(kept) == len(lines):
-        return
-    dropped = sorted({_top(line) for line in lines if not line.startswith("#")} - done)
-    print(f"re-recording unfinished: {', '.join(dropped)}")
-    tmp = f"{path}.tmp"
-    with open(tmp, "w", encoding="utf-8", errors="surrogateescape") as out:
-        out.writelines(kept)
-    os.replace(tmp, path)
-
-
-def resume_state(path: str) -> set[str]:
-    """Finished top-level entries in an existing inventory; drops unfinished ones' rows."""
-    if not os.path.exists(path):
-        return set()
-    with open(path, encoding="utf-8", errors="surrogateescape") as handle:
-        lines = [line for line in handle if line.strip()]
-    done = {line[len(DONE):].rstrip("\n") for line in lines if line.startswith(DONE)}
-    if not done:
-        return {_top(line) for line in lines if not line.startswith("#")}
-    _drop_unfinished(path, lines, done)
-    return done
 
 
 def _row(rel: str, st: os.stat_result) -> str:
@@ -103,7 +68,7 @@ def record_tree(root: str, top: str, out: TextIO) -> tuple[int, int]:
         return 1, st.st_size
     count = total = 0
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if not _skipped(d)]
+        dirnames[:] = [d for d in dirnames if not is_system_area(d)]
         for name in filenames:
             full = os.path.join(dirpath, name)
             try:
@@ -123,7 +88,7 @@ def record_tree(root: str, top: str, out: TextIO) -> tuple[int, int]:
 
 
 def _entries(root: str, only: list[str]) -> list[str]:
-    entries = sorted(e for e in os.listdir(root) if not _skipped(e))
+    entries = sorted(e for e in os.listdir(root) if not is_system_area(e))
     return [e for e in entries if e in only] if only else entries
 
 
@@ -138,8 +103,7 @@ def _record(root: str, entries: list[str], done: set[str], out: TextIO) -> tuple
             print(f"  ! {top:<18} aborted: {exc}")
             out.flush()
             continue
-        out.write(f"{DONE}{top}\n")
-        out.flush()
+        mark_done(out, top)
         files += count
         size += total
         print(f"  {top:<18} {count:7d} files  {total / 1e9:8.1f} GB  {time.time() - started:5.0f}s")

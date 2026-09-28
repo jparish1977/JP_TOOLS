@@ -1,211 +1,171 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 JP_TOOLS/tests/test_ntfs_recovery.py
-Tests for the NTFS recovery tools, against a real NTFS filesystem.
+The NTFS recovery tools (ntfs-extract.py, ntfs-size.py, ntfs-inventory.py)
+and their shared listing.
 
-Builds a small NTFS image with mkntfs, seeds it with the case that used to be
-mishandled, and drives the tools' own functions against it. No pytest, no
-dependencies -- the toolbox has none and this should not add the first.
+ntfsls reports size 0 for a directory AND for an empty file; branching on
+size made every zero-byte file a directory that was never copied, silent
+data loss with a plausible file count. `-F` marks directories with "/".
 
-THE BUG THIS PINS DOWN
-    ntfsls reports size 0 for a directory *and* for an empty file, so code that
-    branched on size treated every zero-byte file as a directory: it recursed
-    into it, found nothing, and never copied it. On a recovery pass that is
-    silent data loss, and the file count looks correct either way.
-
-    Measured before the fix, on an image holding four files: collect() returned
-    one of them.
-
-Skips rather than fails when the environment cannot support it:
-  - no ntfsls/ntfscat/mkntfs  -> skip (ntfs-3g not installed)
-  - cannot mount              -> the directory-recursion checks are skipped;
-                                 mounting needs root, and everything else still
-                                 runs unprivileged against the image file
+Two halves:
+  - a FAKE ntfsls/ntfscat serving a tree from JSON: directory recursion, the
+    depth limit, extraction (copy, skip, short read, failure, a name that
+    escapes the destination) and inventory resume. Runs anywhere.
+  - a REAL NTFS image built with mkntfs and ntfscp, holding an empty file and
+    a small one: the empty file listed and copied as a file. Needs ntfs-3g;
+    SKIP without it. (Directories in a real image need a root mount, which
+    is why the directory cases use the fake.)
 
     python tests/test_ntfs_recovery.py
 """
 
 import contextlib
-import importlib.util
 import io
+import json
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-REQUIRED = ("mkntfs", "ntfsls", "ntfscat", "ntfscp")
+from _harness import check, check_true, load_script, run
+from fake_tools import calls, env, fake_tools, run_main
+from ntfstools.listing import parse_listing
+
+EXTRACT = load_script("ntfs-extract.py")
+SIZE = load_script("ntfs-size.py")
+INVENTORY = load_script("ntfs-inventory.py")
+
+# FAKE_TREE is {"/dir": [[size, name, is_dir], ...]}; FAKE_DATA is {"/path": content}.
+FAKE_NTFSLS = """\
+path = sys.argv[sys.argv.index("-p") + 1]
+for size, name, is_dir in json.loads(os.environ["FAKE_TREE"]).get(path.rstrip("/") or "/", []):
+    print(f"{size:>10} Jan  1 00:00 2020 {name}{'/' if is_dir else ''}")
+"""
+FAKE_NTFSCAT = """\
+data = json.loads(os.environ["FAKE_DATA"])
+if sys.argv[2] not in data:
+    print("ntfscat: read error", file=sys.stderr)
+    sys.exit(1)
+sys.stdout.write(data[sys.argv[2]])
+"""
+
+TREE = {
+    "/": [[0, "docs", True], [0, "empty.bin", False], [5, "top.txt", False], [0, "$Extend", True]],
+    "/docs": [[3, "a.txt", False], [0, "deep", True], [4, "short.txt", False], [2, "bad.txt", False]],
+    "/docs/deep": [[6, "b.txt", False]],
+}
+DATA = {"/empty.bin": "", "/top.txt": "12345", "/docs/a.txt": "abc", "/docs/deep/b.txt": "abcdef",
+        "/docs/short.txt": "ab"}
 
 
-def load(name: str, path: Path):
-    """Import a hyphenated script by path."""
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+def _fakes(image: Path) -> contextlib.AbstractContextManager[None]:
+    """The fake tree in the environment; IMAGE is a plain file standing in for the device."""
+    image.write_bytes(b"not really ntfs")
+    return env(FAKE_TREE=json.dumps(TREE), FAKE_DATA=json.dumps(DATA))
 
 
-class EnvironmentUnavailable(RuntimeError):
-    """The tools are installed but this machine cannot build the fixture."""
+def test_parse_listing() -> None:
+    text = "        0 Jan  1 00:00 2020 ./\n        0 Jan  1 00:00 2020 d/\n       11 Jan  1 00:00 2020 f\n"
+    check("entries", [tuple(e) for e in parse_listing(text)], [(0, "d", True), (11, "f", False)])
 
 
-def build_image(directory: Path) -> Path:
-    """A 20MB NTFS volume holding an empty file and a normal one."""
+def test_walk_and_depth_limit() -> None:
+    with fake_tools(ntfsls=FAKE_NTFSLS) as (w, _log), _fakes(w / "img"):
+        found = [p for p, _ in EXTRACT.collect(str(w / "img"), "/", 6, 30, 0)]
+        check("every file, empty ones included", sorted(found),
+              ["/docs/a.txt", "/docs/bad.txt", "/docs/deep/b.txt", "/docs/short.txt",
+               "/empty.bin", "/top.txt"])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            shallow = [p for p, _ in EXTRACT.collect(str(w / "img"), "/", 1, 30, 0)]
+        check_true("depth 1 stops above deep/", "/docs/deep/b.txt" not in shallow and len(shallow) == 5)
+        check_true("and says so", "depth limit 1 reached" in err.getvalue())
+
+
+def test_extract() -> None:
+    """Copies, skips what is present, rejects a short read and a failed read."""
+    with fake_tools(keep_path=True, ntfsls=FAKE_NTFSLS, ntfscat=FAKE_NTFSCAT) as (w, log), _fakes(w / "img"):
+        dest = w / "out"
+        (dest / "docs").mkdir(parents=True)
+        (dest / "top.txt").write_text("12345")
+        code, out = run_main(EXTRACT.main, str(w / "img"), "/", str(dest))
+        check("exit: failures present", code, 1)
+        check_true("counts", "copied 3, skipped 1 already present, failed 2" in out)
+        check("empty file copied as a file", (dest / "empty.bin").read_bytes(), b"")
+        check("deep file", (dest / "docs" / "deep" / "b.txt").read_text(), "abcdef")
+        check("no partial files left", sorted(p.name for p in dest.rglob("*.part")), [])
+        check("present file not re-read", [c for c in calls(log) if c[-1] == "/top.txt" and c[0] == "ntfscat"], [])
+
+
+def test_containment() -> None:
+    for root, candidate, expected in (("/dest", "/dest/sub/file.bin", True),
+                                      ("/dest", "/dest/../../etc/passwd", False),
+                                      ("/dest", "/dest", True), ("/dest", "/destination/other", False)):
+        check(f"within({candidate})", EXTRACT.within(root, candidate), expected)
+
+
+def test_size() -> None:
+    with fake_tools(keep_path=True, ntfsls=FAKE_NTFSLS) as (w, _log), _fakes(w / "img"):
+        code, out = run_main(SIZE.main, str(w / "img"))
+        check("exit", code, 0)
+        check_true("docs subtree summed", "docs" in out and "4 files" in out)
+        check_true("total", "TOTAL" in out and "      6 files" in out)
+
+
+def test_inventory_resumes_an_interrupted_entry() -> None:
+    with fake_tools(keep_path=True, ntfsls=FAKE_NTFSLS) as (w, _log), _fakes(w / "img"):
+        tsv = w / "inv.tsv"
+        tsv.write_text("#path\tsize\n/top.txt\t5\n#done\ttop.txt\n/docs/a.txt\t3\n")
+        code, out = run_main(INVENTORY.main, str(w / "img"), str(tsv))
+        check("exit", code, 0)
+        check_true("docs re-read", "re-recording unfinished: docs" in out)
+        rows = [line.split("\t")[0] for line in tsv.read_text().splitlines() if not line.startswith("#")]
+        check("each file once, $Extend never", sorted(rows),
+              ["/docs/a.txt", "/docs/bad.txt", "/docs/deep/b.txt", "/docs/short.txt",
+               "/empty.bin", "/top.txt"])
+        check("importing it does not run it", run_main(INVENTORY.main, "--help")[0], 0)
+
+
+def _real_image(directory: Path) -> Path | None:
+    """A 20MB NTFS image holding empty.bin and small.bin, or None (said) when it cannot be built."""
     image = directory / "test.ntfs"
     with open(image, "wb") as handle:
         handle.truncate(20 * 1024 * 1024)
-    # check=False plus an explicit raise: on a machine where the tools exist
-    # but the environment cannot build an image, check=True raised an uncaught
-    # CalledProcessError and turned CI red for a reason unrelated to any diff.
-    # A missing capability is a SKIP, not a failure.
-    made = subprocess.run(["mkntfs", "-F", "-q", "-L", "jptest", str(image)],
-                          check=False, capture_output=True)
-    if made.returncode != 0:
-        raise EnvironmentUnavailable(
-            f"mkntfs failed: {made.stderr.decode('utf-8', 'replace').strip()[:200]}")
-
-    empty = directory / "empty.bin"
-    empty.touch()
-    small = directory / "small.bin"
-    small.write_text("hello world")
-    # ntfscp is version-sensitive and fails on some ntfs-3g builds. check=True
-    # here made the skip-don't-fail fix half-applied: mkntfs was converted and
-    # this loop was not, so a runner where the tools exist but ntfscp fails
-    # turns CI red for a reason unrelated to any diff -- exactly what the
-    # mkntfs change was written to prevent.
-    for source, name in ((empty, "/empty.bin"), (small, "/small.bin")):
-        copied = subprocess.run(["ntfscp", "-f", str(image), str(source), name],
-                                check=False, capture_output=True)
-        if copied.returncode != 0:
-            raise EnvironmentUnavailable(
-                f"ntfscp failed on {name}: "
-                f"{copied.stderr.decode('utf-8', 'replace').strip()[:200]}"
-            )
+    steps = [["mkntfs", "-F", "-q", "-L", "jptest", str(image)]]
+    (directory / "empty.bin").touch()
+    (directory / "small.bin").write_text("hello world")
+    steps += [["ntfscp", "-f", str(image), str(directory / n), f"/{n}"] for n in ("empty.bin", "small.bin")]
+    for step in steps:
+        made = subprocess.run(step, check=False, capture_output=True)
+        if made.returncode != 0:
+            print(f"SKIP: cannot build an NTFS fixture here ({step[0]}: "
+                  f"{made.stderr.decode('utf-8', 'replace').strip()[:120]})")
+            return None
     return image
 
 
-def add_directories(image: Path, mountpoint: Path) -> bool:
-    """Create a real directory tree inside the image. Needs root; may fail."""
-    mountpoint.mkdir(exist_ok=True)
-    try:
-        subprocess.run(["mount", "-o", "loop", str(image), str(mountpoint)],
-                       check=True, capture_output=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # reason: mount failed or is absent: False is SKIP, said by the caller
-        return False
-    try:
-        # Guarded like the mount itself: a loop image that mounts read-only or
-        # degraded raises here, and an escaping OSError turns CI red for an
-        # environment problem -- the failure the mkntfs and ntfscp conversions
-        # in this same diff were written to prevent, one function further on.
-        (mountpoint / "realdir" / "deeper").mkdir(parents=True, exist_ok=True)
-        (mountpoint / "realdir" / "inner.bin").touch()
-        (mountpoint / "realdir" / "deeper" / "deep.bin").touch()
-    except OSError:
-        # reason: a read-only or degraded mount: False is SKIP, said by the caller (above)
-        # A read-only or degraded mount lands here. The caller treats False as
-        # "directory cases not exercised" and carries on, which is a SKIP.
-        return False
-    finally:
-        subprocess.run(["umount", str(mountpoint)], check=False, capture_output=True)
-    return True
-
-
-def main() -> int:
-    missing = [t for t in REQUIRED if shutil.which(t) is None]
-    if missing:
-        print(f"SKIP: ntfs-3g tools not installed ({', '.join(missing)})")
-        return 0
-
-    extract = load("ntfs_extract", ROOT / "ntfs-extract.py")
-    # The image is a plain file, so no privilege is needed to read it.
-    extract.as_root = lambda cmd: cmd
-
-    failures = []
-
-    def check(condition: bool, message: str) -> None:
-        if not condition:
-            failures.append(message)
-
+def ntfs_test_a_real_empty_file_is_a_file() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        directory = Path(tmp)
-        try:
-            image = build_image(directory)
-        except EnvironmentUnavailable as exc:
-            print(f"SKIP: cannot build an NTFS fixture here ({exc})")
-            return 0
-        have_dirs = add_directories(image, directory / "mnt")
-
-        rows = extract.listdir(str(image), "/", 30)
-        entries = {name: (size, is_dir) for size, name, is_dir in rows}
-        check(bool(rows), "listdir returned nothing")
-
-        # An empty file must be a FILE. Branching on size made it a directory.
-        check(entries.get("empty.bin") == (0, False),
-              f"empty.bin should be (0, False), got {entries.get('empty.bin')}")
-        check(entries.get("small.bin") == (11, False),
-              f"small.bin should be (11, False), got {entries.get('small.bin')}")
-        check(not any(n.endswith("/") for n in entries),
-              "classify marker was not stripped from a name")
-
-        found = {path for path, _ in extract.collect(str(image), "/", 0, 6, 30, 0)}
-        check("/empty.bin" in found,
-              "collect() dropped the zero-byte file (silent data loss)")
-        check("/small.bin" in found, "collect() dropped /small.bin")
-
-        if have_dirs:
-            check(entries.get("realdir") == (0, True),
-                  f"realdir should be (0, True), got {entries.get('realdir')}")
-            for path in ("/realdir/inner.bin", "/realdir/deeper/deep.bin"):
-                check(path in found, f"collect() did not recurse to {path}")
-
-            # The depth limit must announce itself; a truncated tree otherwise
-            # looks exactly like a complete one.
-            buffer = io.StringIO()
-            with contextlib.redirect_stderr(buffer):
-                shallow = {p for p, _ in extract.collect(str(image), "/", 0, 1, 30, 0)}
-            warned = buffer.getvalue()
-            check("/realdir/deeper/deep.bin" not in shallow,
-                  "depth limit did not actually stop the walk")
-            check("depth limit" in warned,
-                  "depth limit truncated the walk silently")
-        else:
-            print("  note: mounting needs root, so directory recursion and the "
-                  "depth warning were not exercised")
-
-    # Containment: names come off a damaged volume and this may run as root.
-    for root, candidate, expected in (
-        ("/dest", "/dest/sub/file.bin", True),
-        ("/dest", "/dest/../../etc/passwd", False),
-        ("/dest", "/dest", True),
-        ("/dest", "/destination/other", False),
-    ):
-        actual = extract.within(root, candidate)
-        check(actual == expected,
-              f"within({root!r}, {candidate!r}) = {actual}, expected {expected}")
-
-    # The sibling tools share the classification, so pin it there too. They are
-    # read as source: ntfs-inventory.py parses argv at import, so it cannot be
-    # imported without exiting.
-    for name in ("ntfs-size.py", "ntfs-inventory.py"):
-        source = (ROOT / name).read_text(encoding="utf-8")
-        check('"-F"' in source, f"{name} does not pass -F to ntfsls")
-        check("is_dir" in source, f"{name} still classifies by size")
-
-    if failures:
-        print("FAIL")
-        for failure in failures:
-            print(f"  - {failure}")
-        return 1
-    count = 16 if have_dirs else 11
-    note = "" if have_dirs else " (directory cases skipped, needs root)"
-    print(f"PASS: {count} checks{note}")
-    return 0
+        d = Path(tmp)
+        image = _real_image(d)
+        if image is None:
+            return
+        found = dict(EXTRACT.collect(str(image), "/", 6, 30, 0))
+        check("empty.bin found as a file", found.get("/empty.bin"), 0)
+        check("small.bin", found.get("/small.bin"), 11)
+        check("extract", run_main(EXTRACT.main, str(image), "/", str(d / "out"))[0], 0)
+        check("empty copied", (d / "out" / "empty.bin").read_bytes(), b"")
+        check("small copied", (d / "out" / "small.bin").read_text(), "hello world")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    tests = dict(globals())
+    missing = [t for t in ("mkntfs", "ntfsls", "ntfscat", "ntfscp") if shutil.which(t) is None]
+    if missing:
+        print(f"SKIP: ntfs-3g tools not installed ({', '.join(missing)}); the fake-tool checks run alone")
+    else:
+        tests.update({k.removeprefix("ntfs_"): v for k, v in globals().items()
+                      if k.startswith("ntfs_test_")})
+    sys.exit(run(tests, "ntfs recovery"))
