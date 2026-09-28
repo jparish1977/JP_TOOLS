@@ -29,12 +29,13 @@ def install(bin_dir: Path, name: str, body: str) -> None:
 
 
 @contextlib.contextmanager
-def fake_tools(**tools: str) -> Iterator[tuple[Path, Path]]:
-    """(work dir, log) with only the named fake TOOLS on PATH.
+def fake_tools(keep_path: bool = False, **tools: str) -> Iterator[tuple[Path, Path]]:
+    """(work dir, log) with the named fake TOOLS on PATH.
 
     PATH is replaced, not extended, so a real tool on the box cannot answer
-    in place of the fake one. Pass names that are not identifiers, such as
-    7z, as `**{"7z": BODY}`.
+    in place of the fake one; KEEP_PATH puts the fakes in front of the real
+    PATH instead, for a test that also needs real tools such as git. Pass
+    names that are not identifiers, such as 7z, as `**{"7z": BODY}`.
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -46,7 +47,8 @@ def fake_tools(**tools: str) -> Iterator[tuple[Path, Path]]:
             install(bin_dir, name, body)
         log = root / "log"
         log.touch()
-        with env(PATH=str(bin_dir), FAKE_LOG=str(log)):
+        path = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}" if keep_path else str(bin_dir)
+        with env(PATH=path, FAKE_LOG=str(log)):
             yield work, log
 
 
