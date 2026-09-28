@@ -1,0 +1,6 @@
+{
+ "about": ".jp-tools-ignore, the part in jpcheck/baseline.py: the baseline recorder skips ignored files. Run: mutate-on-target.py TREE jpcheck/baseline.py tests/test_ignore.py tests/mutants/jpt-ignore-on-baseline.json",
+ "mutants": [
+  {"name": "the baseline records ignored files", "edits": [["        _drop_ignored(groups, root, ignores)\n        files = sorted(", "        files = sorted("]], "target": "a recorded baseline leaves ignored files out"}
+ ]
+}

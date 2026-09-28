@@ -94,21 +94,24 @@ def _run_tools(tool_names: list[str], target: str) -> list[dict[str, Any]]:
     return checks
 
 
+def _count(issues: list[dict[str, Any]], key: str, value: object = None) -> int:
+    """Issues whose KEY equals VALUE, or is truthy when no VALUE is given."""
+    return sum(1 for i in issues if (i.get(key) == value if value is not None else i.get(key)))
+
+
 def _summarize(checks: list[dict[str, Any]]) -> dict[str, Any]:
     all_issues = [i for c in checks for i in c.get("issues", [])]
-    counted  = [i for i in all_issues if not i.get("exempt")]
-    errors   = sum(1 for i in counted if i["severity"] == "error")
-    warnings = sum(1 for i in counted if i["severity"] == "warning")
+    counted = [i for i in all_issues if not i.get("exempt")]
     return {
         "total":    len(all_issues),
-        "errors":   errors,
-        "warnings": warnings,
+        "errors":   _count(counted, "severity", "error"),
+        "warnings": _count(counted, "severity", "warning"),
         # Listed in "total" and in the issues, never counted as errors: a lab
         # file under its 2.9 header.
         "exempt":   len(all_issues) - len(counted),
         # Split deliberately: "fixable" is what `fix.py` applies now, and
         # "fixable_unsafe" is what `fix.py --unsafe` would additionally attempt.
-        # Reporting one combined number described work no tool would do.
-        "fixable":  sum(1 for i in all_issues if i.get("fixable")),
-        "fixable_unsafe": sum(1 for i in all_issues if i.get("fixable_unsafe")),
+        # One combined number would describe work no tool does.
+        "fixable":  _count(all_issues, "fixable"),
+        "fixable_unsafe": _count(all_issues, "fixable_unsafe"),
     }

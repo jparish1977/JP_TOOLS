@@ -24,9 +24,12 @@ _EXT_TO_LANG = {
 # Interpreters shellcheck understands, as a #! line names them.
 _SHELL_INTERPRETERS = {b"sh", b"bash", b"dash", b"ksh"}
 
-# Directories to skip when scanning
+# Directories that are not this project's source, skipped by every walk: the
+# gate's file collection and the coverage-exemption scan alike. Virtualenvs
+# under other names are caught by their pyvenv.cfg (is_project_file).
 _SKIP_DIRS = {"node_modules", "vendor", "__pycache__", ".git", ".venv", "venv",
-              "dist", "build", ".mypy_cache", ".ruff_cache", ".pytest_cache"}
+              "dist", "build", ".mypy_cache", ".ruff_cache", ".pytest_cache",
+              ".tox", "site-packages"}
 
 
 def _shebang_lang(p: Path) -> str | None:
@@ -47,11 +50,14 @@ def _shebang_lang(p: Path) -> str | None:
         # reason: a file that cannot be read has no shebang to read; the
         # language then comes from the suffix, and a linter reports the read
         return None
-    if not first.startswith(b"#!"):
-        return None
-    if b"python" in first:
+    return _interpreter_lang(first) if first.startswith(b"#!") else None
+
+
+def _interpreter_lang(shebang: bytes) -> str | None:
+    """"python" or "shell" for the interpreter a #! line names, else None."""
+    if b"python" in shebang:
         return "python"
-    words = first[2:].split()
+    words = shebang[2:].split()
     if words and words[0].endswith(b"/env"):
         words = [w for w in words[1:] if not w.startswith(b"-")]
     if words and words[0].rsplit(b"/", 1)[-1] in _SHELL_INTERPRETERS:

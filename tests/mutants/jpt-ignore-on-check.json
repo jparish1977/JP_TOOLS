@@ -1,0 +1,7 @@
+{
+ "about": ".jp-tools-ignore, the parts in check.py: the single-file skip and its wording. Run: mutate-on-target.py TREE check.py tests/test_ignore.py tests/mutants/jpt-ignore-on-check.json",
+ "mutants": [
+  {"name": "a single ignored file is checked", "edits": [["    hit = None if is_dir else ignored_by(target, root, ignores)\n    if hit:", "    hit = None if is_dir else ignored_by(target, root, ignores)\n    if False:"]], "target": "an ignored file is skipped, exit 0, naming the entry and its reason"},
+  {"name": "the skip does not give the reason", "edits": [["f\"ignored by {_IGNORE_FILE}: {hit[0]} ({hit[1]})\"", "f\"ignored by {_IGNORE_FILE}: {hit[0]}\""]], "target": "an ignored file is skipped, exit 0, naming the entry and its reason"}
+ ]
+}

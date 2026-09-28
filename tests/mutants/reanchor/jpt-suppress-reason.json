@@ -1,3 +1,0 @@
-{
- "a bare except-pass is counted here as well as by ruff": {"edits": [["            \"ruffs\": (pass_only and (blind or len(node.body) == 1)\n                      and h.lineno not in (hushed or set())),", "            \"ruffs\": False,"]], "why": "#58 added a hushed-line condition, so the ruffs expression spans two lines now; same mutation, never defer to ruff"}
-}

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from jpcheck.common import _status
+from jpcheck.files import _SKIP_DIRS
 
 # A coverage exemption is a CLAIM: that the function is a thin wrapper with
 # nothing in it worth testing. Nothing rechecks that claim, so it goes stale
@@ -48,33 +49,50 @@ def coverage_exemptions(path: Path) -> list[dict[str, Any]]:
     try:
         src = path.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(src)
-    except (OSError, SyntaxError, ValueError):
-        # reason: not this check's job to report an unparseable file; ruff already does (below)
-        # Not this check's job to report unparseable files; ruff already does,
-        # and reporting it twice makes one problem look like two.
+        directives = _trailing_comments(src)
+    except (OSError, SyntaxError, ValueError, tokenize.TokenError):
+        # reason: not this check's job to report an unreadable or unparseable
+        # file; ruff already does, and twice would make one problem look like two
         return []
-    # Only a trailing comment on a LINE OF CODE is a directive: prose that
-    # documents the pragma, like the comment block above, is not one.
-    # Tokenising also excludes docstrings.
+    owners = _owners(tree)
+    found: list[dict[str, Any]] = []
+    for lineno, text in directives:
+        match = _NO_COVER.search(text)
+        if not match:
+            continue
+        entry = _exemption(path, lineno, match.group("rest"), owners)
+        # One entry per owner. Two pragmas inside the same function are one
+        # exemption, and counting the span twice would overstate the share of
+        # the file that is exempt.
+        if not any(e["function"] == entry["function"] and e["line"] == entry["line"]
+                   for e in found):
+            found.append(entry)
+    return found
+
+
+def _trailing_comments(src: str) -> list[tuple[int, str]]:
+    """(row, text) of each comment that trails code on its line.
+
+    Only a trailing comment on a LINE OF CODE is a directive: prose that
+    documents the pragma, like the comment block above, is not one.
+    Tokenising also excludes docstrings. IndentationError and TokenError
+    propagate for the caller to treat as unparseable.
+    """
     code_rows: set[int] = set()
     comments: list[tuple[int, str]] = []
-    try:
-        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
-            if tok.type == tokenize.COMMENT:
-                comments.append((tok.start[0], tok.string))
-            elif tok.type not in (
-                tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
-                tokenize.DEDENT, tokenize.ENDMARKER, tokenize.ENCODING,
-            ):
-                for row in range(tok.start[0], tok.end[0] + 1):
-                    code_rows.add(row)
-    except (tokenize.TokenError, IndentationError, SyntaxError):
-        # reason: as above: a file the tokenizer refuses is ruff's to report, and this lists nothing
-        return []
+    layout = (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
+              tokenize.DEDENT, tokenize.ENDMARKER, tokenize.ENCODING)
+    for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+        if tok.type == tokenize.COMMENT:
+            comments.append((tok.start[0], tok.string))
+        elif tok.type not in layout:
+            code_rows.update(range(tok.start[0], tok.end[0] + 1))
+    return [(row, text) for row, text in comments if row in code_rows]
 
-    # Every construct a pragma could sit inside, so the innermost one can be
-    # named. Sorted by span so the tightest enclosing owner wins.
-    owners: list[tuple[int, int, str, int]] = []
+
+def _owners(tree: ast.AST) -> list[tuple[int, int, str, int]]:
+    """(first line, last line, label, branch count) for every construct a pragma can sit in."""
+    owners = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             label = node.name
@@ -82,42 +100,22 @@ def coverage_exemptions(path: Path) -> list[dict[str, Any]]:
             label = f"<{type(node).__name__.lower()} line {node.lineno}>"
         else:
             continue
-        end = node.end_lineno or node.lineno
-        owners.append((
-            node.lineno, end, label,
-            sum(isinstance(n, _BRANCHY) for n in ast.walk(node)),
-        ))
+        owners.append((node.lineno, node.end_lineno or node.lineno, label,
+                       sum(isinstance(n, _BRANCHY) for n in ast.walk(node))))
+    return owners
 
-    found: list[dict[str, Any]] = []
-    seen: set[tuple[str, int]] = set()
-    for lineno, text in comments:
-        if lineno not in code_rows:
-            continue
-        match = _NO_COVER.search(text)
-        if not match:
-            continue
-        rest = match.group("rest")
-        reason = rest.split("reason:", 1)[1].strip() if _HAS_REASON.search(rest) else ""
-        holding = [o for o in owners if o[0] <= lineno <= o[1]]
-        if holding:
-            begin, finish, label, branches = min(holding, key=lambda o: o[1] - o[0])
-        else:
-            begin, finish, label, branches = lineno, lineno, "<module level>", 0
-        # One entry per owner. Two pragmas inside the same function are one
-        # exemption, and counting the span twice would overstate the share of
-        # the file that is exempt.
-        if (label, begin) in seen:
-            continue
-        seen.add((label, begin))
-        found.append({
-            "file":     str(path),
-            "line":     begin,
-            "function": label,
-            "lines":    finish - begin,
-            "branches": branches,
-            "reason":   reason,
-        })
-    return found
+
+def _exemption(path: Path, lineno: int, rest: str,
+               owners: list[tuple[int, int, str, int]]) -> dict[str, Any]:
+    """The exemption a pragma on LINENO makes, owned by the tightest construct holding it."""
+    reason = rest.split("reason:", 1)[1].strip() if _HAS_REASON.search(rest) else ""
+    holding = [o for o in owners if o[0] <= lineno <= o[1]]
+    if holding:
+        begin, finish, label, branches = min(holding, key=lambda o: o[1] - o[0])
+    else:
+        begin, finish, label, branches = lineno, lineno, "<module level>", 0
+    return {"file": str(path), "line": begin, "function": label,
+            "lines": finish - begin, "branches": branches, "reason": reason}
 
 
 def _branchy_no_cover(path: Path) -> list[dict[str, Any]]:
@@ -143,17 +141,13 @@ def _branchy_no_cover(path: Path) -> list[dict[str, Any]]:
     ]
 
 
-# Directories that are not this project's source. docs/coverage.md tells the
-# reader to run `python3 -m venv .venv` in the repo root, so following the
-# instructions in this repo put third-party code in the walk: the exemption
-# share became a number about site-packages. pyvenv.cfg catches venvs under any
-# name, which is the case a hardcoded list misses.
-_SKIP_DIRS = {".git", "__pycache__", "node_modules", "vendor", ".mypy_cache",
-              ".ruff_cache", ".tox", "site-packages"}
-
-
 def is_project_file(p: Path, root: Path) -> bool:
-    """Is this a file of the project rooted at `root`, not a dependency?"""
+    """Is this a file of the project rooted at `root`, not a dependency?
+
+    A venv inside the repo (docs/coverage.md creates one) would otherwise put
+    site-packages in the walk. pyvenv.cfg catches venvs under any name, which
+    is the case a list of directory names misses.
+    """
     rel = p.relative_to(root) if p.is_relative_to(root) else p
     for part in rel.parts[:-1]:
         if part in _SKIP_DIRS:

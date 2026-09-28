@@ -34,9 +34,8 @@ from jpcheck.registry import AUDIT_TOOLS, DEFAULT_TOOLS, _run_tools, _summarize
 #
 # VERSIONS DEGRADE, THEY DO NOT REFUSE. Compare only when BOTH sides are known.
 # An unknown version is not evidence of a match, but refusing on one would make
-# the feature unusable wherever a tool has no version we can parse -- and a
-# guard that fires on "cannot tell" gets switched off, which is the reasoning
-# coord.py already uses for session ownership.
+# the feature unusable wherever a tool has no version we can parse, and a
+# guard that fires on "cannot tell" gets switched off.
 #
 # The verdict is on ERRORS, because that is what the gate already exits on.
 # Warnings are recorded per file so a later change can use them, and are printed
@@ -93,7 +92,7 @@ def _per_file_checks(target: str, audit: bool = False) -> list[dict[str, Any]]:
     Deliberately not `check.py .`. The entire point of the mode field is that
     the two produce different numbers, so a recorder taking the cheaper
     whole-repo route would record exactly the quantity the gate cannot
-    reproduce -- which is the bug this feature exists to remove.
+    reproduce.
     """
     p = Path(target)
     root = _repo_root(target)
@@ -119,23 +118,20 @@ def _dropped_entries(dest: str, files: dict[str, Any]) -> tuple[list[str], int, 
     """Files the existing baseline records that this write would not.
 
     Returns (dropped, existing_count, unreadable). A destination that does not
-    exist drops nothing -- there is no prior measurement to lose.
+    exist drops nothing: there is no prior measurement to lose.
 
     A destination that exists and CANNOT BE PARSED is a third state and is
-    reported as such, not folded into the first, because treating it as
-    absent is the same overloaded empty the guard exists to fix: a file that fails to parse did hold a measurement -- a
-    truncated write, conflict markers, a half-synced copy over a real baseline
-    -- and its contents are precisely what nobody can recover. Treating it as
-    absent destroys the one case where the prior numbers are unknown, which is
-    the one case where losing them costs most.
+    reported as such, not folded into the first. A file that fails to parse
+    did hold a measurement (a truncated write, conflict markers, a half-synced
+    copy over a real baseline), and its contents are precisely what nobody can
+    recover, so treating it as absent destroys the prior numbers in the one
+    case where losing them costs most.
 
     Recording is whole-file: the doc is rebuilt and rewritten, so pointing two
-    per-file invocations at one path keeps only the second. Both print
-    "recorded 1 file(s)" and the loss surfaces one step later, as the first
-    file failing for being un-baselined -- which reads as a different problem
-    entirely. That is this tool's own failure mode aimed at itself: a zero that
-    means "never measured" wearing the face of a zero that means "measured, and
-    clean".
+    per-file invocations at one path would keep only the second, and the loss
+    would surface one step later as the first file failing for being
+    un-baselined: a zero that means "never measured" wearing the face of a
+    zero that means "measured, and clean".
     """
     if not Path(dest).exists():
         return [], 0, False
@@ -146,10 +142,64 @@ def _dropped_entries(dest: str, files: dict[str, Any]) -> tuple[list[str], int, 
         return [], 0, True
     had = prior.get("files")
     if not isinstance(had, dict):
-        # Parsed, but not a baseline this tool wrote. Same argument: something
-        # is there, and this run cannot say what it was worth.
+        # Parsed, but not a baseline this tool wrote: something is there, and
+        # this run cannot say what it was worth.
         return [], 0, True
     return sorted(set(had) - set(files)), len(had), False
+
+
+def _refuse_write(dest: str, files: dict[str, Any], dropped: list[str], existing: int,
+                  unreadable: bool) -> bool:
+    """Print why DEST must not be overwritten, and return True; False when it may be."""
+    if unreadable:
+        print(f"baseline: REFUSING to write {dest} -- it exists but cannot be "
+              f"read as a baseline, so this run cannot say what would be lost.",
+              file=sys.stderr)
+        print("  That is a reason to stop, not to proceed: a truncated write, "
+              "conflict markers or a half-synced file all look like this, and "
+              "the numbers in it are the ones nobody can reconstruct.",
+              file=sys.stderr)
+        print("  Inspect it, or overwrite deliberately with --force-baseline.",
+              file=sys.stderr)
+        return True
+    if dropped:
+        shown = ", ".join(dropped[:3]) + (f", +{len(dropped) - 3} more"
+                                          if len(dropped) > 3 else "")
+        print(f"baseline: REFUSING to write {dest} -- it records {existing} "
+              f"file(s) and this run measured {len(files)}, so "
+              f"{len(dropped)} would be discarded: {shown}",
+              file=sys.stderr)
+        print("  A discarded file is not baselined, so it fails the next gate "
+              "for having no recorded count -- which looks like a different "
+              "bug one step later.", file=sys.stderr)
+        print(f"  To baseline a whole tree in one go:  "
+              f"check.py <dir> --record-baseline {dest}", file=sys.stderr)
+        print("  To replace the baseline deliberately, including on purpose "
+              "after deleting files:  --force-baseline", file=sys.stderr)
+        return True
+    return False
+
+
+def _report_recorded(dest: str, files: dict[str, Any], tools: list[str],
+                     status: dict[str, str], existed: bool, existing: int,
+                     dropped: list[str]) -> None:
+    print(f"recorded {len(files)} file(s) from {len(tools)} tool(s), "
+          f"mode=per-file, to {dest}")
+    # Say what was displaced, not only what was written. Keyed on the file
+    # having EXISTED, not on how much it recorded: a baseline of zero files is
+    # a real baseline (every file was clean), and it is the one most easily
+    # mistaken for no baseline at all.
+    if existed:
+        note = f"  replaced a baseline of {existing} file(s)"
+        if dropped:
+            note += f", discarding {len(dropped)} on --force-baseline"
+        print(note)
+    missing = [t for t, s in sorted(status.items()) if s not in ("pass", "fail")]
+    if missing:
+        print("  WARNING: recorded while these tools were not running: "
+              + ", ".join(f"{t} ({status[t]})" for t in missing))
+        print("  Their zeros are not measurements. Re-record where they run, "
+              "or a later real count will read as a regression.")
 
 
 def record_baseline(target: str, dest: str, audit: bool = False,
@@ -177,67 +227,21 @@ def record_baseline(target: str, dest: str, audit: bool = False,
     }
     existed = Path(dest).exists()
     dropped, existing, unreadable = _dropped_entries(dest, files)
-    if unreadable and not force:
-        print(f"baseline: REFUSING to write {dest} -- it exists but cannot be "
-              f"read as a baseline, so this run cannot say what would be lost.",
-              file=sys.stderr)
-        print("  That is a reason to stop, not to proceed: a truncated write, "
-              "conflict markers or a half-synced file all look like this, and "
-              "the numbers in it are the ones nobody can reconstruct.",
-              file=sys.stderr)
-        print("  Inspect it, or overwrite deliberately with --force-baseline.",
-              file=sys.stderr)
+    if not force and _refuse_write(dest, files, dropped, existing, unreadable):
         return 2
-    if dropped and not force:
-        shown = ", ".join(dropped[:3]) + (f", +{len(dropped) - 3} more"
-                                          if len(dropped) > 3 else "")
-        print(f"baseline: REFUSING to write {dest} -- it records {existing} "
-              f"file(s) and this run measured {len(files)}, so "
-              f"{len(dropped)} would be discarded: {shown}",
-              file=sys.stderr)
-        print("  A discarded file is not baselined, so it fails the next gate "
-              "for having no recorded count -- which looks like a different "
-              "bug one step later.", file=sys.stderr)
-        print(f"  To baseline a whole tree in one go:  "
-              f"check.py <dir> --record-baseline {dest}", file=sys.stderr)
-        print("  To replace the baseline deliberately, including on purpose "
-              "after deleting files:  --force-baseline", file=sys.stderr)
-        return 2
-
     Path(dest).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n",
                           encoding="utf-8")
-    missing = [t for t, s in sorted(status.items()) if s != "pass" and s != "fail"]
-    print(f"recorded {len(files)} file(s) from {len(tools)} tool(s), "
-          f"mode=per-file, to {dest}")
-    # Say what was displaced. The old message was true about what it wrote and
-    # silent about what it removed, which is exactly why reading it carefully
-    # did not catch the loss.
-    # Keyed on the file having EXISTED, not on how much it recorded. A baseline
-    # of zero files is a real baseline -- every file was clean -- and it is the
-    # one most easily mistaken for no baseline at all, so overwriting it is
-    # exactly when saying so matters.
-    if existed:
-        note = f"  replaced a baseline of {existing} file(s)"
-        if dropped:
-            note += f", discarding {len(dropped)} on --force-baseline"
-        print(note)
-    if missing:
-        print("  WARNING: recorded while these tools were not running: "
-              + ", ".join(f"{t} ({status[t]})" for t in missing))
-        print("  Their zeros are not measurements. Re-record where they run, "
-              "or a later real count will read as a regression.")
+    _report_recorded(dest, files, tools, status, existed, existing, dropped)
     return 0
 
 
-def compare_baseline(checks: list[dict[str, Any]], target: str,
-                     source: str, mode: str) -> int:
-    """0 = no worse, 1 = worse, 2 = cannot compare."""
+def _read_baseline(source: str, mode: str) -> dict[str, Any] | None:
+    """The baseline document, or None after saying why it cannot be compared."""
     try:
-        doc = json.loads(Path(source).read_text(encoding="utf-8"))
+        doc: dict[str, Any] = json.loads(Path(source).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         print(f"baseline: cannot read {source}: {exc}", file=sys.stderr)
-        return 2
-
+        return None
     recorded_mode = doc.get("mode", "unknown")
     if recorded_mode != mode:
         print(f"baseline: REFUSING to compare. It was recorded as "
@@ -246,29 +250,33 @@ def compare_baseline(checks: list[dict[str, Any]], target: str,
               f"resolves across files they disagree by hundreds of findings on "
               f"unchanged code. Re-record with --record-baseline.",
               file=sys.stderr)
-        return 2
+        return None
+    return doc
 
-    root   = _repo_root(target)
-    now    = _counts_by_file(checks, root)
-    was    = doc.get("files", {})
-    old_v  = doc.get("tools", {})
-    status = _statuses(checks)
 
+def _uncomparable(status: dict[str, str], old_versions: dict[str, str]) -> list[tuple[str, str]]:
+    """(tool, why) for each tool that did not run, or whose version changed."""
     skipped: list[tuple[str, str]] = []
     for tool, st in sorted(status.items()):
         if st not in ("pass", "fail"):
             skipped.append((tool, f"did not run ({st})"))
             continue
-        was_v, now_v = old_v.get(tool, ""), _tool_version(tool)
+        was_v, now_v = old_versions.get(tool, ""), _tool_version(tool)
         if was_v and now_v and was_v != now_v:
             skipped.append((tool, f"version {was_v} -> {now_v}"))
-    skip = {t for t, _ in skipped}
+    return skipped
 
-    # A run measures only what it was pointed at. A baselined file outside that
-    # was not looked at, so it is counted on one line rather than compared:
-    # read as zero it would print as a gain that never happened, once per file,
-    # and the hook checks one staged file per run. A measured file that
-    # went clean has no findings in `now`, so the target itself is added.
+
+def _compared_paths(target: str, root: Path, now: dict[str, Any],
+                    was: dict[str, Any]) -> tuple[set[str], int]:
+    """(the paths this run can compare, how many baselined paths it did not measure).
+
+    A run measures only what it was pointed at. A baselined file outside that
+    was not looked at, so it is counted on one line rather than compared: read
+    as zero it would print as a gain that never happened, once per file, and
+    the hook checks one staged file per run. A measured file that went clean
+    has no findings in `now`, so the target itself is added.
+    """
     rel_target = _rel(target, root)
     if Path(target).is_dir():
         prefix = "" if rel_target in ("", ".") else rel_target.rstrip("/") + "/"
@@ -277,7 +285,12 @@ def compare_baseline(checks: list[dict[str, Any]], target: str,
         in_scope = {rel_target}
     compared = set(now) | in_scope
     unmeasured = len(set(was) - compared)
+    return compared, unmeasured
 
+
+def _deltas(compared: set[str], now: dict[str, Any], was: dict[str, Any],
+            skip: set[str]) -> tuple[list[tuple[str, str, int, int]], list[str]]:
+    """(each (path, tool, before, after) that got worse, a line per changed count)."""
     worse, deltas = [], []
     for path in sorted(compared):
         tools = set(now.get(path, {})) | set(was.get(path, {}))
@@ -289,24 +302,41 @@ def compare_baseline(checks: list[dict[str, Any]], target: str,
                               f"({after - before:+d})")
             if after > before:
                 worse.append((path, tool, before, after))
+    return worse, deltas
 
+
+def _report_comparison(source: str, skipped: list[tuple[str, str]], deltas: list[str],
+                       unmeasured: int, worse: list[tuple[str, str, int, int]]) -> None:
     for tool, why in skipped:
         print(f"baseline: cannot compare {tool} -- {why}. Excluded from the "
               f"verdict rather than counted as zero.", file=sys.stderr)
     for line in deltas:
         print(line)
     if not deltas:
-        # Say it. A ratchet that only speaks when it fails is indistinguishable
-        # from one that never ran, which is the whole complaint in step 3.
+        # Said, not implied: a ratchet that only speaks when it fails is
+        # indistinguishable from one that never ran.
         print(f"baseline: no change against {Path(source).name}")
     if unmeasured:
         print(f"baseline: {unmeasured} other baselined file(s) not measured in "
               f"this run, so not compared")
-
     if worse:
-        print("", file=sys.stderr)
+        print(file=sys.stderr)
         print("baseline: WORSE than recorded --", file=sys.stderr)
         for path, tool, before, after in worse:
             print(f"  {path}  {tool}  {before} -> {after}", file=sys.stderr)
-        return 1
-    return 0
+
+
+def compare_baseline(checks: list[dict[str, Any]], target: str,
+                     source: str, mode: str) -> int:
+    """0 = no worse, 1 = worse, 2 = cannot compare."""
+    doc = _read_baseline(source, mode)
+    if doc is None:
+        return 2
+    root = _repo_root(target)
+    now = _counts_by_file(checks, root)
+    was = doc.get("files", {})
+    skipped = _uncomparable(_statuses(checks), doc.get("tools", {}))
+    compared, unmeasured = _compared_paths(target, root, now, was)
+    worse, deltas = _deltas(compared, now, was, {t for t, _ in skipped})
+    _report_comparison(source, skipped, deltas, unmeasured, worse)
+    return 1 if worse else 0
