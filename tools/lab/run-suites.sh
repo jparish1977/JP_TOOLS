@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# tools/lab/run-suites.sh -- run every JP_TOOLS suite, one line per suite.
+# tools/lab/run-suites.sh -- run every suite in the repo, one line per suite.
 #
 # ANSWERS: did any suite change outcome between two trees? One line each,
 #   "rc=N path :: last line of output", so a before-and-after pair reads side
 #   by side or through diff.
 #
-# TESTED AGAINST: origin/master at 78354db (11 suites) and
-#   fix/check-exit-on-unrun-tools (13 suites), 2026-09-14, all rc=0, with
+# TESTED AGAINST: two trees of this repo (11 and 13 suites), all rc=0, with
 #   test_check_phpstan.py printing its SKIP line because vendor/ was absent.
+#   A copy of the tree with a deliberately failing suite and a silent one
+#   added: the failing one printed rc=1 and its own last line, the silent
+#   one's line ended "::", and the run exited 1.
 #
-# NOT TESTED AGAINST: a deliberately broken suite. A failing suite should
-#   print rc=1 and its own last line, and this exits 1, but that path was not
-#   driven on purpose. Also not: Windows; suites that need root (ntfs skips its
-#   directory cases itself); a suite that prints nothing, whose line ends
-#   "::". The last line is a summary only when the suite prints one last.
+# NOT TESTED AGAINST: Windows; suites that need root (ntfs skips its
+#   directory cases itself). The last line is a summary only when the suite
+#   prints one last.
 #
 # usage: tools/lab/run-suites.sh [REPO_ROOT]
 #   default: the repo you are standing in, not the one this file lives in,

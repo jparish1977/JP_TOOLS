@@ -142,6 +142,8 @@ Good tools take work, and the default outcome is that the work is thrown away: a
 
 A directory is a blanket claim ("lesser tested") with no per-tool justification, which is §2.6's defect at directory scale. The header is the per-tool justification. The third line is the one people leave out, and it is the most useful: it tells the next user where the tool's answer stops meaning anything.
 
+**A recorded result never freezes the code that produced it.** A lab tool is fixed and restructured like any other code. Keeping the record true means re-running the tool against what it was tested on and saying in its header what changed and whether the output did; the revision that produced a recorded number stays in version control. A second copy kept "as run" is two homes for one tool (§2.13), and the copy's bugs are kept with it.
+
 **A standard met by copying is worth a generator.** Standards like the index row, the header and a common test shape are cheap for one tool and expensive by the dozen, because everyone retypes them and the copies drift. When a standard is being met by copying, write a generator for it.
 
 **A generator writes the shape, never the substance.** It emits the interface, the wiring and the index row. What differs every time (the assertion, the control, the reason) stays with the person, because a generator that fills those in writes a test that cannot fail. A generated test stub fails until it is filled in. A generator is a tool like any other: it lands in the lab with the header, and its index row names the standard it makes cheap.

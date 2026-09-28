@@ -2,14 +2,20 @@
 """Build the fixtures that answer "can --purge reach outside the directory it
 was told about, and does it claim more than it achieved".
 
-WHY THIS EXISTS. Reviewing JP_TOOLS PR #37 across three rounds, the two
-questions that actually decide whether spool-audit is safe are not readable
-from the source. Round 1 I read the anchoring and reported containment as
-BELIEVED, not measured, because building the fixtures by hand looked like more
-work than it was. Round 2 I built them in about four minutes and the answer
-changed from an opinion into a result.
+ANSWERS: the two questions that decide whether spool-audit's --purge is
+safe, which are not readable from the source: can it destroy content outside
+the spool (through a symlinked file, a symlinked directory, or a hard link),
+and does its report claim a removal it did not achieve. Measuring them takes
+minutes; reading the anchoring code only yields a belief.
 
-WHAT IT COST TO LEARN, so the next person does not re-derive it:
+TESTED AGAINST: spool-audit.py's --purge, unprivileged, on a scratch
+  directory: every outside case SURVIVED, the in-spool control was removed,
+  and the run exited 2 (see below).
+
+NOT TESTED AGAINST: a live /var/spool/cups as root with cupsd writing
+  concurrently. That gap is real.
+
+WHAT A FIXTURE NEEDS, so the next person does not re-derive it:
 
   - --purge only removes files whose FIRST BYTES are print data and which
     carry no job id. A fixture file must start with one of DOCUMENT_MAGIC
@@ -34,15 +40,11 @@ except the control should say SURVIVED. A DESTROYED line on any of the outside
 cases is a containment failure and blocks.
 
 EXPECT THE PURGE RUN TO EXIT 2, NOT 0, AND DO NOT READ THAT AS FAILURE.
-Verified against spool-audit.py:291, not assumed: exit 2 is "unknown", returned
-whenever `not complete` -- and this fixture deliberately plants two symlinks
-that the audit refuses to examine, so the run is INCOMPLETE by construction.
-That is the fixture working. Exit 0 from a purge over these fixtures would mean
-the symlinks were examined, which is the failure this harness exists to catch.
-
-NOT A CLAIM ABOUT ROOT. Everything here runs unprivileged against a scratch
-directory. It does not exercise a live /var/spool/cups with cupsd writing
-concurrently, and that gap is real.
+Exit 2 is "unknown", returned whenever the audit is not complete, and this
+fixture deliberately plants two symlinks that the audit refuses to examine,
+so the run is INCOMPLETE by construction. That is the fixture working. Exit 0
+from a purge over these fixtures would mean the symlinks were examined, which
+is the failure this harness exists to catch.
 """
 import os
 import sys
@@ -97,15 +99,19 @@ def verify(root: str) -> int:
     return 1 if bad else 0
 
 
-if __name__ == "__main__":
-    args = sys.argv[1:]
-    # A bare --help used to be taken as a positional path, so the tool built a
-    # directory literally called "--help". Caught by jp-tools-advisor running
-    # it. Positional paths are now anything that is not a flag.
+def main(args: list[str]) -> int:
+    # Positional paths are anything that is not a flag, so `--help` is never
+    # taken as a directory to build.
     if not args or "-h" in args or "--help" in args:
         sys.exit(__doc__)
     paths = [a for a in args if not a.startswith("-")]
     if not paths:
-        sys.exit("need a target directory\n" + __doc__)
-    target = paths[0]
-    sys.exit(verify(target) if "--verify" in args else (build(target) or 0))
+        sys.exit("need a target directory\n" + (__doc__ or ""))
+    if "--verify" in args:
+        return verify(paths[0])
+    build(paths[0])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

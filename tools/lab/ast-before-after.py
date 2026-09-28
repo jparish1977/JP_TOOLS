@@ -3,19 +3,14 @@
 
 ANSWERS: between two refs of one git repository, which Python functions
   changed structure (by AST, so whitespace and comments do not count), what
-  each looked like before and after as a code figure (another repo's
-  vm/code-figure.py, the same renderer the covers use), each one's node count,
-  depth and McCabe complexity on both sides, and how many check.py findings
-  (ruff and smells) each changed file carried before and after, by rule.
-  Joe, 2026-09-15: "it hink it will be really interesting to see the
-  difference in the ast drawing of the code before and after this cleanup
-  effort", then "befor/after on both would be best" (drawings and
-  patterns/antipatterns).
+  each looked like before and after as a code figure (drawn by the renderer
+  named with --figure-tool), each one's node count, depth and McCabe
+  complexity on both sides, and how many check.py findings (ruff and smells)
+  each changed file carried before and after, by rule.
 
-TESTED AGAINST: another repo b2de031^..d4a4ee3 and another repo
-  77e90b4..main, 2026-09-15. Positive control: dtlibidx.ibase, changed by a
-  known one-line fix in that range, is reported changed; a function the range
-  never touched is not reported at all.
+TESTED AGAINST: two repositories, each across a cleanup range. Positive
+  control: a function changed by a known one-line fix in the range is
+  reported changed; a function the range never touched is not reported.
 
 NOT TESTED AGAINST: functions renamed or moved between classes (they read as
   one removed and one added); files renamed (the diff is by path). Findings
@@ -25,8 +20,8 @@ NOT TESTED AGAINST: functions renamed or moved between classes (they read as
   project to type-check against. Complexity is ruff's C901 at threshold 0,
   not a second implementation.
 
-usage: ast-before-after.py REPO BEFORE AFTER --out DATA.json
-         [--skip-dir tests --skip-dir checks] [--figure-tool PATH]
+usage: ast-before-after.py REPO BEFORE AFTER --out DATA.json --figure-tool PATH
+         [--skip-dir tests --skip-dir checks]
 """
 
 import argparse
@@ -200,8 +195,8 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--skip-dir", action="append", default=[],
                     help="a top-level directory to leave out, e.g. tests; repeatable")
-    ap.add_argument("--figure-tool", default=os.path.expanduser(
-        "~/projects/another repo/vm/code-figure.py"))
+    ap.add_argument("--figure-tool", required=True,
+                    help="the code-figure renderer (a Python file) that draws each function")
     a = ap.parse_args()
     if git(a.repo, "rev-parse", "--verify", a.before) is None or \
             git(a.repo, "rev-parse", "--verify", a.after) is None:

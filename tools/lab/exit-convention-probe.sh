@@ -1,36 +1,32 @@
 #!/bin/sh
 # What does a tool exit with on FINDINGS, on CLEAN, and on REFUSAL?
 #
-# Built ad hoc on 2026-09-01 and retyped four times, which is the argument for
-# it being a file. It produced the nine-runner table in JP_TOOLS
-# METHODOLOGY-s10-DRAFT.md item 17, and the finding that check.py's single
-# "error when returncode not in (0,1)" rule is wrong for three of its twelve
-# runners -- cppcheck inverts it, the stylelint node runner means "crashed",
-# and phpcs exits 2 on an ORDINARY findings run.
+# ANSWERS: the exit code of each of the three cases, per tool. It showed that
+# a single "error when returncode not in (0,1)" rule is wrong for three of
+# check.py's runners: cppcheck inverts it, the stylelint node runner means
+# "crashed", and phpcs exits 2 on an ORDINARY findings run.
 #
 # WHY IT IS NOT "run the tool and look": the answer is per tool, it is three
-# cases not one, and the case that matters -- refusal -- is the one nobody
-# constructs by accident. Every wrong answer this fleet got about exit codes
-# came from testing one case.
+# cases not one, and the case that matters, refusal, is the one nobody
+# constructs by accident. Wrong answers about exit codes come from testing
+# one case.
 #
-# WHAT IT WAS TESTED AGAINST: nine runners on a laptop, 2026-09-01 --
-# ruff 0.16.1, mypy, eslint, prettier, stylelint, cppcheck, phpstan, phpcs,
-# rector. Positive control is built in: it REFUSES a run where dirty and clean
-# are the same path, because that yields three identical rows that look like a
-# finding about the tool and are a fact about the inputs. That guard exists
-# because this script's own first demo did exactly that.
+# TESTED AGAINST: nine runners on one Linux machine: ruff 0.16.1, mypy,
+# eslint, prettier, stylelint, cppcheck, phpstan, phpcs, rector. The positive
+# control is built in: it REFUSES a run where dirty and clean are the same
+# path, because that yields three identical rows that look like a finding
+# about the tool and are a fact about the inputs.
 #
-# WHAT IT WAS NOT TESTED AGAINST: one box, one afternoon, one version of each
-# tool. Nothing on Windows. No tool whose exit codes are configurable at
-# runtime, which several linters have and none of the nine used. It reports
-# THREE cases; a tool with a fourth meaningful code will be described
-# incompletely and the script will not say so.
+# NOT TESTED AGAINST: one machine, one version of each tool. Nothing on
+# Windows. No tool whose exit codes are configurable at runtime, which several
+# linters have and none of the nine used. It reports THREE cases; a tool with
+# a fourth meaningful code will be described incompletely and the script will
+# not say so.
 #
-# WHERE IT MISLED ITS OWN AUTHOR: the first four phpcs rows were wrong because
-# the probe ran RAW phpcs while check.py invokes it with --standard. Under
-# phpcs's PEAR default a deliberately tidy file reported five errors and one
-# warning, the same counts as the deliberately dirty one by coincidence, and
-# that near-match was nearly written up as an anomaly worth investigating.
+# PROBE WITH THE CALLER'S ARGUMENTS: raw phpcs uses its PEAR default, under
+# which a deliberately tidy file reported five errors and one warning, the
+# same counts as the deliberately dirty one by coincidence. check.py passes
+# --standard, so the raw rows described a tool check.py never runs.
 #
 # USAGE
 #   exit-convention-probe.sh "<cmd template with {} for the target>" \

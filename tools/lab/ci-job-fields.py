@@ -6,17 +6,17 @@ ANSWERS: what did check.py actually report inside a CI job, per file? Its
   stderr, without reading 400 lines of log. A green job is not the answer: a
   step whose loop kept only the last exit code was green over a failure.
 
-TESTED AGAINST: JP_TOOLS PR #59, runs 34817262214 and 34818216343,
-  2026-09-14. It showed prettier's summary line counted as a file, the defect
-  behind that PR's second commit, and then the corrected 6 and 2 warnings.
+TESTED AGAINST: two GitHub Actions runs of this repo's check job, one before
+  and one after a fix. It showed prettier's summary line counted as a file
+  (the defect), and then the corrected 6 and 2 warnings.
 
 NOT TESTED AGAINST: Forgejo Actions logs, which prefix lines differently;
   any output but check.py's --pretty JSON.
 
-THE INPUT CAN BE A CONFIDENT NOTHING. `gh run view RUN --log` returned 0 lines
-  with exit 0 for master's run 33540757691, both run-level and per job. So this
-  reports how many lines it read, and exits 1 on zero, so an empty log cannot
-  pass for a clean one.
+THE INPUT CAN BE A CONFIDENT NOTHING. `gh run view RUN --log` can return 0
+  lines with exit 0, both run-level and per job. So this reports how many
+  lines it read, and exits 1 on zero, so an empty log cannot pass for a
+  clean one.
 
 usage:
     gh run view RUN -R OWNER/REPO --job JOB --log | tools/lab/ci-job-fields.py [KEY ...]
