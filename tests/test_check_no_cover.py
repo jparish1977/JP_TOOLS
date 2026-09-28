@@ -9,32 +9,20 @@ the parsing and the rule together rather than a reimplementation of either.
 
 WHAT THIS PINS DOWN
 The check exists because `# pragma: no cover` is a claim that a function has
-nothing worth testing, and nothing rechecks that claim as the function grows.
-On spool-audit.py the exempt region reached 430 lines of 1350 holding 51
-branches, and every serious defect on that branch came from inside it. See
-docs/coverage.md.
+nothing worth testing, and nothing rechecks that claim as the function grows,
+so the exempt region becomes the region nobody looks at. See docs/coverage.md.
 
 The rule: a pragma on a branchy function must state a reason. A pragma on a
 branchless one need not, because it is self-evidently a wrapper.
 """
 
-import importlib.util
 import pathlib
 import sys
 import tempfile
 
-MODULE_PATH = pathlib.Path(__file__).resolve().parent.parent / "check.py"
+import jpcheck_loader
 
-_cache = pathlib.Path(importlib.util.cache_from_source(str(MODULE_PATH)))
-if _cache.exists():
-    _cache.unlink()
-importlib.invalidate_caches()
-
-_spec = importlib.util.spec_from_file_location("check_mod", MODULE_PATH)
-assert _spec is not None and _spec.loader is not None
-check_mod = importlib.util.module_from_spec(_spec)
-sys.modules["check_mod"] = check_mod
-_spec.loader.exec_module(check_mod)
+check_mod = jpcheck_loader.load("coverage")
 
 FAILURES: list[str] = []
 

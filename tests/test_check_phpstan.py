@@ -5,21 +5,15 @@ Tests check.py's phpstan runner against a real phpstan.
 
 No pytest, no dependencies, same as the rest of tests/.
 
-THE BUG THIS PINS DOWN
-    run_phpstan iterated `data["files"].values()`. phpstan keys that dict BY
-    FILENAME and its per-message objects carry no "file" field, so discarding
-    the key threw away the only copy of the path. `msg.get("file", target)`
-    then fell through to the default on every message, and an entire run
-    reported the target directory as the location:
+WHAT THIS PINS DOWN
+    phpstan keys its results BY FILENAME and its per-message objects carry no
+    "file" field, so a runner that iterates the values alone throws away the
+    only copy of the path, and every finding reports the target directory as
+    its location. Nothing in the summary looks wrong, because the count is
+    right.
 
-        /home/user/projects/a consuming repo:214  Ternary condition always false
-
-    Every finding named the same "file", none of which was a file. Nothing in
-    the summary looked wrong, because the count was right.
-
-    Also asserts the configured level. configs/phpstan.neon shipped `level: 5`
-    while METHODOLOGY section 2.5 said 8, and on one real project that was 3
-    findings reported against 17 present.
+    Also asserts the configured level is the one METHODOLOGY section 2.5
+    states, 8: a lower level reports a fraction of the findings present.
 
 Skips rather than fails when the environment cannot support it:
   - no php                     -> skip
@@ -33,11 +27,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+import jpcheck_loader
 
-# check.py keeps its argparse behind a main guard, so importing is safe.
-import check  # noqa: E402 -- after the sys.path insert above, by construction
+ROOT = jpcheck_loader.ROOT
+check = jpcheck_loader.load("php_tools")
 
 # Two findings at level 8, neither of them at level 5: an unspecified iterable
 # value type, and a property with no declared type.
@@ -94,7 +87,7 @@ def main() -> int:
         issues = result["issues"]
         check_("it found something to report", len(issues) > 0)
 
-        # The bug: every issue's file was the directory that was passed in.
+        # Each finding names its own file, not the directory passed in.
         named_dir = [i for i in issues if i["file"].rstrip("/") == str(tmp)]
         check_("no finding is attributed to the target directory",
                not named_dir,

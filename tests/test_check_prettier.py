@@ -3,17 +3,14 @@
 JP_TOOLS/tests/test_check_prettier.py
 run_prettier must count unformatted FILES, not prettier's summary line.
 
-THE BUG THIS PINS DOWN
+WHAT THIS PINS DOWN
     `prettier --check` ends with a summary on its own `[warn]` line:
 
         [warn] jp_eslint.mjs
         [warn] Code style issues found in the above file. Run Prettier with --write to fix.
 
-    run_prettier read every `[warn]` line as a filename, so each unformatted
-    file became two warnings, one of them "file": "Code style issues found...".
-    Seen in CI on PR #59, the first run in which prettier ran at all: before
-    it, prettier resolved through PATH only and was "unavailable" after
-    `npm install`.
+    Read as a filename, that line would turn each unformatted file into two
+    warnings, one of them "file": "Code style issues found...".
 
 A fake prettier stands in for the real one, so this needs neither node nor
 prettier installed, and it pins the output shapes prettier 2 and 3 print.
@@ -23,20 +20,17 @@ No pytest, no dependencies.
     python tests/test_check_prettier.py
 """
 
-import importlib.util
 import os
 import pathlib
 import sys
 import tempfile
 from typing import Any
 
-MODULE_PATH = pathlib.Path(__file__).resolve().parent.parent / "check.py"
-sys.dont_write_bytecode = True
-_spec = importlib.util.spec_from_file_location("check_mod", MODULE_PATH)
-assert _spec is not None and _spec.loader is not None
-check_mod = importlib.util.module_from_spec(_spec)
-sys.modules["check_mod"] = check_mod
-_spec.loader.exec_module(check_mod)
+import jpcheck_loader
+
+# run_prettier looks _node_bin up in its own module, so that is where the
+# fake is installed.
+js_tools = jpcheck_loader.load("js_tools")
 
 FAILURES: list[str] = []
 
@@ -60,9 +54,9 @@ def run_with(tmp: pathlib.Path, output: str, rc: int) -> dict[str, object]:
     out.write_text(output)
     os.environ["FAKE_PRETTIER_OUT"] = str(out)
     os.environ["FAKE_PRETTIER_RC"] = str(rc)
-    # Through an Any alias: mypy types a module loaded from a spec as
+    # Through an Any alias: mypy types an imported-by-name module as
     # ModuleType, which it lets you read attributes from but not assign.
-    mod: Any = check_mod
+    mod: Any = js_tools
     real = mod._node_bin
     mod._node_bin = lambda name: str(fake)
     try:

@@ -8,11 +8,7 @@ written to a temp directory and run through the real check.
 
 WHAT THIS PINS DOWN
 A swallowed exception is a decision that a failure does not matter here, and
-without a reason on the line the decision is invisible. On 2026-09-15
-another repo was found naming 109 scripts' processes under
-`try/except ImportError: pass` and `contextlib.suppress(ImportError)`, so a
-script that failed to name itself ran on quietly, and the first fix added the
-same blanket to 30 more. Nothing refused any of it.
+without a reason on the line the decision is invisible.
 
 The rule: a `contextlib.suppress(...)` or a handler that only passes,
 continues, breaks or returns a default must carry `reason:` on its own line
@@ -20,23 +16,13 @@ or inside its body. A handler that does something (logs, raises, sets state)
 is a decision the code shows and is not flagged.
 """
 
-import importlib.util
 import pathlib
 import sys
 import tempfile
 
-MODULE_PATH = pathlib.Path(__file__).resolve().parent.parent / "check.py"
+import jpcheck_loader
 
-_cache = pathlib.Path(importlib.util.cache_from_source(str(MODULE_PATH)))
-if _cache.exists():
-    _cache.unlink()
-importlib.invalidate_caches()
-
-_spec = importlib.util.spec_from_file_location("check_mod", MODULE_PATH)
-assert _spec is not None and _spec.loader is not None
-check_mod = importlib.util.module_from_spec(_spec)
-sys.modules["check_mod"] = check_mod
-_spec.loader.exec_module(check_mod)
+check_mod = jpcheck_loader.load("suppressions")
 
 FAILURES: list[str] = []
 
@@ -175,9 +161,11 @@ def test_unparseable_source_is_left_to_ruff() -> None:
 
 
 def test_check_py_passes_its_own_rule() -> None:
-    result = check_mod.run_suppress_reason(str(MODULE_PATH))
-    check("check.py states a reason on every silent catch",
-          [f"{i['line']}" for i in result["issues"]], [])
+    root = jpcheck_loader.ROOT
+    issues = (check_mod.run_suppress_reason(str(root / "check.py"))["issues"]
+              + check_mod.run_suppress_reason(str(root / "jpcheck"))["issues"])
+    check("check.py and jpcheck/ state a reason on every silent catch",
+          [f"{i['file']}:{i['line']}" for i in issues], [])
 
 
 def main() -> int:

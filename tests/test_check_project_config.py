@@ -9,10 +9,8 @@ THE GAP THIS PINS DOWN
     when it finds a project-local config file. It counted ANY pyproject.toml
     (and, for mypy, any setup.cfg). ruff skips a pyproject.toml with no
     [tool.ruff] and mypy a setup.cfg with no [mypy], so a project that only
-    declared its own name and dependencies ran on the tools' built-in defaults,
-    and every rule configs/ruff.toml adds was off. Measured with ruff 0.16.1:
-    N802 and C416 reported without a pyproject.toml, only I001 with a
-    three-line [project] one.
+    declared its own name and dependencies would run on the tools' built-in
+    defaults, with every rule configs/ruff.toml adds switched off.
 
 AND mypy stops looking at the repository root (.git or .hg) where ruff does
 not, so a [tool.mypy] above a repo is not that repo's config: counting it
@@ -24,7 +22,6 @@ The end-to-end part skips when ruff is missing.
     python3 tests/test_check_project_config.py
 """
 
-import importlib.util
 import json
 import shutil
 import subprocess
@@ -32,17 +29,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+import jpcheck_loader
+
+ROOT = jpcheck_loader.ROOT
 CHECK_PY = ROOT / "check.py"
-sys.dont_write_bytecode = True
-_cache = Path(importlib.util.cache_from_source(str(CHECK_PY)))
-if _cache.exists():
-    _cache.unlink()
-_spec = importlib.util.spec_from_file_location("check_mod", CHECK_PY)
-assert _spec is not None and _spec.loader is not None
-check_mod = importlib.util.module_from_spec(_spec)
-sys.modules["check_mod"] = check_mod
-_spec.loader.exec_module(check_mod)
+check_mod = jpcheck_loader.load("python_tools")
 
 BARE_PYPROJECT = '[project]\nname = "demo"\nversion = "0.1.0"\nrequires-python = ">=3.12"\n'
 # N802 and C416 are on in configs/ruff.toml and off in ruff's built-in defaults.

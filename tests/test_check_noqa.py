@@ -8,10 +8,8 @@ No pytest, matching the rest of tests/. Every case is a small source file
 written to a temp directory and run through the real check.
 
 WHAT THIS PINS DOWN
-A `# pragma: no cover` has to say why and `list-exemptions.py` lists every one.
-A `# noqa` had neither, so it suppressed a finding with nothing required of it
-and nothing listing it (#58). Joe, 2026-09-14: "the damned good reasons need to
-be damned good reasons, not an easy escape route."
+A `# pragma: no cover` has to say why, and a `# noqa` is held to the same bar:
+no suppression without a real reason.
 
 The rule, in three parts, because they are not one thing:
   * a marker must state a reason, since for a structural suppression the
@@ -21,28 +19,19 @@ The rule, in three parts, because they are not one thing:
   * `BLE001` and `S110` over a handler that SWALLOWS are not available under
     any reason, because the evidence there is the exception recorded
 
-And one regression, which is why the check exists at all: a `# noqa` used to
-take a blind swallow from 2 errors to 0, suppress-reason included, because that
-check defers the shape to ruff and a noqa is how you stop ruff reporting it.
+And the case the check exists for: without it, a `# noqa` takes a blind
+swallow from 2 errors to 0, suppress-reason included, because that check
+defers the shape to ruff and a noqa is how you stop ruff reporting it.
 """
 
-import importlib.util
 import pathlib
 import sys
 import tempfile
+from typing import Any
 
-MODULE_PATH = pathlib.Path(__file__).resolve().parent.parent / "check.py"
+import jpcheck_loader
 
-_cache = pathlib.Path(importlib.util.cache_from_source(str(MODULE_PATH)))
-if _cache.exists():
-    _cache.unlink()
-importlib.invalidate_caches()
-
-_spec = importlib.util.spec_from_file_location("check_mod", MODULE_PATH)
-assert _spec is not None and _spec.loader is not None
-check_mod = importlib.util.module_from_spec(_spec)
-sys.modules["check_mod"] = check_mod
-_spec.loader.exec_module(check_mod)
+check_mod = jpcheck_loader.load("suppressions")
 
 FAILURES: list[str] = []
 
@@ -52,11 +41,12 @@ def check(label: str, got: object, want: object) -> None:
         FAILURES.append(f"{label}: got {got!r}, want {want!r}")
 
 
-def _run(source: str) -> list[dict]:
+def _run(source: str) -> list[dict[str, Any]]:
     with tempfile.TemporaryDirectory() as tmp:
         f = pathlib.Path(tmp) / "sample.py"
         f.write_text(source)
-        return check_mod.run_noqa(str(f))["issues"]
+        issues: list[dict[str, Any]] = check_mod.run_noqa(str(f))["issues"]
+        return issues
 
 
 def errors_for(source: str) -> list[str]:
@@ -67,11 +57,9 @@ def errors_for(source: str) -> list[str]:
 def quiet_about(source: str) -> list[str]:
     """Everything the check emits, of any severity.
 
-    THIS CHECK REFUSES AND DOES NOT LIST (Joe, 2026-09-16), so an accepted
-    marker produces NOTHING, not a warning. Pinned as its own idea rather than
-    folded into errors_for: the first version listed every marker, and the
-    difference between "accepted" and "accepted and announced" is the whole of
-    that decision.
+    THIS CHECK REFUSES AND DOES NOT LIST, so an accepted marker produces
+    NOTHING, not a warning. Pinned as its own idea rather than folded into
+    errors_for: "accepted" and "accepted and announced" are different.
     """
     return [i["rule"] for i in _run(source)]
 
@@ -83,7 +71,7 @@ def suppress_rules_for(source: str) -> list[str]:
         return [i["rule"] for i in check_mod.run_suppress_reason(str(f))["issues"]]
 
 
-# The shape #58 is about: a structural suppression whose evidence is a sentence.
+# A structural suppression whose evidence is a sentence.
 E402 = "import os\nsys.path.insert(0, '/x')\nimport dt  # noqa: E402 -- found at run time above\n"
 
 
@@ -116,25 +104,24 @@ RECORDS = ("def f():\n    try:\n        return g()\n"
            "        return f'{type(e).__name__}: {e}'\n")
 
 
-def test_BLE001_over_a_swallow_is_refused_whatever_the_reason() -> None:
+def test_ble001_over_a_swallow_is_refused_whatever_the_reason() -> None:
     check("a damned good reason does not make a blind catch less blind",
           errors_for(SWALLOW.format(why="dtserve raises anything")),
           ["noqa-not-explainable"])
 
 
-def test_BLE001_over_a_RECORDED_exception_is_accepted() -> None:
-    # #58's argument is that the evidence is the exception recorded rather than
-    # a sentence. A handler that records it has met that bar, so refusing it
-    # buys nothing. Measured against another repo 2026-09-16: the literal
-    # reading fires on 17 sites, every one a test harness of this exact shape.
+def test_ble001_over_a_recorded_exception_is_accepted() -> None:
+    # The evidence for a broad catch is the exception recorded rather than a
+    # sentence. A handler that records it (a test harness reporting the
+    # failure, say) has met that bar, so refusing it buys nothing.
     check("a handler that reports the exception is not refused",
           errors_for(RECORDS), [])
 
 
 def test_a_noqa_cannot_hide_a_swallow_from_suppress_reason() -> None:
-    # THE REGRESSION. suppress-reason skips a blind except-pass because ruff's
-    # S110 owns it; `# noqa: S110` is how ruff stops owning it, and the shape
-    # then measured 0 errors from all five tools.
+    # suppress-reason skips a blind except-pass because ruff's S110 owns it;
+    # `# noqa: S110` is how ruff stops owning it, and without this the shape
+    # would read 0 errors from every tool.
     bare = "def f():\n    try:\n        g()\n    except Exception:\n        pass\n"
     hushed = ("def f():\n    try:\n        g()\n"
               "    except Exception:  # noqa: BLE001,S110\n        pass\n")
@@ -145,10 +132,9 @@ def test_a_noqa_cannot_hide_a_swallow_from_suppress_reason() -> None:
 
 
 def test_the_marker_is_matched_case_insensitively() -> None:
-    # ruff's directive is case-insensitive, so every rule here has to be too.
-    # Matched case-sensitively, `# NOQA: BLE001,S110` over a blind swallow read
-    # 0 from every tool: the hole this check exists to close, reopened by
-    # holding shift. jp-tools' review of #109.
+    # ruff's directive is case-insensitive, so every rule here has to be too:
+    # otherwise `# NOQA: BLE001,S110` over a blind swallow reads 0 from every
+    # tool, the hole this check exists to close.
     check("NOQA over a swallow is still refused",
           errors_for(SWALLOW.replace("noqa", "NOQA").format(why="x")),
           ["noqa-not-explainable"])
@@ -170,8 +156,7 @@ def test_a_marker_that_is_not_a_marker_is_not_counted() -> None:
 def test_type_ignore_is_never_this_check_s_business() -> None:
     src = "x = y  # type: ignore[assignment]\n"
     check("an unreasoned type: ignore is not an error", errors_for(src), [])
-    check("and nothing is said about it: #58 leaves that open and dropping "
-          "the listing left nothing for it to belong to", quiet_about(src), [])
+    check("and nothing is said about it", quiet_about(src), [])
 
 
 def test_an_unparseable_file_yields_nothing_from_this_check() -> None:
@@ -180,9 +165,11 @@ def test_an_unparseable_file_yields_nothing_from_this_check() -> None:
 
 
 def test_check_py_passes_its_own_rule() -> None:
-    issues = check_mod.run_noqa(str(MODULE_PATH))["issues"]
-    check("check.py states a reason on every marker it carries",
-          [f"{i['line']}:{i['rule']}" for i in issues if i["severity"] == "error"], [])
+    root = jpcheck_loader.ROOT
+    issues = (check_mod.run_noqa(str(root / "check.py"))["issues"]
+              + check_mod.run_noqa(str(root / "jpcheck"))["issues"])
+    check("check.py and jpcheck/ state a reason on every marker they carry",
+          [f"{i['file']}:{i['line']}:{i['rule']}" for i in issues if i["severity"] == "error"], [])
 
 
 def main() -> int:

@@ -174,6 +174,8 @@ def crash_case(tmp: Path) -> None:
     tools.mkdir()
     for name in ("check.py", "install-hooks.py"):
         shutil.copy2(ROOT / name, tools / name)
+    shutil.copytree(ROOT / "jpcheck", tools / "jpcheck",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(ROOT / "hooks", tools / "hooks")
     (tools / "fix-dashes.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
     git(tools, "init", "-q")

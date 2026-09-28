@@ -328,6 +328,8 @@ def fake_jp_tools(at: Path, with_template: bool = True, git_repo: bool = True) -
     git_repo=False, a plain copy with no .git at all."""
     at.mkdir(parents=True)
     shutil.copy2(ROOT / "check.py", at / "check.py")
+    shutil.copytree(ROOT / "jpcheck", at / "jpcheck",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     # The template runs it before check.py and fails closed without it, so a
     # tree missing it would read as BROKEN rather than as the case under test.
     shutil.copy2(ROOT / "fix-dashes.py", at / "fix-dashes.py")
