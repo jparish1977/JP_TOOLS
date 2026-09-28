@@ -3,7 +3,7 @@
 [![Code Quality](https://github.com/jparish1977/JP_TOOLS/actions/workflows/check.yml/badge.svg)](https://github.com/jparish1977/JP_TOOLS/actions/workflows/check.yml)
 
 Developer toolbox for code quality, data recovery, file analysis, and archive management.
-Built with pluggable interfaces — every tool is coded to contracts with swappable adapters.
+Built with pluggable interfaces -- every tool is coded to contracts with swappable adapters.
 
 > **Read [METHODOLOGY.md](METHODOLOGY.md) first.**
 > JP_TOOLS is a set of practices, not just a set of scripts. The methodology is
@@ -44,7 +44,7 @@ composer config repositories.iteration8-utilities vcs https://github.com/jparish
 composer require iteration8/utilities:dev-master
 ```
 
-That edits your local `composer.json` — don't commit those two entries back.
+That edits your local `composer.json` -- don't commit those two entries back.
 
 ## Tools
 
@@ -57,7 +57,7 @@ That edits your local `composer.json` — don't commit those two entries back.
 | `install-hooks.py` | Install pre-commit hook into any git repo |
 | `init-ci.py` | Copy GitHub Actions CI template into a repo |
 
-### File Analysis (PHP — hex architecture)
+### File Analysis (PHP -- hex architecture)
 
 | Script | Purpose |
 |---|---|
@@ -65,7 +65,7 @@ That edits your local `composer.json` — don't commit those two entries back.
 | | Pluggable hashers, caches (memory, filesystem, SQLite), output formats |
 | | Worker pool for parallel hashing, persistent hash DB for instant re-scans |
 
-`find-dupes.php` depends on `iteration8/utilities`, which lives in a private repo — see
+`find-dupes.php` depends on `iteration8/utilities`, which lives in a private repo -- see
 [Optional: find-dupes.php](#optional-find-dupesphp). Nothing else in JP_TOOLS needs it.
 
 ### Data Recovery (Python)
@@ -76,14 +76,14 @@ That edits your local `composer.json` — don't commit those two entries back.
 | `undelete.py` | Recover deleted files from NTFS/ext filesystems |
 | `image-disk.py` | Forensic disk imaging via ddrescue |
 | `scan-image.py` | Scan raw images for ROM signatures and embedded files |
-| `ntfs-inventory.py` | List an **unmountable** NTFS volume to TSV — resumable, metadata only |
+| `ntfs-inventory.py` | List an **unmountable** NTFS volume to TSV -- resumable, metadata only |
 | `ntfs-size.py` | Size a subtree on an unmountable volume, before committing to a copy |
-| `ntfs-extract.py` | Copy a tree off an unmountable volume — resumable, skips unreadable files |
+| `ntfs-extract.py` | Copy a tree off an unmountable volume -- resumable, skips unreadable files |
 | `inventory-drive.py` | Catalogue a **mounted** volume to the same TSV format, for offline diffing |
 
 The last four cover a gap between imaging and carving: **the volume will not
 mount, but the live files are intact.** `image-disk.py` needs somewhere to put a
-full image, and `undelete.py` looks for deleted files — neither helps when the
+full image, and `undelete.py` looks for deleted files -- neither helps when the
 files are fine and only the filesystem metadata is damaged. Inventory first,
 size what you might want, then copy. Comparing that inventory against drives you
 already own is usually what shrinks the job most.
@@ -92,7 +92,7 @@ already own is usually what shrinks the job most.
 
 | Script | Purpose |
 |---|---|
-| `spool-audit.py` | Report documents CUPS keeps after printing, including its TempDir, and remove (`--purge`) the content-proven leftovers `cancel` cannot reach. Never touches config, daemon, job files, or anything it could not identify — it names the CUPS commands that clear those |
+| `spool-audit.py` | Report documents CUPS keeps after printing, including its TempDir, and remove (`--purge`) the content-proven leftovers `cancel` cannot reach. Never touches config, daemon, job files, or anything it could not identify -- it names the CUPS commands that clear those |
 
 Printing sends the whole document through CUPS, and CUPS may keep a copy after
 the job finishes. Print a password, a recovery sheet or a private key and that
@@ -169,7 +169,7 @@ surface alone. Only the decoded script settles it.
 `autoit-ripper` reads the resource layout; this also handles the **overlay**
 layout used by older Aut2Exe builds, where the payload is appended after the
 last section and `autoit-ripper` stops with "Couldn't find any appropiate PE
-resource directory" — a layout miss reported as a failure.
+resource directory" -- a layout miss reported as a failure.
 
 ```bash
 pip install autoit-ripper
@@ -177,7 +177,7 @@ python3 autoit-extract.py SUSPECT.exe -o ./out
 ```
 
 Nothing is executed; the input is read as bytes. Read the indicator lines
-rather than counting them — a device-flashing tool legitimately runs other
+rather than counting them -- a device-flashing tool legitimately runs other
 binaries, and what matters is which ones and from where.
 
 ### VM / Image Triage (Python)
@@ -267,8 +267,8 @@ and runs the appropriate tools for each:
 | Python | `.py` | ruff, mypy | pip-audit |
 | JavaScript | `.js`, `.jsx` | eslint, prettier | npm audit |
 | TypeScript | `.ts`, `.tsx` | eslint (typescript-eslint), prettier | npm audit |
-| CSS | `.css`, `.scss`, `.less` | stylelint, prettier | — |
-| HTML | `.html` | eslint, stylelint, prettier | — |
+| CSS | `.css`, `.scss`, `.less` | stylelint, prettier | none |
+| HTML | `.html` | eslint, stylelint, prettier | none |
 | PHP | `.php` | phpstan, phpcs, rector | composer audit |
 
 Skipped directories: `node_modules`, `vendor`, `__pycache__`, `.git`, `.venv`, `dist`, `build`
@@ -339,7 +339,7 @@ Use `git commit --no-verify` to bypass when needed.
 python init-ci.py /path/to/repo
 ```
 
-Creates `.github/workflows/check.yml` — runs on push to main and on PRs.
+Creates `.github/workflows/check.yml` -- runs on push to main and on PRs.
 
 ## FileScanner Library
 

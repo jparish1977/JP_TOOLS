@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * JP_TOOLS Stylelint runner — lints CSS files and <style> blocks in HTML.
+ * JP_TOOLS Stylelint runner: lints CSS files and <style> blocks in HTML.
  *
  * Usage: node jp_stylelint.mjs <path>
  * Output: JSON array of stylelint result objects

@@ -9,7 +9,7 @@
         "squizlabs/php_codesniffer": "^3.10"
     },
     "suggest": {
-        "iteration8/utilities": "Required by find-dupes.php only. Private repo — see README (Optional: find-dupes.php)."
+        "iteration8/utilities": "Required by find-dupes.php only. Private repo: see README (Optional: find-dupes.php)."
     },
     "config": {
         "optimize-autoloader": true,

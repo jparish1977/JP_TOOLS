@@ -13,8 +13,8 @@
  *   php find-dupes.php <directory> --ignore vendor,dist     Ignore directories
  *
  * Examples:
- *   php find-dupes.php ~/saved/from-surface-pro7
- *   php find-dupes.php ~/saved/from-surface-pro7 ~/saved/sa510 --json
+ *   php find-dupes.php ~/backup/old-laptop
+ *   php find-dupes.php ~/backup/old-laptop ~/backup/old-ssd --json
  *   php find-dupes.php ~/Pictures --cache ~/.hash-cache --algo sha256
  */
 
@@ -24,7 +24,7 @@ ini_set('memory_limit', '1G');
 
 $autoload = __DIR__ . '/vendor/autoload.php';
 if (!is_file($autoload)) {
-    fwrite(STDERR, "vendor/autoload.php missing — run: composer install\n");
+    fwrite(STDERR, "vendor/autoload.php missing; run: composer install\n");
     exit(1);
 }
 require_once $autoload;
@@ -119,7 +119,7 @@ while ($args) {
               --ignore <dirs>       Comma-separated directories to ignore
               --workers N, -w N     Parallel scan processes for --stream mode
               --db <path>           Persistent SQLite hash database (hash once, skip unchanged files)
-              --stream              Streaming mode — scan to DB, query for dupes (requires --db)
+              --stream              Streaming mode --scan to DB, query for dupes (requires --db)
               --help, -h            Show this help
 
             HELP;
@@ -166,13 +166,13 @@ $finder = new DuplicateFinder($scanner, $output);
 $start = microtime(true);
 
 if ($options['stream']) {
-    // Streaming mode — scan to DB, query DB for dupes. No memory accumulation.
+    // Streaming mode: scan to DB, query DB for dupes. No memory accumulation.
     if (!($cache instanceof SqliteCache)) {
         fwrite(STDERR, "Error: --stream requires --db <path>\n");
         exit(1);
     }
 
-    // Scan directories — parallel if workers requested, sequential otherwise
+    // Scan directories: parallel if workers requested, sequential otherwise
     if ($options['workers'] > 0 && count($positional) > 1) {
         $output->info("Spawning " . min($options['workers'], count($positional)) . " parallel scan processes");
         $processes = [];
@@ -278,7 +278,7 @@ if ($options['stream']) {
         'timestamp' => date('c'),
     ];
 } elseif (count($positional) === 1) {
-    // Single directory — find dupes within
+    // Single directory: find dupes within
     $groups = $finder->findDuplicates($positional[0]);
 
     $elapsed = round(microtime(true) - $start, 2);
@@ -298,7 +298,7 @@ if ($options['stream']) {
         'timestamp' => date('c'),
     ];
 } else {
-    // Two directories — compare
+    // Two directories: compare
     $result = $finder->compare($positional[0], $positional[1]);
 
     $elapsed = round(microtime(true) - $start, 2);

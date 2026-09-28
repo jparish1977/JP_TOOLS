@@ -177,7 +177,7 @@ def install(repo_path: Path) -> None:
             print(f"JP_TOOLS hook already installed at {hook_file}")
             print("Use --remove to uninstall first.")
             return
-        # There's a non-JP_TOOLS hook — don't clobber it
+        # There's a non-JP_TOOLS hook: don't clobber it
         print(f"Warning: existing pre-commit hook found at {hook_file}")
         print("Appending JP_TOOLS check. Review the hook if needed.")
         # Append to the existing hook WITHOUT the template's own shebang. The

@@ -63,13 +63,13 @@ def set_proc_name(name: str) -> None:
 def image_format(path: str) -> str:
     """The image's real container format, asked of qemu-img rather than assumed.
 
-    Both disk paths used to hardcode `raw`: `-F raw` for the overlay's backing
-    format, and `format=raw` for the --writable attach. Against a qcow2 base
-    every layer reports success -- create is silent, `qemu-img check` finds no
-    errors -- and the guest's sector 0 is the base's `QFI\xfb` magic instead of
+    Both disk paths depend on it: `-F` for the overlay's backing format, and
+    `format=` for the --writable attach. Assuming `raw` against a qcow2 base,
+    every layer reports success (create is silent, `qemu-img check` finds no
+    errors) while the guest's sector 0 is the base's `QFI\xfb` magic instead of
     a boot sector, so the screenshot shows "no bootable device" and the image
-    reads as dead. --writable is worse: the guest then writes raw sectors over
-    qcow2 metadata. Same class as the two traps in the module docstring, a
+    reads as dead. With --writable the guest would write raw sectors over
+    qcow2 metadata. Same class as the two traps in the module docstring: a
     working image that presents as a broken one.
     """
     out = subprocess.run(["qemu-img", "info", "--output=json", path],
@@ -205,10 +205,9 @@ def build_parser() -> argparse.ArgumentParser:
 def clean_workdir(workdir: str, keep: bool) -> None:
     """Remove the scratch directory, or say why it could not be.
 
-    ignore_errors=True was a silent failure in a repo currently landing a rule
-    against silent failures (#58, PR #104). A workdir that cannot be removed is
-    a disk leak the operator should hear about once, so it prints and carries
-    on rather than either raising or saying nothing.
+    Not ignore_errors=True, which would be a silent failure: a workdir that
+    cannot be removed is a disk leak the operator should hear about once, so
+    it prints and carries on rather than either raising or saying nothing.
     """
     if keep:
         print(f"  workdir {workdir} (yours to remove)")
@@ -228,11 +227,9 @@ def main() -> int:
 
     base_format = image_format(args.image)
     # Everything from here on runs inside boot(), so that ONE finally covers
-    # every exit. The first version wrapped only the part after Popen, and a
-    # sys.exit before it -- OVMF missing, or --forward refused -- walked past
-    # the cleanup: three /tmp/vmboot-* directories from testing --forward are
-    # what found this, each holding an overlay and OVMF_VARS and no PPM.
-    # SystemExit is an exception, so a finally still runs on it.
+    # every exit, including a sys.exit before qemu starts (OVMF missing,
+    # --forward refused), which would otherwise leave the workdir with its
+    # overlay behind. SystemExit is an exception, so a finally still runs on it.
     workdir = tempfile.mkdtemp(prefix="vmboot-")
     try:
         return boot(args, base_format, workdir)

@@ -49,7 +49,7 @@ export default [
       "no-eval":            "error",
       "no-implied-eval":    "error",
 
-      // Warnings — style / quality
+      // Warnings: style / quality
       "prefer-const":       "warn",
       "no-var":             "warn",
       "no-console":         ["warn", { allow: ["warn", "error"] }],

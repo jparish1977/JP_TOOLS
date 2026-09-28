@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * JP_TOOLS ESLint runner — uses programmatic API so arbitrary file paths work
+ * JP_TOOLS ESLint runner: uses programmatic API so arbitrary file paths work
  * regardless of where the config file lives.
  *
  * Usage: node jp_eslint.mjs <path>
@@ -60,7 +60,7 @@ function collectFiles(targetPath) {
   return files;
 }
 
-// Common rules — quality + correctness
+// Common rules: quality + correctness
 const commonRules = {
   // Correctness
   "no-undef":              "error",
@@ -121,7 +121,7 @@ async function lintFile(filePath) {
       rules: commonRules,
     });
   } else if (isTs) {
-    // TypeScript files — use typescript-eslint parser
+    // TypeScript files: use typescript-eslint parser
     // Disable rules that conflict with TS type system
     const tsRules = { ...commonRules };
     delete tsRules["no-undef"];          // TS handles this
@@ -147,7 +147,7 @@ async function lintFile(filePath) {
     });
   } else {
     const scriptOverrides = isModule ? {} : {
-      // In script mode, top-level functions/vars are global exports — not truly unused
+      // In script mode, top-level functions/vars are global exports, not truly unused
       "no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" }],
     };
     config.push({

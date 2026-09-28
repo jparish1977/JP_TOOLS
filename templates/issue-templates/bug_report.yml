@@ -24,7 +24,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Browser, OS, Node/Python/PHP version — whatever's relevant
+      description: Browser, OS, Node/Python/PHP version, whatever's relevant
     validations:
       required: false
   - type: textarea

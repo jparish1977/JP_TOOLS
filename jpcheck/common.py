@@ -172,7 +172,7 @@ def _tool_missing(name: str) -> dict[str, Any]:
         "tool":   name,
         "status": "unavailable",
         "issues": [],
-        "note":   f"'{name}' not found on PATH — install it to enable this check",
+        "note":   f"'{name}' not found on PATH: install it to enable this check",
     }
 
 

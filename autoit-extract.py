@@ -74,8 +74,8 @@ def pe_facts(data: bytes) -> tuple[dict[str, Any], int] | None:
     every caller test the first half and then subtract the second.
     """
     # Length-checked before every unpack, not just the magic. Truncated and
-    # carved samples are ordinary input here, and b"MZ" alone used to reach
-    # the e_lfanew read and raise struct.error where "not a PE file" was meant.
+    # carved samples are ordinary input here, and b"MZ" alone would reach the
+    # e_lfanew read and raise struct.error where "not a PE file" is meant.
     if data[:2] != b"MZ" or len(data) < 0x40:
         return None
     pe = struct.unpack_from("<I", data, 0x3C)[0]
@@ -108,10 +108,9 @@ def pe_facts(data: bytes) -> tuple[dict[str, Any], int] | None:
 def find_payload(data: bytes, overlay_at: int | None) -> tuple[bytes | None, str, str]:
     """-> (bytes_after_header, where, tag) or (None, reason, "").
 
-    The tag comes back as its own value. It used to be readable only by
-    finding "EA05" inside the human sentence, which is what decode() tested,
-    so rewording that message would have silently decoded every EA05 payload
-    as EA06 with nothing in either function saying the two were coupled.
+    The tag comes back as its own value, so decode() never reads it out of
+    the human sentence: rewording a message must not silently decode every
+    EA05 payload as EA06.
     """
     at = data.find(MARKER)
     if at < 0:
@@ -143,10 +142,10 @@ def scan(text: str) -> list[tuple[str, int, str]]:
         # of someone else's code. Structure and comments are skipped; the
         # CONSTANT TABLE is not, because that is where the URLs live.
         # `Global Const $URL = "http://..."` is a common shape in compiled
-        # AutoIt and this filter used to drop it, showing the operator
-        # `InetGet($URL, ...)` with no way to see what $URL was -- the one
-        # fact they needed. The indicators are specific enough to be their own
-        # filter: a UDF constant matches none of them.
+        # AutoIt; dropping it would show the operator `InetGet($URL, ...)`
+        # with no way to see what $URL was, the one fact they need. The
+        # indicators are specific enough to be their own filter: a UDF
+        # constant matches none of them.
         if re.match(r"^\s*(Func |EndFunc|;)", line):
             continue
         for kind, pattern in INDICATORS:
