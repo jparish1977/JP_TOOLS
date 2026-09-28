@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
 JP_TOOLS/tests/test_check_shell.py
-check.py's shell arm, backed by shellcheck. #57.
+check.py's shell arm, backed by shellcheck.
 
-THE GAP THIS PINS DOWN
-    check.py had no shell language. On a repo that is mostly shell the gate
-    checked nothing, and said so only in the "skipped" list. Measured across
-    the fleet on 2026-09-14: 261 shell files in 18 repos, none read by any gate.
+A .sh file, or an extensionless file whose #! names sh or bash, is shell.
+A WARNING-level finding (or worse) fails the file; an INFO-level one is
+reported and does not block.
 
 WHAT A MISSING shellcheck MUST DO
     Fail the run as "did not run" (exit 2), naming shellcheck. Reporting
-    "unavailable" and exiting 0 is the #29 shape. That case runs everywhere,
-    with shellcheck removed from PATH; the finding cases need shellcheck and
-    skip without it (a laptop has none; iteration8 has 0.9.0).
+    "unavailable" and exiting 0 would be a check that did not run passing.
+    That case runs everywhere, with an EMPTY PATH (check.py runs by
+    sys.executable's absolute path, so it needs none; a PATH holding python's
+    own directory can also hold shellcheck). The finding cases need
+    shellcheck and print SKIP without it.
 
     python3 tests/test_check_shell.py
 """
@@ -24,9 +25,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
 
-ROOT = Path(__file__).resolve().parent.parent
+from _harness import ROOT, check, check_true, run
+
 CHECK_PY = ROOT / "check.py"
 
 # SC2164: `cd` without `|| exit` is a WARNING, so it blocks.
@@ -35,112 +36,78 @@ BLOCKING_SH = "#!/bin/sh\ncd /tmp\nls\n"
 INFO_SH = "#!/bin/sh\necho $1\n"
 CLEAN_SH = "#!/bin/sh\necho hello\n"
 
-fails = 0
-checks = 0
 
-
-def check(what: str, ok: bool, detail: str = "") -> None:
-    global fails, checks
-    checks += 1
-    if not ok:
-        fails += 1
-    print(f"  [{' ok ' if ok else 'FAIL'}] {what}")
-    if not ok and detail:
-        for line in detail.strip().splitlines()[:12]:
-            print(f"         {line}")
-
-
-def run(*args: str, env: dict[str, str] | None = None) -> tuple[int, str, str]:
+def check_py(*args: str, env: dict[str, str] | None = None) -> tuple[int, str, str]:
     r = subprocess.run([sys.executable, str(CHECK_PY), *args], capture_output=True,
                        text=True, check=False, env=env)
     return r.returncode, r.stdout, r.stderr
 
 
-def shellcheck_result(out: str) -> dict[str, Any]:
+def rules(out: str) -> list[str]:
+    """The shellcheck rules in a check.py report, or [] when it is not one."""
     try:
-        doc = json.loads(out)
+        checks = json.loads(out).get("checks", [])
     except ValueError:
-        # reason: not a check.py report: no result, which fails the check that reads it
-        return {}
-    for c in doc.get("checks", []):
-        if c.get("tool") == "shellcheck":
-            return dict(c)
-    return {}
+        # reason: not a check.py report: no rules, which fails the check that reads it
+        return []
+    issues: list[dict[str, object]] = next(
+        (c.get("issues", []) for c in checks if c.get("tool") == "shellcheck"), [])
+    return [str(i.get("rule")) for i in issues]
 
 
-def main() -> int:
+def _script(d: Path, name: str, text: str) -> str:
+    (d / name).write_text(text, encoding="utf-8")
+    return str(d / name)
+
+
+def test_a_missing_shellcheck_is_a_run_that_did_not_happen() -> None:
     with tempfile.TemporaryDirectory() as td:
         d = Path(td)
-        script = d / "s.sh"
-        script.write_text(BLOCKING_SH, encoding="utf-8")
+        (d / "empty-path").mkdir()
+        rc, out, err = check_py(_script(d, "s.sh", BLOCKING_SH),
+                                env=dict(os.environ, PATH=str(d / "empty-path")))
+        # The missing tool reports as "shellcheck (apt install shellcheck)",
+        # so detection is asserted on the language.
+        check_true("a .sh file is detected as shell with no shellcheck", '"language": "shell"' in out)
+        check("the run exits 2, not 0", rc, 2)
+        check_true("naming shellcheck", "shellcheck" in (out + err))
 
-        print("shellcheck missing from PATH:")
-        # An EMPTY PATH. check.py runs by sys.executable's absolute path, so it
-        # needs none, and shellcheck cannot be found. The first version used
-        # python's own directory, which is /usr/bin on the build server, where
-        # shellcheck also lives: the "missing" case could only pass on a box
-        # without shellcheck, where it proves nothing.
-        empty = d / "empty-path"
-        empty.mkdir()
-        env = dict(os.environ, PATH=str(empty))
-        rc, out, err = run(str(script), env=env)
-        # The missing tool reports as "shellcheck (apt install shellcheck)", the
-        # _tool_missing convention, so detection is asserted on the language.
-        check("a .sh file is detected as shell even with no shellcheck",
-              '"language": "shell"' in out, out[:300])
-        check("... and the run exits 2, not 0: a check that did not run is not a pass",
-              rc == 2, f"rc={rc}\n{out[:300]}\n{err[:300]}")
-        check("... naming shellcheck", "shellcheck" in (out + err), out[:300])
 
-        if not shutil.which("shellcheck"):
-            print("\nSKIP the finding cases: shellcheck not on PATH "
-                  f"({checks - fails}/{checks} passed above)")
-            return 1 if fails else 0
+def shellcheck_test_levels() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        rc, out, _ = check_py(_script(d, "s.sh", BLOCKING_SH))
+        check("a WARNING (SC2164) fails the file", (rc, "SC2164" in rules(out)), (1, True))
+        rc, out, _ = check_py(_script(d, "i.sh", INFO_SH))
+        check("an INFO (SC2086) is reported and does not block", (rc, "SC2086" in rules(out)), (0, True))
+        check("a clean script passes", check_py(_script(d, "c.sh", CLEAN_SH))[0], 0)
+        tool = _script(d, "tool", "#!/usr/bin/env bash\n" + BLOCKING_SH.split("\n", 1)[1])
+        rc, out, _ = check_py(tool)
+        check("an extensionless #!/usr/bin/env bash script is checked", (rc, "SC2164" in rules(out)),
+              (1, True))
 
-        print("\nWith shellcheck:")
-        rc, out, _ = run(str(script))
-        sc = shellcheck_result(out)
-        rules = [str(i.get("rule")) for i in sc.get("issues", [])]
-        check("a WARNING-level finding (SC2164) fails the file, exit 1",
-              rc == 1 and "SC2164" in rules, out[:400])
 
-        info = d / "i.sh"
-        info.write_text(INFO_SH, encoding="utf-8")
-        rc, out, _ = run(str(info))
-        sc = shellcheck_result(out)
-        rules = [str(i.get("rule")) for i in sc.get("issues", [])]
-        check("an INFO-level finding (SC2086) is reported but does not block, exit 0",
-              rc == 0 and "SC2086" in rules, out[:400])
-
-        clean = d / "c.sh"
-        clean.write_text(CLEAN_SH, encoding="utf-8")
-        rc, out, _ = run(str(clean))
-        check("a clean script passes, exit 0", rc == 0, out[:300])
-
-        tool = d / "tool"
-        tool.write_text("#!/usr/bin/env bash\n" + BLOCKING_SH.split("\n", 1)[1],
-                        encoding="utf-8")
-        rc, out, _ = run(str(tool))
-        check("an extensionless '#!/usr/bin/env bash' script is checked, exit 1",
-              rc == 1 and shellcheck_result(out).get("tool") == "shellcheck", out[:400])
-
-        repo = d / "repo"
+def shellcheck_test_directory_mode() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td) / "repo"
         (repo / "bin").mkdir(parents=True)
         (repo / "ok.sh").write_text(CLEAN_SH, encoding="utf-8")
         (repo / "bin" / "run").write_text(BLOCKING_SH, encoding="utf-8")
-        rc, out, _ = run(str(repo))
+        rc, out, _ = check_py(str(repo))
         try:
             langs = {s["language"]: s["file_count"] for s in json.loads(out)["languages"]}
         except (ValueError, KeyError):
+            # reason: an unexpected report leaves langs empty, which fails the check below
             langs = {}
-        check("directory mode: a dirty extensionless script fails the run, exit 1",
-              rc == 1, out[:400])
-        check("... and the shell section counts both scripts", langs.get("shell") == 2,
-              str(langs))
-
-    print(f"\n{checks - fails}/{checks} passed")
-    return 1 if fails else 0
+        check("a dirty extensionless script fails the run", rc, 1)
+        check("the shell section counts both scripts", langs.get("shell"), 2)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    tests = dict(globals())
+    if shutil.which("shellcheck") is None:
+        print("SKIP: shellcheck not on PATH; the finding cases do not run")
+    else:
+        tests.update({k.removeprefix("shellcheck_"): v for k, v in globals().items()
+                      if k.startswith("shellcheck_test_")})
+    sys.exit(run(tests, "check.py shell"))
