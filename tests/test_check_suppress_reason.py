@@ -20,16 +20,8 @@ import pathlib
 import sys
 import tempfile
 
-import jpcheck_loader
-
-check_mod = jpcheck_loader.load("suppressions")
-
-FAILURES: list[str] = []
-
-
-def check(label: str, got: object, want: object) -> None:
-    if got != want:
-        FAILURES.append(f"{label}: got {got!r}, want {want!r}")
+from _harness import ROOT, check, run
+from jpcheck.suppressions import run_suppress_reason
 
 
 def rules_for(source: str) -> list[str]:
@@ -37,8 +29,7 @@ def rules_for(source: str) -> list[str]:
     with tempfile.TemporaryDirectory() as tmp:
         f = pathlib.Path(tmp) / "sample.py"
         f.write_text(source)
-        result = check_mod.run_suppress_reason(str(f))
-        return [i["rule"] for i in result["issues"]]
+        return [i["rule"] for i in run_suppress_reason(str(f))["issues"]]
 
 
 def test_a_bare_suppress_is_flagged() -> None:
@@ -69,8 +60,7 @@ def test_a_silent_handler_is_flagged() -> None:
         ("return a constant", "    return 0\n"),
         ("return a bare name", "    return rows\n"),
         ("a bare return", "    return\n"),
-        # jp-tools' review: the commonest silent defaults are these, and a
-        # Constant-only test let every one of them through.
+        # The commonest silent defaults, which a Constant-only test would miss.
         ("return an empty list", "    return []\n"),
         ("return an empty dict", "    return {}\n"),
         ("return an empty tuple", "    return ()\n"),
@@ -100,8 +90,8 @@ def test_what_ruff_already_reports_is_not_counted_twice() -> None:
 
 
 def test_a_blind_catch_is_flagged_whatever_the_comment_says() -> None:
-    """#58: a reason must not satisfy a blind catch. The fix for a blind catch
-    is to log it or re-raise, never to annotate it."""
+    """A reason must not satisfy a blind catch. The fix for a blind catch is
+    to log it or re-raise, never to annotate it."""
     check("except Exception returning a default, with a reason", rules_for(
         "try:\n    x()\nexcept Exception:  # reason: anything at all\n    return None\n"
     ), ["suppress-reason"])
@@ -161,25 +151,11 @@ def test_unparseable_source_is_left_to_ruff() -> None:
 
 
 def test_check_py_passes_its_own_rule() -> None:
-    root = jpcheck_loader.ROOT
-    issues = (check_mod.run_suppress_reason(str(root / "check.py"))["issues"]
-              + check_mod.run_suppress_reason(str(root / "jpcheck"))["issues"])
+    issues = (run_suppress_reason(str(ROOT / "check.py"))["issues"]
+              + run_suppress_reason(str(ROOT / "jpcheck"))["issues"])
     check("check.py and jpcheck/ state a reason on every silent catch",
           [f"{i['file']}:{i['line']}" for i in issues], [])
 
 
-def main() -> int:
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            fn()
-    if FAILURES:
-        print(f"FAILED ({len(FAILURES)})")
-        for f in FAILURES:
-            print(f"FAIL {f}")      # "FAIL <label>: ...", the line mutate-on-target reads
-        return 1
-    print("all check.py suppress-reason tests passed")
-    return 0
-
-
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run(globals(), "check.py suppress-reason"))

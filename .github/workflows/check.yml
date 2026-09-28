@@ -48,7 +48,7 @@ jobs:
             base=HEAD
           fi
           rc=0
-          for f in check.py jpcheck/*.py fix.py install-hooks.py init-ci.py spool-audit.py list-exemptions.py; do
+          for f in check.py jpcheck/*.py fix.py install-hooks.py init-ci.py spool-audit.py spoolaudit/*.py list-exemptions.py; do
             echo "--- $f ---"
             python check.py "$f" --pretty --smells-base "$base" || rc=1
           done

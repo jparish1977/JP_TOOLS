@@ -4,28 +4,20 @@ JP_TOOLS/tests/test_suite_flags.py
 Every flag a suite passes to spool-audit.py must be a flag spool-audit.py has.
 
 WHY
-    On 2026-08-14 --purge and --fix were deleted from the tool. Both suites
-    went on invoking them, argparse rejected the unknown flag and exited 2
-    without running, and the acceptance suite printed "13 passed, 0 failed"
-    because its assertions were negatives that a program which never runs
-    satisfies for free. Every individual check was reasonable; the gap was
-    that nothing compared the two lists.
-
-    Suggested by thinkpad-session over the fleet mailbox, 2026-08-14, as the
-    cheap check that catches this exact cause across every suite at once.
+    When a flag is removed from the tool and a suite goes on passing it,
+    argparse rejects it and exits 2 without running, and an assertion that
+    the tool did NOT do something then passes for free. Every individual
+    check can be reasonable while nothing compares the two lists; this does.
 
 BOTH DIRECTIONS
-    A suite naming a flag the tool lacks is the bug above. A tool offering a
-    flag no suite exercises is the same gap facing the other way -- that is
-    how spool-audit.py reached a PR with a green badge and no job touching it.
+    A suite naming a flag the tool lacks is the case above. A tool offering a
+    flag no suite exercises is the same gap facing the other way.
 
 PROSE IS NOT AN INVOCATION
-    This has to read code, not text. The tool's own docstring explains why
-    --purge and --fix were removed, and the suites carry comments about the
-    bugs those flags caused, so a plain `grep -o -- '--[a-z-]*'` finds both
-    names on both sides and reports perfect agreement about two flags that no
-    longer exist. Python strings come from the AST with docstrings dropped;
-    shell lines have their comments stripped first.
+    This has to read code, not text. Docstrings and comments can name flags
+    that no longer exist, and a plain `grep -o -- '--[a-z-]*'` would find
+    them on both sides and report agreement. Python strings come from the AST
+    with docstrings dropped; shell lines have their comments stripped first.
 
     python tests/test_suite_flags.py
 """
@@ -38,11 +30,10 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 TOOL = REPO / "spool-audit.py"
-SUITES = [
-    REPO / "tests" / "test_spool_audit.py",
-    REPO / "tests" / "test_spool_audit_invariant.py",
-    REPO / "tests" / "test_spool_audit_acceptance.sh",
-]
+# Every spool-audit suite, found rather than listed, so a renamed or added
+# suite cannot drop out of the comparison.
+SUITES = sorted((REPO / "tests").glob("test_spool_audit*.py")) + \
+    sorted((REPO / "tests").glob("test_spool_audit*.sh"))
 
 FLAG = re.compile(r"--[a-z][a-z-]+")
 FAILURES: list[str] = []
@@ -55,7 +46,7 @@ def tool_flags() -> set[str]:
     """The flags argparse actually accepts, read from its own options block.
 
     Not the whole --help text: argparse prints the module docstring as the
-    description, and that prose names flags this tool used to have.
+    description, and prose can name flags the tool does not have.
     """
     out = subprocess.run(
         [sys.executable, str(TOOL), "--help"],
@@ -76,18 +67,22 @@ def tool_flags() -> set[str]:
     return found - IGNORED
 
 
+def _docstring_ids(tree: ast.AST) -> set[int]:
+    """id() of every docstring constant in TREE."""
+    ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            first = node.body[0] if node.body else None
+            if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                    and isinstance(first.value.value, str)):
+                ids.add(id(first.value))
+    return ids
+
+
 def flags_in_python(path: pathlib.Path) -> set[str]:
     """Flags in string literals, docstrings excluded."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    docstrings = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
-                             ast.ClassDef)):
-            body = getattr(node, "body", [])
-            if (body and isinstance(body[0], ast.Expr)
-                    and isinstance(body[0].value, ast.Constant)
-                    and isinstance(body[0].value.value, str)):
-                docstrings.add(id(body[0].value))
+    docstrings = _docstring_ids(tree)
     found = set()
     for node in ast.walk(tree):
         if (isinstance(node, ast.Constant) and isinstance(node.value, str)
@@ -114,6 +109,21 @@ def flags_in_shell(path: pathlib.Path) -> set[str]:
     return found - IGNORED - {"--format", "--line-buffered"}
 
 
+def flags_used(offered: set[str]) -> set[str]:
+    """Every flag the suites pass, recording each one the tool does not accept."""
+    used: set[str] = set()
+    for suite in SUITES:
+        got = flags_in_shell(suite) if suite.suffix == ".sh" else flags_in_python(suite)
+        used |= got
+        for flag in sorted(got - offered):
+            FAILURES.append(
+                f"{suite.name} passes {flag}, which spool-audit.py does not "
+                "accept. argparse exits 2 without running, and an assertion "
+                "about what the tool did not do then passes for free."
+            )
+    return used
+
+
 def main() -> int:
     if not TOOL.exists():
         print(f"SKIP: {TOOL} not found")
@@ -126,23 +136,10 @@ def main() -> int:
             "pass by having nothing to compare, which is the failure it exists "
             "to catch"
         )
+    if len(SUITES) < 2:
+        FAILURES.append(f"found {len(SUITES)} spool-audit suite(s); the glob matched nothing useful")
 
-    used: dict[str, set[str]] = {}
-    for suite in SUITES:
-        if not suite.exists():
-            FAILURES.append(f"{suite.name}: listed here but not on disk")
-            continue
-        got = (flags_in_shell(suite) if suite.suffix == ".sh"
-               else flags_in_python(suite))
-        used[suite.name] = got
-        for flag in sorted(got - offered):
-            FAILURES.append(
-                f"{suite.name} passes {flag}, which spool-audit.py does not "
-                "accept. argparse exits 2 without running, and an assertion "
-                "about what the tool did not do then passes for free."
-            )
-
-    exercised = set().union(*used.values()) if used else set()
+    exercised = flags_used(offered)
     for flag in sorted(offered - exercised):
         FAILURES.append(
             f"spool-audit.py accepts {flag}, which no suite ever passes. "

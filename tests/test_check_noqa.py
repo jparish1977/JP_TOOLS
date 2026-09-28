@@ -29,23 +29,15 @@ import sys
 import tempfile
 from typing import Any
 
-import jpcheck_loader
-
-check_mod = jpcheck_loader.load("suppressions")
-
-FAILURES: list[str] = []
-
-
-def check(label: str, got: object, want: object) -> None:
-    if got != want:
-        FAILURES.append(f"{label}: got {got!r}, want {want!r}")
+from _harness import ROOT, check, run
+from jpcheck.suppressions import run_noqa, run_suppress_reason
 
 
 def _run(source: str) -> list[dict[str, Any]]:
     with tempfile.TemporaryDirectory() as tmp:
         f = pathlib.Path(tmp) / "sample.py"
         f.write_text(source)
-        issues: list[dict[str, Any]] = check_mod.run_noqa(str(f))["issues"]
+        issues: list[dict[str, Any]] = run_noqa(str(f))["issues"]
         return issues
 
 
@@ -68,7 +60,7 @@ def suppress_rules_for(source: str) -> list[str]:
     with tempfile.TemporaryDirectory() as tmp:
         f = pathlib.Path(tmp) / "sample.py"
         f.write_text(source)
-        return [i["rule"] for i in check_mod.run_suppress_reason(str(f))["issues"]]
+        return [i["rule"] for i in run_suppress_reason(str(f))["issues"]]
 
 
 # A structural suppression whose evidence is a sentence.
@@ -119,9 +111,9 @@ def test_ble001_over_a_recorded_exception_is_accepted() -> None:
 
 
 def test_a_noqa_cannot_hide_a_swallow_from_suppress_reason() -> None:
-    # suppress-reason skips a blind except-pass because ruff's S110 owns it;
-    # `# noqa: S110` is how ruff stops owning it, and without this the shape
-    # would read 0 errors from every tool.
+    # suppress-reason skips a blind except-pass because ruff's S110 owns it.
+    # A suppression naming S110 is how ruff stops owning it, and without this
+    # check the shape would read 0 errors from every tool.
     bare = "def f():\n    try:\n        g()\n    except Exception:\n        pass\n"
     hushed = ("def f():\n    try:\n        g()\n"
               "    except Exception:  # noqa: BLE001,S110\n        pass\n")
@@ -133,7 +125,7 @@ def test_a_noqa_cannot_hide_a_swallow_from_suppress_reason() -> None:
 
 def test_the_marker_is_matched_case_insensitively() -> None:
     # ruff's directive is case-insensitive, so every rule here has to be too:
-    # otherwise `# NOQA: BLE001,S110` over a blind swallow reads 0 from every
+    # otherwise the upper-case spelling over a blind swallow reads 0 from every
     # tool, the hole this check exists to close.
     check("NOQA over a swallow is still refused",
           errors_for(SWALLOW.replace("noqa", "NOQA").format(why="x")),
@@ -165,25 +157,11 @@ def test_an_unparseable_file_yields_nothing_from_this_check() -> None:
 
 
 def test_check_py_passes_its_own_rule() -> None:
-    root = jpcheck_loader.ROOT
-    issues = (check_mod.run_noqa(str(root / "check.py"))["issues"]
-              + check_mod.run_noqa(str(root / "jpcheck"))["issues"])
+    issues = (run_noqa(str(ROOT / "check.py"))["issues"]
+              + run_noqa(str(ROOT / "jpcheck"))["issues"])
     check("check.py and jpcheck/ state a reason on every marker they carry",
           [f"{i['file']}:{i['line']}:{i['rule']}" for i in issues if i["severity"] == "error"], [])
 
 
-def main() -> int:
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            fn()
-    if FAILURES:
-        print(f"FAILED ({len(FAILURES)})")
-        for f in FAILURES:
-            print(f"FAIL {f}")      # "FAIL <label>: ...", the line mutate-on-target reads
-        return 1
-    print("all check.py noqa tests passed")
-    return 0
-
-
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run(globals(), "check.py noqa"))

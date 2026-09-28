@@ -3,9 +3,7 @@
 # Or copy/symlink into a project as ruff.toml
 
 line-length = 100
-# Matches the CI runner (3.12). This said py38, which was wrong in a way
-# nothing could catch while the file went unused: check.py itself uses
-# `str | None`, which needs 3.10.
+# Matches the CI runner (3.12).
 target-version = "py312"
 
 [lint]
@@ -21,21 +19,27 @@ select = [
     "SIM",  # flake8-simplify
     "RUF",  # ruff-specific
 
-    # Chosen against what this codebase actually does, rather than inherited
-    # from whatever the installed ruff defaults to. Widened 2026-08-12 after
-    # measuring what the narrower list was dropping.
-    "DTZ",      # naive datetime — inventories and logs record mtimes
-    "EXE",      # shebang/executable-bit agreement — this repo is scripts
+    # Chosen against what code like this actually does, rather than inherited
+    # from whatever the installed ruff defaults to.
+    "DTZ",      # naive datetime: inventories and logs record mtimes
+    "EXE",      # shebang/executable-bit agreement: this repo is scripts
     "ISC",      # implicit string concatenation
     "BLE",      # blind except
     "PLW1510",  # subprocess.run without an explicit check=
     "S110",     # try/except/pass, which swallows the error entirely
 ]
 ignore = [
-    "E501",   # line too long — handled by formatter, not linter
+    "E501",   # line too long: handled by formatter, not linter
     "B008",   # do not perform function calls in default arguments (common in Tkinter/UI)
-    "SIM108", # ternary operator — sometimes less readable
+    "SIM108", # ternary operator: sometimes less readable
 ]
+
+[lint.isort]
+# JP_TOOLS' own packages, the test harness that puts them on sys.path, and
+# the test support module that imports them. _harness is forced to the top of
+# the section so it is always imported before what it makes importable.
+known-first-party = ["jpcheck", "spoolaudit", "_harness", "spool_audit_support"]
+force-to-top = ["_harness"]
 
 [lint.per-file-ignores]
 "*_test.py"  = ["S101"]  # allow assert in tests

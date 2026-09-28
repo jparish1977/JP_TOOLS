@@ -25,14 +25,10 @@ import pathlib
 import sys
 import tempfile
 from typing import Any
+from unittest import mock
 
-import jpcheck_loader
-
-# run_prettier looks _node_bin up in its own module, so that is where the
-# fake is installed.
-js_tools = jpcheck_loader.load("js_tools")
-
-FAILURES: list[str] = []
+from _harness import check, run
+from jpcheck import js_tools
 
 FAKE = """#!{python}
 import os, sys
@@ -41,12 +37,7 @@ sys.exit(int(os.environ["FAKE_PRETTIER_RC"]))
 """
 
 
-def expect(label: str, got: object, want: object) -> None:
-    if got != want:
-        FAILURES.append(f"{label}: got {got!r}, want {want!r}")
-
-
-def run_with(tmp: pathlib.Path, output: str, rc: int) -> dict[str, object]:
+def run_with(tmp: pathlib.Path, output: str, rc: int) -> dict[str, Any]:
     fake = tmp / "prettier"
     fake.write_text(FAKE.format(python=sys.executable))
     fake.chmod(0o755)
@@ -54,25 +45,17 @@ def run_with(tmp: pathlib.Path, output: str, rc: int) -> dict[str, object]:
     out.write_text(output)
     os.environ["FAKE_PRETTIER_OUT"] = str(out)
     os.environ["FAKE_PRETTIER_RC"] = str(rc)
-    # Through an Any alias: mypy types an imported-by-name module as
-    # ModuleType, which it lets you read attributes from but not assign.
-    mod: Any = js_tools
-    real = mod._node_bin
-    mod._node_bin = lambda name: str(fake)
-    try:
-        result: dict[str, object] = mod.run_prettier(str(tmp))
-        return result
-    finally:
-        mod._node_bin = real
+    # run_prettier looks _node_bin up in its own module, so that is where the
+    # fake is installed.
+    with mock.patch.object(js_tools, "_node_bin", lambda name: str(fake)):
+        return js_tools.run_prettier(str(tmp))
 
 
-def files(result: dict[str, object]) -> list[str]:
-    issues = result.get("issues")
-    assert isinstance(issues, list)
-    return [str(i["file"]) for i in issues]
+def files(result: dict[str, Any]) -> list[str]:
+    return [str(i["file"]) for i in result["issues"]]
 
 
-def main() -> int:
+def test_the_summary_line_is_not_a_file() -> None:
     cases = [
         ("prettier 3, one file",
          ("Checking formatting...\n[warn] a.js\n"
@@ -96,16 +79,9 @@ def main() -> int:
     for label, output, rc, want_files, want_status in cases:
         with tempfile.TemporaryDirectory() as d:
             result = run_with(pathlib.Path(d), output, rc)
-        expect(f"{label}: files", files(result), want_files)
-        expect(f"{label}: status", result.get("status"), want_status)
-    if FAILURES:
-        print(f"FAILED ({len(FAILURES)})")
-        for f in FAILURES:
-            print(f"  {f}")
-        return 1
-    print(f"all check.py prettier tests passed ({len(cases)} cases)")
-    return 0
+        check(f"{label}: files", files(result), want_files)
+        check(f"{label}: status", result.get("status"), want_status)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run(globals(), "check.py prettier"))

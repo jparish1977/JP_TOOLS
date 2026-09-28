@@ -27,10 +27,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-import jpcheck_loader
-
-ROOT = jpcheck_loader.ROOT
-check = jpcheck_loader.load("php_tools")
+from _harness import ROOT
+from jpcheck.php_tools import run_phpstan
 
 # Two findings at level 8, neither of them at level 5: an unspecified iterable
 # value type, and a property with no declared type.
@@ -60,26 +58,19 @@ def check_(what: str, ok: bool, detail: str = "") -> None:
         print(f"         {detail}")
 
 
-def main() -> int:
-    if not shutil.which("php"):
-        print("SKIP: php not found")
-        return 0
-    if not (ROOT / "vendor" / "bin" / "phpstan").exists():
-        print("SKIP: vendor/bin/phpstan not found, run composer install")
-        return 0
-
+def configured_level_cases() -> None:
     print("Configured level:")
     cfg = (ROOT / "configs" / "phpstan.neon").read_text(encoding="utf-8")
     check_("configs/phpstan.neon is at level 8, as METHODOLOGY 2.5 states",
            "level: 8" in cfg,
            "; ".join(ln.strip() for ln in cfg.splitlines() if "level" in ln))
 
+
+def finding_location_cases() -> None:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        php_file = tmp / "Thing.php"
-        php_file.write_text(PHP_AT_LEVEL_8, encoding="utf-8")
-
-        result = check.run_phpstan(str(tmp))
+        (tmp / "Thing.php").write_text(PHP_AT_LEVEL_8, encoding="utf-8")
+        result = run_phpstan(str(tmp))
 
         print("\nAgainst a directory holding one failing file:")
         check_("phpstan ran", result["status"] != "unavailable",
@@ -98,6 +89,17 @@ def main() -> int:
         check_("every finding carries a real line number",
                all(isinstance(i["line"], int) and i["line"] > 0 for i in issues),
                str([i["line"] for i in issues]))
+
+
+def main() -> int:
+    if not shutil.which("php"):
+        print("SKIP: php not found")
+        return 0
+    if not (ROOT / "vendor" / "bin" / "phpstan").exists():
+        print("SKIP: vendor/bin/phpstan not found, run composer install")
+        return 0
+    configured_level_cases()
+    finding_location_cases()
 
     print(f"\n{checks - fails}/{checks} passed")
     return 1 if fails else 0
