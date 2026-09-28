@@ -1,23 +1,11 @@
 {
- "about": "Mutants of JP_TOOLS check.py's symlink handling (#99, branch fix/symlink-once) for tests/test_symlink_once.py (jp-tools, 2026-09-15). Run: tools/lab/mutate-on-target.py JP_TOOLS_WORKTREE check.py tests/test_symlink_once.py tools/lab/mutants/jpt-symlink-once.json. One per piece: the symlink test, each of the three labels, the count of what was skipped, and skipping collection itself. Not here: resolving the scanned directory in _collect_files, because main resolves the target before _collect_files sees it, so an unresolved top compares the same.",
+ "about": "Mutants of JP_TOOLS check.py's symlink handling (#99, branch fix/symlink-once) for tests/test_symlink_once.py (jp-tools, 2026-09-15). Run: ~/projects/another repo/tools/lab/mutate-on-target.py JP_TOOLS_WORKTREE check.py tests/test_symlink_once.py tests/mutants/jpt-symlink-once.json. One per piece: the symlink test, each of the three labels, the count of what was skipped, and skipping collection itself. Not here: resolving the scanned directory in _collect_files, because main resolves the target before _collect_files sees it, so an unresolved top compares the same.",
  "mutants": [
-  {"name": "no file is a symlink",
-   "edits": [["    if not link.is_symlink():\n        return None", "    if True:\n        return None"]],
-   "target": "a file with two links inside the tree is recorded at its own count, not three times it"},
-  {"name": "every link reads as out of the tree",
-   "edits": [["    if target.is_relative_to(top):\n        return \"(symlink inside the tree", "    if False:\n        return \"(symlink inside the tree"]],
-   "target": "dir mode says it skipped the two links inside the tree"},
-  {"name": "a broken link reads as out of the tree",
-   "edits": [["        return \"(broken symlink)\"", "        return \"(symlink out of the tree, not this repo's file)\""]],
-   "target": "and the broken one"},
-  {"name": "a link out of the tree reads as inside it",
-   "edits": [["    return \"(symlink out of the tree, not this repo's file)\"\n", "    return \"(symlink inside the tree, measured at its target)\"\n"]],
-   "target": "and the one out of the tree"},
-  {"name": "a skipped link is not counted",
-   "edits": [["            if kind:\n                skipped[kind] = skipped.get(kind, 0) + 1\n                continue", "            if kind:\n                continue"]],
-   "target": "dir mode says it skipped the two links inside the tree"},
-  {"name": "a link is counted and still collected",
-   "edits": [["                skipped[kind] = skipped.get(kind, 0) + 1\n                continue\n            ext = Path(f).suffix.lower()", "                skipped[kind] = skipped.get(kind, 0) + 1\n            ext = Path(f).suffix.lower()"]],
-   "target": "a file with two links inside the tree is recorded at its own count, not three times it"}
+  {"name": "no file is a symlink", "edits": [["    if not link.is_symlink():\n        return None", "    if True:\n        return None"]], "target": "a file with two links inside the tree is recorded at its own count, not three times it"},
+  {"name": "every link reads as out of the tree", "edits": [["    if target.is_relative_to(top):\n        return \"(symlink inside the tree", "    if False:\n        return \"(symlink inside the tree"]], "target": "dir mode says it skipped the two links inside the tree"},
+  {"name": "a broken link reads as out of the tree", "edits": [["        return \"(broken symlink)\"", "        return \"(symlink out of the tree, not this repo's file)\""]], "target": "and the broken one"},
+  {"name": "a link out of the tree reads as inside it", "edits": [["    return \"(symlink out of the tree, not this repo's file)\"\n", "    return \"(symlink inside the tree, measured at its target)\"\n"]], "target": "and the one out of the tree"},
+  {"name": "a skipped link is not counted", "edits": [["            if kind:\n                skipped[kind] = skipped.get(kind, 0) + 1\n                continue", "            if kind:\n                continue"]], "target": "dir mode says it skipped the two links inside the tree"},
+  {"name": "a link is counted and still collected", "edits": [["                skipped[kind] = skipped.get(kind, 0) + 1\n                continue\n            ext = Path(f).suffix.lower()", "                skipped[kind] = skipped.get(kind, 0) + 1\n            ext = Path(f).suffix.lower()"]], "target": "a file with two links inside the tree is recorded at its own count, not three times it"}
  ]
 }
