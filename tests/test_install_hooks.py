@@ -7,25 +7,18 @@ Builds a throwaway repo that already contains a failing file, installs the
 hook, and drives real `git commit` calls through it. No pytest, no
 dependencies -- the toolbox has none and this should not add the first.
 
-THE BUG THIS PINS DOWN
-    The hook's own comment said it "runs check.py against staged files". It
-    collected them into $STAGED, used that list only to decide whether
-    anything had been staged at all, and then ran `check.py .` against the
-    whole repo.
+WHAT THIS PINS DOWN
+    The hook checks the STAGED FILES, one at a time, not the whole repo. On a
+    clean repo the two are indistinguishable. On an inherited one a whole-repo
+    check blocks the first commit on every pre-existing error in the tree, so
+    the hook is uninstallable and the only remaining moves are a cleanup
+    nobody scheduled or --no-verify forever.
 
-    On a clean repo the two are indistinguishable, which is why it survived.
-    On an inherited one it means the first commit is blocked by every
-    pre-existing error in the tree, so the hook is uninstallable and the only
-    remaining moves are a cleanup nobody scheduled or --no-verify forever.
-    Measured on a consuming repo: 924 pre-existing errors, so every commit.
-
-    Three further defects in the same thirty lines:
-      - `python`, which does not exist on most of this fleet.
-      - $STAGED split on unquoted $IFS, so any path with a space became two
-        paths, neither of which existed, and both were skipped in silence.
-      - check.py exits 2 on a file whose language it cannot detect, so a
-        commit touching only a README would have been blocked once the loop
-        was per-file.
+    Also pinned:
+      - it runs `python3` where there is no bare `python`;
+      - a path with a space is one path, not two that do not exist and are
+        skipped in silence;
+      - a file whose language check.py cannot detect does not block a commit.
 
 Skips rather than fails when the environment cannot support it:
   - no git         -> skip
@@ -89,8 +82,7 @@ def build_repo(tmp: Path) -> tuple[Path, str]:
     """A repo carrying pre-existing debt, with the hook installed over it.
 
     Returns the repo and the installer's stdout, because what the installer
-    SAYS it set up is a separate claim from what it wrote, and the two drifted
-    apart once already.
+    SAYS it set up is a separate claim from what it wrote.
     """
     repo = tmp / "repo"
     repo.mkdir()
@@ -117,14 +109,14 @@ def run_installer(repo: Path, *flags: str) -> subprocess.CompletedProcess[str]:
 
 
 def symlinked_hook_cases(tmp: Path) -> None:
-    """#67: a hook that is a symlink into the repo is never written through.
+    """A hook that is a symlink into the repo is never written through.
 
-    another repo ships hooks/pre-commit as a tracked file and links it into
-    .git/hooks. Before the fix, install appended the JP_TOOLS hook INTO that
-    tracked file and chmod'ed it; a dangling link had its target created.
-    Needs no ruff, so it runs before the ruff skip.
+    A repo that ships hooks/pre-commit as a tracked file and links it into
+    .git/hooks must not get the JP_TOOLS hook appended INTO that tracked file,
+    nor a dangling link's target created. Needs no ruff, so it runs before the
+    ruff skip.
     """
-    print("Symlinked hook (#67):")
+    print("Symlinked hook:")
     repo = tmp / "linked"
     repo.mkdir()
     git(repo, "init", "-q")
@@ -188,7 +180,7 @@ STUB_CHECK_PY = (
 
 
 def incapable_tools_cases(tmp: Path) -> None:
-    """#65: a JP_TOOLS tree that cannot run the hook is REFUSED, not trusted
+    """A JP_TOOLS tree that cannot run the hook is REFUSED, not trusted
     and not skipped.
 
     The stub passes anything it is handed, so trusting it is a silent false
@@ -197,12 +189,12 @@ def incapable_tools_cases(tmp: Path) -> None:
     tree (the main checkout, since installing from a worktree records that),
     and the commit must STILL be refused.
     """
-    print("\nA JP_TOOLS tree that cannot run the hook (#65):")
+    print("\nA JP_TOOLS tree that cannot run the hook:")
     stub = tmp / "stale-jp-tools"
     stub.mkdir()
     (stub / "check.py").write_text(STUB_CHECK_PY, encoding="utf-8")
-    # The template is current, so what is refused is the stale check.py (#73's
-    # flag check, now in hooks/pre-commit.sh), not a too-old tree.
+    # The template is current, so what is refused is the stale check.py (the
+    # flag check in hooks/pre-commit.sh), not a too-old tree.
     (stub / "hooks").mkdir()
     shutil.copy2(ROOT / "hooks" / "pre-commit.sh", stub / "hooks" / "pre-commit.sh")
     home = tmp / "home"
@@ -224,16 +216,12 @@ def incapable_tools_cases(tmp: Path) -> None:
 
 
 def append_roundtrip_cases(tmp: Path) -> None:
-    """#66: install then --remove on a repo's OWN hook gives it back byte for
-    byte, and a second cycle gives the same file.
-
-    Before the fix, install appended the template with its own #!/bin/sh and
-    --remove kept every line above the marker, so each cycle left one more
-    stray shebang (another repo went from 1 to 2). Needs no ruff.
+    """Install then --remove on a repo's OWN hook gives it back byte for
+    byte, and a second cycle gives the same file: no stray shebang accumulates.
+    Needs no ruff.
     """
-    print("Appending to a repo's own hook (#66):")
-    # a reviewer's four shapes from its review of #74. The last two
-    # were rewritten by remove()'s old rstrip() on master too.
+    print("Appending to a repo's own hook:")
+    # The last two shapes are the ones a line-based rewrite would change.
     shapes = {
         "sh, one final newline": "#!/bin/sh\necho repo's own gate\n",
         "bash, one final newline": "#!/usr/bin/env bash\necho repo's own gate\n",
@@ -264,7 +252,7 @@ def append_roundtrip_cases(tmp: Path) -> None:
         after = hook.read_text(encoding="utf-8")
         check(f"[{label}] a second cycle gives the same file", after == own, repr(after))
 
-    # A hook installed BEFORE #66: the old template, shebang and all, appended.
+    # A hook from an older install: the old template, shebang and all, appended.
     # --remove must still give back the repo's hook, without the stray shebang.
     repo = tmp / "old-install"
     repo.mkdir()
@@ -276,19 +264,17 @@ def append_roundtrip_cases(tmp: Path) -> None:
                     encoding="utf-8")
     run_installer(repo, "--remove")
     after = hook.read_text(encoding="utf-8")
-    check("[pre-#66 install] --remove strips the old stray shebang too", after == own,
+    check("[older install] --remove strips the old stray shebang too", after == own,
           repr(after))
     print()
 
 
 def status_cases(tmp: Path) -> None:
-    """#65 part 2: --status says which installed hooks are stale. Needs no ruff.
+    """--status says which installed hooks are stale. Needs no ruff.
 
-    Before it, nothing said a hook was the old template: another repo found
-    all three on a laptop by reading them. Five repos under one root,
-    one of each state.
+    Five repos under one root, one of each state.
     """
-    print("Installed-hook status (#65 part 2):")
+    print("Installed-hook status:")
     root = tmp / "fleet"
     root.mkdir()
 
@@ -320,8 +306,9 @@ def status_cases(tmp: Path) -> None:
     check("a root with a stale hook exits 1", r.returncode == 1, r.stdout + r.stderr)
     check("a fresh install reads CURRENT", states.get("current", "").startswith("CURRENT"),
           r.stdout)
-    check("a pre-#41 hook reads STALE, saying why",
-          states.get("old", "").startswith("STALE") and "#41" in states.get("old", ""), r.stdout)
+    check("a hook with no run-time lookup reads STALE, saying why",
+          states.get("old", "").startswith("STALE") and "older install-hooks.py" in states.get("old", ""),
+          r.stdout)
     check("an edited install reads STALE, as differing from the template",
           states.get("edited", "").startswith("STALE") and "differs" in states.get("edited", ""),
           r.stdout)
@@ -358,13 +345,12 @@ def fake_jp_tools(at: Path, with_template: bool = True, git_repo: bool = True) -
 
 
 def shim_cases(tmp: Path) -> None:
-    """#65 part 3, the design's acceptance (another repo): a feature-branch
-    tree found by the search, and a shim from an older interface, each print
+    """The shim's acceptance cases: a feature-branch tree found by the search, and a shim from an older interface, each print
     BROKEN, with master as the control. Plus: an explicit JP_TOOLS_DIR runs on
     any branch and says so; a tree with no template and a named tree that is
     not there both refuse, never falling through to another candidate.
     """
-    print("\nThe shim (#65 part 3):")
+    print("\nThe shim:")
     home = tmp / "home"
     tree = fake_jp_tools(home / "projects" / "JP_TOOLS")
     env = {k: v for k, v in os.environ.items() if k != "JP_TOOLS_DIR"}
@@ -421,8 +407,8 @@ def shim_cases(tmp: Path) -> None:
           r.returncode != 0 and "has no check.py" in out and "staged file(s) checked" not in out,
           out)
 
-    # another repo' note on #80: a copy with no .git was refused "on ? ?"
-    # with a Fix (checkout master) that cannot work there.
+    # A copy with no .git must be refused with a Fix that can work there, not
+    # "on ? ?" and "checkout master".
     home2 = tmp / "home2"
     copy = fake_jp_tools(home2 / "projects" / "JP_TOOLS", git_repo=False)
     env2 = dict(env, HOME=str(home2))
@@ -479,9 +465,8 @@ def main() -> int:
         hook = repo / ".git" / "hooks" / "pre-commit"
         check("hook installed", hook.is_file())
         check("hook is executable", os.access(hook, os.X_OK))
-        # The installer announced "python check.py ." for one commit after the
-        # hook stopped doing that. Same defect as the original: a description
-        # that outlived the behaviour it described.
+        # What the installer says it set up is a separate claim from what it
+        # wrote, and a description can outlive the behaviour it describes.
         check("installer describes what it installed",
               "staged" in install_out and "check.py ." not in install_out,
               install_out)

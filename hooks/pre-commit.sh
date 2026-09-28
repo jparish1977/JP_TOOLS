@@ -5,7 +5,7 @@
 # ONE COPY, HERE. The installed hook is a shim that runs this file from the
 # JP_TOOLS tree it resolved, so a change here reaches every repo at its next
 # commit with no reinstall. A copy taken at install time would go stale with
-# nothing to say so. The design is on JP_TOOLS #65.
+# nothing to say so.
 #
 # INTERFACE: the shim exports TOOLS_DIR (the tree it checked) and
 # JP_TOOLS_HOOK_API. A shim from another interface is refused, never guessed at.
@@ -52,7 +52,7 @@ BASELINE_FILE="$(git rev-parse --show-toplevel)/quality-baseline.json"
 
 # A tree at master can still lack a flag this template passes, if the two are
 # ever out of step. Ask check.py, and refuse rather than let "unrecognized
-# arguments" read as a failing check. #65 part 1 (#73).
+# arguments" read as a failing check.
 CHECK_PY="$TOOLS_DIR/check.py"
 HELP=$("$PY" "$CHECK_PY" --help 2>/dev/null)
 NEED="--skip-unsupported"

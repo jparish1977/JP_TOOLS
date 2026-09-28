@@ -96,8 +96,7 @@ already own is usually what shrinks the job most.
 
 Printing sends the whole document through CUPS, and CUPS may keep a copy after
 the job finishes. Print a password, a recovery sheet or a private key and that
-copy outlives the paper, on a machine that may not be yours. Written after
-exactly that happened on a shared household printer.
+copy outlives the paper, on a machine that may not be yours.
 
 It exists as a tool rather than a one-liner because the obvious one-liner
 reports danger as safety: `sudo ls /var/spool/cups | grep -E 'd0*85' || echo
@@ -105,9 +104,9 @@ CLEAN` prints CLEAN when sudo fails, making a check that never ran
 indistinguishable from a clean result.
 
 **Why the problem exists:** CUPS documents `PreserveJobFiles` as defaulting to
-`No`, so completed jobs should leave nothing behind. Measured in a clean Ubuntu
-24.04 container, stock config with no such directive, the document file was
-still present 60 seconds after the job finished. Writing `PreserveJobFiles No`
+`No`, so completed jobs should leave nothing behind. In a clean Ubuntu 24.04
+container with the stock config and no such directive, the document file is
+still present 60 seconds after the job finishes. Writing `PreserveJobFiles No`
 explicitly stops it. An unset directive and an explicit `No` behave differently,
 which matches [apple/cups#6083](https://github.com/apple/cups/issues/6083)
 (open, no root cause, repo archived March 2026 -- reported there on macOS, and
@@ -121,18 +120,11 @@ the report; the exit code still answers the wider question, because "the job
 you asked about is gone" and "the spool is empty" are different claims.
 
 A file it cannot identify is reported and blocks a clean verdict. Over-reporting
-is the safe direction for a report -- and it was the wrong direction for the
-delete set this tool used to have, which shared the same predicate and destroyed
-a plain-text README. Both halves lived here until 2026-08-14.
+is the safe direction for a report, and the wrong one for anything that deletes.
 
-**What CUPS can clear, CUPS clears.** The first destructive half was cut
-entirely on 2026-08-14: `--fix` was "set `PreserveJobFiles No`, restart cupsd,
-delete the leftovers", which is `cancel -a -x` and one config line -- work CUPS
-already does correctly -- and it was where every dangerous bug lived: a `--fix`
-that could destroy a device node, one that truncated `cupsd.conf` to zero
-bytes, a `--purge` that followed a symlinked `TempDir` out of the directory it
-was told to audit. `--fix` is not coming back; the report names the commands
-and leaves them to you:
+**What CUPS can clear, CUPS clears.** This tool reports; it does not delete.
+Clearing the spool is `cancel -a -x` and one config line, work CUPS already does
+correctly, so the report names the commands and leaves them to you:
 
 ```
 cancel -a -x                      # cancel every job and its documents
@@ -310,7 +302,7 @@ Skipped directories: `node_modules`, `vendor`, `__pycache__`, `.git`, `.venv`, `
 
 A tool that is not found is reported as `"status": "unavailable"` and the rest
 still run, but the run then exits `2` and names the tool on stderr: a check that
-did not run is not a pass (#29). The same holds for a tool that exits
+did not run is not a pass. The same holds for a tool that exits
 abnormally, such as ruff on a config that fails to load (`"status": "error"`).
 `tests/test_check_exit_codes.py` pins this behaviour.
 

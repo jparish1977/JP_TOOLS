@@ -21,8 +21,7 @@ def _tools_dir() -> Path:
 
     If this file lives in a git WORKTREE, record the MAIN checkout instead. A
     worktree path is transient -- `git worktree remove` deletes it -- and a hook
-    pointing at one breaks on the very machine it was installed on. Measured
-    2026-09-01: a consuming repo's hook pointed at JP_TOOLS.worktrees/master. #40.
+    pointing at one breaks on the very machine it was installed on.
     """
     here = Path(__file__).resolve().parent
     try:
@@ -48,11 +47,10 @@ METHODOLOGY_DOC = TOOLS_DIR / "METHODOLOGY.md"
 
 HOOK_MARKER = "# JP_TOOLS pre-commit hook"
 
-# THE INSTALLED HOOK IS A SHIM (#65 part 3; the design, voted unanimously on
-# 2026-09-14, is on JP_TOOLS #65). It used to be a full copy of the template,
-# taken at install time, so every template change needed a reinstall in every
-# repo and nothing prompted one. Now the checks live once, in JP_TOOLS'
-# hooks/pre-commit.sh, and this shim runs them from the tree it resolves. What
+# THE INSTALLED HOOK IS A SHIM. A full copy of the checks, taken at install
+# time, would need a reinstall in every repo after every change, with nothing
+# prompting one. So the checks live once, in JP_TOOLS' hooks/pre-commit.sh, and
+# this shim runs them from the tree it resolves. What
 # can go stale moves from each repo to each box's JP_TOOLS pull, so the shim
 # checks that tree instead: it must be at its own origin/master (compared
 # locally, no fetch, so it can be behind the forge), unless a person named it
@@ -145,11 +143,10 @@ def _refuse_symlink(hook_file: Path, verb: str) -> None:
 
     Every write below follows a link: open(..., "a"), write_text(), chmod()
     and read_text(). A repo that ships its own hook as a tracked file and links
-    it into .git/hooks (another repo's hooks/install.sh does) would get the
-    JP_TOOLS hook appended INTO THE TRACKED FILE, and its mode changed. A
-    dangling link is worse: write_text() creates the target. Replacing the
-    link instead would silently disable the repo's own hook. So refuse, and
-    say what to do. #67.
+    it into .git/hooks would get the JP_TOOLS hook appended INTO THE TRACKED
+    FILE, and its mode changed. A dangling link is worse: write_text() creates
+    the target. Replacing the link instead would silently disable the repo's
+    own hook. So refuse, and say what to do.
     """
     if hook_file.is_symlink():
         print(f"Refusing to {verb}: {hook_file} is a symlink to "
@@ -185,10 +182,10 @@ def install(repo_path: Path) -> None:
         print("Appending JP_TOOLS check. Review the hook if needed.")
         # Append to the existing hook WITHOUT the template's own shebang. The
         # repo's hook already starts with one, and remove() keeps every line
-        # above the marker, so an appended shebang survived each --remove and
-        # every reinstall added another: another repo went from 1 to 2. With the
-        # shebang dropped the marker is the first appended line, and remove()
-        # gives back the repo's hook as it was. #66.
+        # above the marker, so an appended shebang would survive each --remove
+        # and every reinstall would add another. With the shebang dropped the
+        # marker is the first appended line, and remove() gives back the
+        # repo's hook as it was.
         body = SHIM_TEMPLATE.format(
             marker=HOOK_MARKER,
             tools_dir=str(TOOLS_DIR).replace("\\", "/"),
@@ -242,11 +239,10 @@ def remove(repo_path: Path) -> None:
     else:
         # Our section was appended. install() writes exactly "\n" + the marker
         # onward, so cut at that offset and the repo's hook comes back byte for
-        # byte, whatever its ending. Splitting into lines and rstrip()ing
-        # rewrote a hook with no final newline or a trailing blank line
-        # (a reviewer, reviewing #74). An install from before #66 also
-        # left its own "#!/bin/sh" just above the marker; strip that too, so
-        # older installs come back clean.
+        # byte, whatever its ending; splitting into lines and rstrip()ing would
+        # rewrite a hook with no final newline or a trailing blank line. Older
+        # installs also left their own "#!/bin/sh" just above the marker;
+        # strip that too, so they come back clean.
         before = content[:content.index("\n" + HOOK_MARKER)]
         if before.endswith("\n#!/bin/sh"):
             before = before[:-len("\n#!/bin/sh")]
@@ -255,13 +251,11 @@ def remove(repo_path: Path) -> None:
 
 
 def hook_status(repo: Path) -> tuple[str, str]:
-    """(STATE, detail) for one repo's pre-commit hook. #65, part 2.
+    """(STATE, detail) for one repo's pre-commit hook.
 
-    An installed hook never updates itself, and nothing said so: on
-    2026-09-14 all three on a laptop were the pre-#41 template, and one
-    baked a worktree path that had gone stale (#40). CURRENT means the JP_TOOLS
-    section is exactly what this JP_TOOLS would install today for the same
-    recorded path. STALE says why, so the fix is a reinstall.
+    An installed hook never updates itself. CURRENT means the JP_TOOLS section
+    is exactly what this JP_TOOLS would install today for the same recorded
+    path. STALE says why, so the fix is a reinstall.
     """
     hook = repo / ".git" / "hooks" / "pre-commit"
     if hook.is_symlink():
@@ -274,7 +268,7 @@ def hook_status(repo: Path) -> tuple[str, str]:
     section = content[content.index(HOOK_MARKER):]
     m = re.search(r'for cand in .* "([^"]*)"; do', section)
     if m is None:
-        return "STALE", "no run-time JP_TOOLS lookup: installed before #41"
+        return "STALE", "no run-time JP_TOOLS lookup: installed by an older install-hooks.py"
     expected = SHIM_TEMPLATE.format(marker=HOOK_MARKER, tools_dir=m.group(1))
     expected = expected[expected.index(HOOK_MARKER):]
     if section.rstrip("\n") == expected.rstrip("\n"):
