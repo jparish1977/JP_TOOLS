@@ -1,0 +1,17 @@
+{
+ "about": "JP_TOOLS #36: check.py compare_baseline compares only the paths a run measured, and counts the unmeasured baselined files on one line instead of printing them as improved to zero. Test: tests/test_check_baseline.py (scope_case). The directory-target prefix branch is not mutated: record-baseline always writes mode=per-file and a directory run is whole-repo, so that pairing is refused before the scope is used, and no test reaches it.",
+ "mutants": [
+  {"name": "compare-every-baselined-path",
+   "edits": [["    for path in sorted(compared):", "    for path in sorted(set(now) | set(was)):"]],
+   "target": "an unmeasured baselined file is not printed as improved"},
+  {"name": "target-not-in-scope",
+   "edits": [["        in_scope = {rel_target}", "        in_scope = set()"]],
+   "target": "a measured file that went clean still shows its gain"},
+  {"name": "unmeasured-line-dropped",
+   "edits": [["    if unmeasured:", "    if False:"]],
+   "target": "and the unmeasured one is counted on one line"},
+  {"name": "unmeasured-counts-everything",
+   "edits": [["    unmeasured = len(set(was) - compared)", "    unmeasured = len(set(was))"]],
+   "target": "and the unmeasured one is counted on one line"}
+ ]
+}
