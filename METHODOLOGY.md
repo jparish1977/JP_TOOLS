@@ -2,7 +2,7 @@
 
 *Framework-agnostic architecture, distributed as discipline.*
 
-This is the manual for the toolbox. JP_TOOLS isn't a library, it's a set of practices that travel across languages, frameworks, problem domains, and mediums. The practices are for shipping anything: portfolio sites, research visualizers, interactive fiction, data-recovery tools, archive management, generative art, spoken-word pieces with live-rendered backdrops, hardware driver abstractions.
+This is the manual for the toolbox. JP_TOOLS isn't a library, it's a set of practices that travel across languages, frameworks, problem domains, and mediums. The practices are for shipping anything: portfolio sites, research visualizers, interactive fiction, data-recovery tools, archive management, generative art, hardware driver abstractions.
 
 If it's software you expect to survive the decade, this is how it should be built.
 
@@ -12,7 +12,7 @@ If it's software you expect to survive the decade, this is how it should be buil
 
 **The methodology is the asset. Everything downstream is replaceable.**
 
-Over decades of building things that outlast their first framework, a fractal engine that predates WebGL, art archives that survived multiple blog platforms, tooling that's been ported through three languages, one pattern has held: if the domain is cleanly separated from the delivery mechanism, the domain survives. If it isn't, the rewrite starts from zero.
+Software that outlasts its first framework has one thing in common: the domain is cleanly separated from the delivery mechanism. When it is, the domain survives. When it isn't, the rewrite starts from zero.
 
 The rule: **if it can't be reimplemented in Zend 1.x, it's not abstract enough.**
 
@@ -22,33 +22,29 @@ This isn't new theory. It's hexagonal architecture / ports-and-adapters, applied
 
 ### This document is expected to be tested
 
-Joe's rule, 2026-09-01: **like everything else we do, the methodology is expected to be tested.** Everything above is stated with more confidence than any of it has earned permanently, and that is deliberate -- a rule hedged into vagueness cannot be checked. The confidence is a claim, not a status.
+Every rule here is stated with more confidence than it has permanently earned, on purpose: a rule hedged into vagueness cannot be checked. The confidence is a claim, not a status.
 
-So a conflict with this document is **a test, not a verdict.** When a proposal clashes with something written here, that encounter has two possible outcomes and nobody gets to assume which: either the proposal is wrong, or this is. Saying no therefore carries two burdens -- demonstrate that the conflict is real, and demonstrate *which side of it fails*. "It goes against the methodology" is an appeal to authority wearing a rule's clothes, and on its own it is not an answer.
+So a conflict with this document is **a test, not a verdict.** When a proposal clashes with a rule here, either the proposal is wrong or the rule is. Rejecting the proposal means showing that the conflict is real and which side of it fails. "It goes against the methodology" is not, on its own, an answer.
 
-It is proven by use and disproven the same way. That is not a slogan; it is the only test this document has ever passed. §2.8 exists because Joe stated it and this file's author argued it down three times before measuring anything -- the measurement then agreed with him. The fleet's verification ledger was refused by roughly a dozen sessions on reasoning, force-fed once, and adopted so hard it needed a brake threat. In both cases the argument lost to a trial, and in both cases the losing argument was the careful one.
-
-Which is why an unproven rule here says so. A claim with no measured instance is written as a claim with no measured instance, and stays in that state until someone produces one or kills it. A document that only ever wins its arguments is not being tested by them.
+A rule is proven by use and disproven the same way, and a trial beats an argument. A rule that has not yet been measured says so, and stays that way until someone produces an instance or kills it.
 
 ---
 
 ## 2. Principles
 
-These are extracted from the `CLAUDE.md` files in each iteration8-* repo and generalized to apply to any project in any language.
-
 ### 2.1 Zero framework dependencies in the domain
 
 Your domain package declares only:
 - The language runtime (e.g. `php ^8.3`, `python ^3.11`, `typescript ^5`).
-- First-party utility libraries you control (e.g. `iteration8/utilities` may depend on `iteration8/core`).
+- First-party utility libraries you control.
 
 It declares nothing else. No Laravel, no Symfony, no Flask, no React, no Three.js, no numpy, no ImageMagick. If the domain needs to read a file or render a frame or analyse audio, it declares a *port interface* for "thing that reads files" / "thing that renders" / "thing that analyses audio" and accepts an instance of that interface via constructor injection. Concrete implementations live in the infrastructure layer, not the domain.
 
 ### 2.2 Ports define all external boundaries
 
-A port is an interface. It names what the domain needs in terms the domain cares about: `ProjectRepositoryInterface`, `HasherInterface`, `ImageProcessorInterface`, `RendererInterface`, `AudioAnalyserInterface`, `DisplacementFormulaInterface`. It does NOT say "MySQL" or "ImageMagick" or "WebGL" or "FFmpeg."
+A port is an interface. It names what the domain needs in terms the domain cares about: `ProjectRepositoryInterface`, `HasherInterface`, `ImageProcessorInterface`, `RendererInterface`, `AudioAnalyserInterface`. It does NOT say "MySQL" or "ImageMagick" or "WebGL" or "FFmpeg."
 
-An adapter is a concrete implementation: `EloquentProjectRepository`, `NativeHasher`, `ImageMagickProcessor`, `ThreeJsRenderer`, `WebAudioAnalyser`, `DeterminantDisplacement`. It lives in the infrastructure or delivery layer, not the domain.
+An adapter is a concrete implementation: `EloquentProjectRepository`, `NativeHasher`, `ImageMagickProcessor`, `ThreeJsRenderer`, `WebAudioAnalyser`. It lives in the infrastructure or delivery layer, not the domain.
 
 The test: can you swap an adapter without touching domain code? If yes, the port is doing its job. If you find yourself reaching into the adapter's guts from domain code, the port is too thin.
 
@@ -58,10 +54,10 @@ Constructor-promoted properties (PHP 8.1+), `@dataclass(frozen=True)` (Python), 
 
 Immutability buys two things: thread-safety by default, and the ability to reason locally about state. If you have a `FileEntry` and you need a modified version, you construct a new `FileEntry`. The old one is still valid. In tests this removes a whole class of false positives ("the test mutated the fixture"). In production it removes a whole class of concurrency bugs.
 
-**The test-suite trap.** Marking these classes `final` (or `final readonly class` in PHP 8.2+, which blocks subclassing even when properties aren't themselves final) has bitten us repeatedly. `final` breaks:
+**The test-suite trap.** Marking these classes `final` (or `final readonly class` in PHP 8.2+, which blocks subclassing even when properties aren't themselves final) breaks:
 
 - **PHPUnit `createMock()` / `getMockBuilder()`**, which generate subclasses under the hood. Final classes fatal-error at mock-creation.
-- **Test-specific subclasses for IO leaves.** The `protected` + `@codeCoverageIgnore` pattern in §2.6 explicitly relies on subclassing the adapter to fake the IO method. If the adapter is `final`, that escape hatch is gone.
+- **Test-specific subclasses for IO leaves.** The `protected` + `@codeCoverageIgnore` pattern in §2.6 relies on subclassing the adapter to fake the IO method. If the adapter is `final`, that escape hatch is gone.
 - **Lightweight stubs** in higher-level tests. A service test that wants a cheap stand-in for a dependency may reach for a subclass over constructing the full real object.
 
 **Rules of thumb:**
@@ -84,9 +80,9 @@ Every dependency comes in through the constructor. No `ServiceLocator::get()`, n
 
 ### 2.5 Quality gates are not optional
 
-PHPStan level 8 / mypy strict / tsc strict. PHPCS PSR-12 / ruff / eslint. PHPUnit / pytest / jest. Coverage threshold at 95%+, and the iteration8 core package is at 100%.
+PHPStan level 8 / mypy strict / tsc strict. PHPCS PSR-12 / ruff / eslint. PHPUnit / pytest / jest. Coverage threshold at 95%+ for domain code.
 
-Enforcement is mechanical: pre-commit hook (`python ~/JP_TOOLS/install-hooks.py /path/to/repo`) runs `check.py` before every commit. CI (`python ~/JP_TOOLS/init-ci.py /path/to/repo`) runs the same checks on push and PR. A failed check blocks the commit and the merge.
+Enforcement is mechanical: the pre-commit hook (`python /path/to/JP_TOOLS/install-hooks.py /path/to/repo`) runs `check.py` before every commit. CI (`python /path/to/JP_TOOLS/init-ci.py /path/to/repo`) runs the same checks on push and PR. A failed check blocks the commit and the merge.
 
 These gates are not tech-debt mitigation. They are architectural enforcement: if a piece of code can't pass static analysis at level 8, it is probably structured wrong.
 
@@ -96,18 +92,18 @@ At the boundary between your code and the OS, there's always a line that actuall
 
 Business logic stays at 100%. OS-level error handling is acknowledged as an integration concern, not a unit-test concern.
 
-**And the exemption is a CLAIM, not a permission -- which is §1's rule applied to the smallest thing in this document.** It claims the function is a thin wrapper with nothing in it worth testing. Nothing rechecks that claim, so it goes stale silently as the function grows and the exempt region becomes the region nobody looks at. Measured on `spool-audit.py`, 2026-08-13: `# pragma: no cover` covered **430 lines of 1350 -- 32% of the file, holding 51 branch, loop and try statements.** A thin wrapper has none. Every serious defect on that branch came from inside that region, and ruff and mypy together caught 0 of 112 findings.
+**The exemption is a claim, not a permission.** It claims the function is a thin wrapper with nothing in it worth testing. Nothing rechecks that claim, so it goes stale silently as the function grows, and the exempt region becomes the region nobody looks at. A wrapper has no branches; an exempt region full of branches, loops and `try` blocks is untested decision-making.
 
-The rule is therefore not "no exemptions". It is that **an exemption must say why, so the claim is visible and can be disagreed with**:
+So **an exemption must say why, so the claim is visible and can be disagreed with**:
 
     def _unlink(p): ...    # pragma: no cover
     def restart():  ...    # pragma: no cover -- reason: runs systemctl
 
-A pragma on a function with no branches needs no reason: it is self-evidently a wrapper. One with branches is making a decision, and decisions are testable. `check.py` has enforced exactly this since 2026-08-13 and `list-exemptions.py` enumerates them; this paragraph exists because the rule lived only in that tool's source, so a reader following §2.6 wrote a bare pragma and was then failed by a gate whose reasoning they could not see.
+A pragma on a function with no branches needs no reason: it is self-evidently a wrapper. One with branches is making a decision, and decisions are testable. `check.py` enforces this, and `list-exemptions.py` lists every exemption so a person can read them.
 
 ### 2.7 The silence rule
 
-In domain code: when a field or feature is absent, let it be absent. No placeholder strings, no "no description available." Absence is part of the design. This comes from the portfolio aesthetic ("the column exists but goes quiet... no placeholder text... the silence is the content") and applies equally to APIs, CLIs, and internal data models.
+In domain code: when a field or feature is absent, let it be absent. No placeholder strings, no "no description available." Absence is part of the design, and that applies equally to APIs, CLIs, and internal data models.
 
 ---
 
@@ -115,227 +111,133 @@ In domain code: when a field or feature is absent, let it be absent. No placehol
 
 **Do not run a serial test 900 times if you can run it in parallel once.**
 
-Joe's rule, 2026-09-01. It is not "make everything concurrent", and it is not a
-performance principle wearing a correctness hat. It is a claim about the SHAPE of
-an investigation, in two phases that a serial loop collapses into one:
+This is not "make everything concurrent", and it is not a performance principle. It is about the shape of an investigation, in two phases that a serial loop collapses into one:
 
-1. **Sweep in parallel, over everything, cheap and uniform.** Its job is
-   CLASSIFICATION, not analysis: which units are interesting.
-2. **Triage what it found, in an order you choose.** Severity, or cheapness, or
-   likelihood. That ordering is only available because you hold the complete set.
+1. **Sweep in parallel, over everything, cheap and uniform.** Its job is classification, not analysis: which units are interesting.
+2. **Triage what it found, in an order you choose.** Severity, or cheapness, or likelihood. That ordering is only available because you hold the complete set.
 
-The argument that this replaces: if 20 of 900 files are bad, nobody hand-tests
-900 to find 20. And a serial scan does not merely cost more, it makes you
-investigate in ARRIVAL ORDER and calls that a priority -- stopping at the first
-bug found rather than at the worst one.
+If 20 of 900 files are bad, nobody hand-tests 900 to find 20. A serial scan does not merely cost more, it makes you investigate in arrival order and call that a priority, stopping at the first problem found rather than at the worst one. It also produces a conclusion that changes every time a new unit is measured, where a sweep produces one distribution in one report.
 
-**Worked instance, and it is this methodology's own author getting it wrong.**
-The nine-runner exit-code table in §10 was measured serially, one tool at a time.
-The result was three successive corrections to the same conclusion over two hours
--- "9 of 10", then "2 of 10 defeat the standard fix", then "3 of 10" -- each sent
-out as a revision. A parallel sweep of all twelve runners would have produced the
-distribution in one pass and one report. The first-bug-first pathology landed
-too: the design implication was declared at cppcheck, before phpcs was measured,
-and phpcs turned out to be the worst of the three.
+**The precondition: three outcomes per unit, never two.** Clean, finding, and *could not determine*. A worker that crashed is not a clean unit. With two buckets, a 900-to-20 sieve quietly becomes 900-to-20-plus-3-nobody-looked-at, and the sweep has encoded an absence as a pass. With three, the aggregate is trustworthy at any width.
 
-**The precondition, and it is the whole cost of the rule: THREE OUTCOMES PER
-UNIT, NEVER TWO.** Clean, finding, and *could not determine*. A worker that
-crashed is not a clean unit. With two buckets, a 900-to-20 sieve quietly becomes
-900-to-20-plus-3-nobody-looked-at, and the sweep has manufactured the exact defect
-§10 is about -- an absence encoded as a pass. With three, it has not, and the
-aggregate is trustworthy at any width.
+That precondition is not overhead added by parallelism. It was already required; a serial run merely lets you survive without it, because it shows you each failure as it happens and an aggregate does not.
 
-That precondition is not overhead added by parallelism. It is §2.7 and the
-denominator rule, which were already required; parallelism only removes your
-ability to survive without them, because a serial run shows you each failure as it
-happens and an aggregate does not.
-
-Applies to test suites, corpus scans, fleet sweeps, and any check run over more
-than a handful of units. JP_TOOLS has no concurrency in any tool as of
-2026-09-01, and every scan-shaped script in it loops serially, so this is a
-forward rule rather than a description of the code.
+Applies to test suites, corpus scans, machine sweeps, and any check run over more than a handful of units.
 
 ### 2.9 Keep the tool, and make it carry its own evidence
 
-Good tools take work, and the default outcome is that the work is thrown away. A review round, an incident, an afternoon of measurement -- each produces apparatus that answered a real question, and all of it sits in a scratch directory that dies with the session. Joe's rule, 2026-09-01: **"good tools take work, i hate to see work wasted."**
+Good tools take work, and the default outcome is that the work is thrown away: a measurement, a probe or a harness answers a real question and then sits in a scratch directory that gets deleted.
 
-**A landing zone with NO BAR AT ALL.** `another repo/tools/lab/` is the working example (16 files when this was written, 2026-09-01). Nothing is required to put something there. That matters more than it looks: the failure mode is work being LOST, so any bar at entry costs you tools. **Dusty is fine, lost is not.** A scruffy script somebody hesitates to write up is a script that gets deleted.
+**Give them a landing zone with no bar at entry**, such as `tools/lab/`. Nothing is required to put something there. The failure mode is work being lost, so any bar at entry costs you tools. **Dusty is fine, lost is not.**
 
-**THE LANDING ZONE OWES ONE THING: AN INDEX, KEPT CURRENT BY A TEST.** Every lab carries an index, its README, with a row per tool saying what question the tool answers. A test fails when a tool lands without a row, or when a row outlives its tool. A tool nobody can find is lost in place, so without the index "dusty is fine, lost is not" fails the other way: the next seat checks for prior art, finds nothing, and builds it again. Joe, 2026-09-14: *"if the methodology covers the labs it should say an idex is required and must be maintained"*, *"those indexes are what i hope will keep yall from duplicating effort"*, and *"the idea is once i start working out proper prompting i suspect you will all stop rebuilding the same tools over and over"*.
+**The landing zone owes one thing: an index, kept current by a test.** The lab's README has a row per tool saying what question it answers. A test fails when a tool lands without a row, or when a row outlives its tool (`tests/test_lab_index.py` here). A tool nobody can find is lost in place: the next person checks for prior art, finds nothing, and builds it again. So **before writing a tool, read the index.** An index kept by hand goes stale the first time someone is in a hurry; one held by a test does not.
 
-So: **before writing a tool, read the index.** And the index is held by a test, not by memory, because one kept by hand goes stale the first time someone is in a hurry. On 2026-09-14 another repo's listed 51 of 123 tools, and another repo's was 12 behind. The checks: `tests/test_lab_index.py` here, `tests/lab-index-current.py` in another repo, `tools/test-lab-index-current.py` in another repo. The row is not a bar at entry. It is one line, written by the person who is still there, and it does not ask the tool to be good.
-
-**A STANDARD MET BY COPYING IS WORTH A GENERATOR.** Joe, 2026-09-14: *"for 2.9 we should cover generators, if we have standards for the tools to avoid geenral annoyances and generators thta mak meeting htose standards easier well all the better."* The standards here (the index row, the three-field header below, the test shape the fleet has converged on) are cheap for one tool and expensive by the dozen, because every seat retypes them. On 2026-09-14 about fifteen `checks/*_test.py` in another repo were written to one shape by four seats copying an earlier test: a verdict-first check line a mutant can be aimed at, a fixture the test writes itself, a control beside any check that could pass on broken code, and three wiring edits (the CI step, the coverage script, the index row). No generator existed. Every seat retyped the same helper and the same wiring, and the CI step's count line conflicted on every landing.
-
-**A generator writes the shape, never the substance.** Joe, 2026-09-04, on the first one: *"make the generator interfaces. Dont allow implementation?"* The ones in use:
-
-- `another repo/tools/lab/gen-suite.py` emits a test suite's interface for a Python module, and `another repo/vm/gen-suite.py` the same contract for a shell suite run end to end. Neither writes the assertions. Both carry positive and negative control slots that are required, not optional, and the generated file FAILS until it is filled in: an unfilled stub never passes.
-- `another repo/tools/lab/lab-index-rows.py` and another repo' `checks/index_current_test.py --missing` write a lab index's missing rows from each tool's own first docstring line, so keeping the index is one command, and the index check says when it has not been run.
-- `another repo/vm/build-all.py --init` writes a `.projectbook` from a template and marks it as its own output, so it only ever rewrites what it wrote and names a hand-written one instead of touching it.
-- another repo' `dtman.py` writes man pages from a tool's docstrings and argparse calls, so the documentation is generated from the code it describes.
-
-So: **when a standard is being met by copying, write the generator, and keep it to what is the same every time.** What differs every time, the assertion, the control, the reason, stays with the person, because a generator that fills those in writes a test that cannot fail. A generator is a tool like any other here: it lands in the lab with the three-field header, and its index row names the standard it makes cheap.
-
-**A DEPENDENCY IS THE SIGNAL TO PROMOTE, and the reason is not seniority.** `tools/forgejo.py` states it, on being promoted 2026-08-24: *"the wrapper exists to be whitelisted, and whitelisting a wrapper over an untested tool whitelists the untested tool."* Dependency is the moment the untestedness stops being yours and starts being inherited by something else. Promotion cost a test file that pins the three lessons the tool was built from -- invariants, not coverage, and explicitly not the happy path.
-
-**Promotion is where the bar lives, so a lab tool must still say what it IS.** A directory is a blanket claim -- "lesser tested" -- with no per-tool justification, which is §2.6's defect at directory scale: an exemption that does not say why cannot be disagreed with. So the header carries three things, and nothing else is required:
+**Each lab tool's header says three things, and nothing else is required:**
 
 - what question it answers
 - what it was tested against, including the positive control
 - **what it was NOT tested against**
 
-**The third line is the one that earns its place, and it is also the only one nobody volunteers.** That is not an argument against it. It may be the most valuable of the three precisely BECAUSE nobody writes it unasked.
+A directory is a blanket claim ("lesser tested") with no per-tool justification, which is §2.6's defect at directory scale. The header is the per-tool justification. The third line is the one people leave out, and it is the most useful: it tells the next user where the tool's answer stops meaning anything.
 
-Measured on 2026-09-01, two seats, two tools. Fields one and two were written **before anyone specified a format**: *what it answers*, and *what it was tested against* with real numbers in it (`"took #207 from 23.30% to 2.56%"`, `"found 12 where grep found 10"`). The third field has a different history, and it is the useful one.
+**A standard met by copying is worth a generator.** Standards like the index row, the header and a common test shape are cheap for one tool and expensive by the dozen, because everyone retypes them and the copies drift. When a standard is being met by copying, write a generator for it.
 
-**One seat volunteered it.** A containment harness whose docstring records *"unprivileged, scratch dir, no live cupsd"*, by an author who self-tested it end to end **and then broke it on purpose** to confirm it went red: *"a harness that has only ever passed is not evidence."*
+**A generator writes the shape, never the substance.** It emits the interface, the wiring and the index row. What differs every time (the assertion, the control, the reason) stays with the person, because a generator that fills those in writes a test that cannot fail. A generated test stub fails until it is filled in. A generator is a tool like any other: it lands in the lab with the header, and its index row names the standard it makes cheap.
 
-**The second seat received it as a rule and applied it within the hour, in a different repo.** That is not a seat failing to volunteer. It is the relay below running one more hop, with the RULE as the thing being carried instead of a trap: one seat wrote the caveat unasked, this document generalised it into three fields, the fields were handed to a second seat, and that seat put them on two tools in `another repo` the same afternoon.
+**A dependency is the signal to promote a tool out of the lab.** Once something else depends on a lab tool, its untestedness is inherited by that thing: a wrapper over an untested tool makes the untested tool part of whatever trusts the wrapper. Promotion costs a test file that pins the invariants the tool was built to keep, not its happy path.
 
-**So the claim here is transmission, not universality**, and that is the stronger one. "Descriptive" would say people already do this, so writing it down costs nothing. What the evidence actually supports is that one person did it, it was worth generalising, and the generalisation propagated the same day to a seat that had not thought of it. **The relay is doing real work precisely where the description was false.**
-
-An earlier draft claimed both seats volunteered the third field, and cited a commit made *in response to being asked* as proof the format was natural. The seat concerned caught it: a format was requested, supplied, and the supply then offered as evidence no request was needed. Recorded rather than quietly fixed, because it is the failure this section's own question exists to catch.
-
-**THE EXAMPLE IS A RELAY, NOT A CONFESSION, and that is the whole argument.** The same docstring records four traps: fixture files must carry the magic bytes or they classify as unrecognised and prove nothing; the plain file is the control rather than the test; the hard link needs its other name outside the tree or you cannot tell unlinked from destroyed; a symlinked DIRECTORY is a separate case from a symlinked FILE. **Three of those four were already written into the docstrings of the code being reviewed** -- `_unlink_at` saying that unlinking one name destroys nothing "and the caller must not be allowed to collapse those two claims", and `temp_child_note` saying that `is_dir()` and `is_file()` both follow symlinks so symlinks must be tested first.
-
-So the chain is: the tool's author wrote the traps into docstrings, a reviewer READ them and turned them into cases that fail on demand, and the header now carries them to whoever runs it next. Each step is cheap only because the previous one happened. **That is a stronger argument for headers than self-sourced scar tissue, because it does not require the writer to have suffered, only to have read.**
-
-**The bound, from the same seat:** the relay only works when the code under review is documented like that one is. Against an undocumented tool their harness would have been thinner and they would not have known it -- which is the failure their own docstring names.
-
-This passage was wrong twice before it was right, both times in the direction of flattering the example. The first draft said "three wrong attempts, named", implying the third field is earned through failure -- which quietly raises the bar this section spends its length lowering, because somebody with no failures to confess concludes they have nothing to write. The second said the traps were identified by reading the classifier, which was still too generous: most were sitting in docstrings already. Recorded because a section arguing for honest headers cannot carry a slightly-too-good example, and it will be quoted at people.
-
-**PROPOSED, NOT SETTLED:** that writing the evidence down should ALSO be a promotion trigger, not only a dependency. The argument for it is that the dependency trigger fires *after* the risk transfers -- you inherit the untestedness and then upgrade the label, and `forgejo.py` was caught because somebody noticed rather than because anything made noticing reliable. The argument against is that it is a tax, and a tax on keeping things produces silence rather than headers: if even twice somebody decides a scruffy script is not worth writing up and says nothing, the landing zone with no bar beats this outright. Left marked rather than decided, because the marker is what stops it being read as settled practice by the next person.
-
-**And the principle AS A WHOLE is untested. Joe's verdict on it is the one to record: "it should work, guess we see."** It is written from a single day -- one review round, five tools, two seats -- and has not been through a cycle. Per §1 that makes it a claim rather than a status, and it will be proven by use or disproven the same way.
+Unsettled: whether writing a tool's evidence down should also be a promotion trigger. For: the dependency trigger fires after the risk has already moved. Against: a tax on keeping things produces silence rather than headers.
 
 ### 2.10 Check the record before you build
 
-Every other principle here governs code that is being written. This one fires before that, and it is the only one whose failure costs the whole piece of work rather than a review round.
+This fires before any code is written, and it is the only principle whose failure costs the whole piece of work rather than a review round.
 
-Joe's rule, 2026-09-08: **"pbq and pbq-grep should be part if methodolgy in spirit if not in name, they are enforment tools, check the record is the methodology."**
+**The failure is building something that already exists, and it never announces itself, because the thing you build works.** Static analysis passes, coverage passes, the tests you wrote pass. A duplicate is not a defect in any property §2.5 measures, so no gate can see it. It is found by another person, or not at all.
 
-**The failure is building something that already exists, and it never announces itself, because the thing you build works.** No gate goes red. Static analysis passes, coverage passes, the tests you wrote pass. A duplicate is not a defect in any of the properties §2.5 measures, so nothing in the mechanical half of this document can see it. It is found by another person, or not at all.
+Review does not catch it either. A review asks whether the code is correct, not whether it should exist. A feature can go through many review rounds, each finding real bugs, when the right change was to delete it and call a command the platform already provides.
 
-**This repo's own instance, and it is the most expensive one on record here.** `spool-audit.py` grew `--fix` and `--purge` halves that set `PreserveJobFiles No`, restarted cupsd and deleted the leftovers. That is `cancel -a -x` plus one config line, and CUPS already does it correctly. Fifteen review rounds found roughly 112 things, of which ruff and mypy caught none. Joe cut the feature himself on 2026-08-14, 1,573 lines to 1,018 -- commit `d36c661`, whose subject is this principle in six words: *Cut spool-audit.py to the half that had no equivalent*. The deletion removed the exemption region, the seams it needed, and every dangerous bug at once: a `--fix` that could destroy a device node, one that truncated `cupsd.conf` to zero bytes, a `--purge` that followed a symlinked TempDir out of the audited directory.
+**Find out what already exists before you build it**, with the instrument that fits the question:
 
-**Not one of the fifteen rounds proposed it.** A review asks whether the code is correct. It does not ask whether the code should exist, and by round fifteen nobody is asking either.
+- the project's own history, tracker and documentation for anything already done or decided;
+- the platform's documentation for anything the platform might already do;
+- the dependency ecosystem for anything someone else has already published.
 
-**Enforcement is mechanical, on the same footing as §2.5, which is what makes this a principle here rather than advice.** `hook-book-first` refuses bare `grep`, `rg`, `ugrep` and `ack` fleet-wide, with no flag, marker or comment a seat can use; a person lifts it with `bin/book-first`, and `bin/book-first status` says where it is lifted. The ladder is `~/projects/another repo/bin/pbq-grep`, **by full path**, since it is not on `PATH` even though `pbq` is:
+Reaching for the wrong one of those and getting a clean nothing is the failure, not an exemption from the rule.
 
-    ~/projects/another repo/bin/pbq-grep --phrase TERM -- <your command>
+**A search that could not run is not a search that found nothing.** A tool that reports "could not look" and "looked and found nothing" with the same result is collapsing three outcomes into two (§2.8). Before believing a zero, check what the search actually covered: which sources were indexed, and whether they were built before the thing you are asking about.
 
-**The exit codes, measured on 2026-09-08 rather than copied from the description, because they are not what the description says.** `2` means pbq COULD NOT LOOK -- a bad root, a missing collection, a filter matching no book -- and the fallthrough command does not run. That code is the important one, and treating it as "found nothing" converts *I could not look* into *it is not there*, the same collapse §2.8 forbids in a parallel sweep and §10 forbids in a denominator.
-
-Otherwise the wrapper **passes your command's own exit status through verbatim**: a fallthrough exiting 3 yields 3, exiting 1 yields 1, exiting 0 yields 0. Verified in all three directions. It does NOT return a reserved `1` meaning "the book looked and found nothing"; that reads as true because a `grep` fallthrough returns 1 for no-match anyway, so a description saying otherwise agrees with the behaviour on the commonest case and diverges silently everywhere else.
-
-**Ownership was ruled on 2026-09-08 and the pass-through is INTENT, not a defect.** `a reviewer` reproduced the five cases above independently, on a different collection with a generated nonce, and ruled `bin/pbq-grep` correct. So the table above is the durable fact; anyone finding a description that disagrees with it should trust a fresh measurement over either, which costs one command.
-
-**AND THE ROOT CAUSE IS WORTH MORE THAN THE CORRECTION: the WRAPPER was documented with the contract of the thing it WRAPS.** Those three exit codes are real and exactly right -- for `pbq` itself, not for `pbq-grep`. Verified directly:
-
-    pbq, word present in the collection    rc 0
-    pbq, generated nonce                   rc 1
-    pbq, unusable root                     rc 2
-    pbq, phrase of nothing but stop words   rc 2, and it SAYS
-        "the index holds no posting for any of them and the phrase cannot be
-         evaluated -- this is not the same as finding nothing"
-
-Every clause of the description was true of the inner tool. Only the attachment was wrong, which is why it survived review by people who had used both: checking it against `pbq` confirms it, and nobody thinks to ask which of the two they just checked. **A wrapper inherits its wrappee's documentation far more easily than its behaviour** -- and the more faithful the wrapper, the more plausible the wrong contract reads.
-
-Note also what `pbq` does with a stop-word phrase, because it is this whole principle in one message: it refuses to let *cannot evaluate* collapse into *found nothing*, and says so in the text rather than in a number.
-
-**THE CONDITION THIS TABLE WAS MEASURED UNDER, which was missing until `a reviewer` asked the question of their own toolchain.** `pbq` resolves its DynaText tools through `PROJECTBOOK_TOOLS`, and when that is unset -- it was, for every seat on 2026-09-08 -- it falls through to `~/projects/another repo`, whatever branch that checkout happens to be on. On the night these numbers were taken that was `block-text-index-agrees-with-reader`, not `main`, and its `dtserve.py` moved mid-evening.
-
-Split the table by what that can reach, because it does not reach all of it:
-
-- **Unaffected:** the `2` refusal (no reader involved), the generated-nonce `1`, the stop-word `2`, and every `pbq-grep` pass-through row. These are the wrapper's and `pbq`'s own control flow.
-- **Exposed:** the `rc 0` hit row, because whether a term is *found* depends on which books the reader shelves. A shelf change could turn a hit into a miss, i.e. `0` into `1`.
-
-The exposure runs one way only -- a shelf change can hide a book, not invent one -- so a hit that returned `0` is still a hit. **The claim survives; the condition should have been stated with it.** A measured fact with an unrecorded environment is a borrowed description waiting to happen, which is this section's own subject arriving one level down.
-
-**So `0` is ambiguous and must not be branched on.** It means either *the book answered and your command never ran*, or *your command ran and succeeded*. Those are different facts about the world and the exit code cannot tell them apart. Distinguish them by whether the fallthrough produced output, not by the status. A caller that treats `0` as "the book had it" will read its own successful grep as a corpus hit.
-
-That ambiguity is worth stating plainly, because it is the enforcement tool for this principle exhibiting the two-outcomes-where-three-are-needed shape the principle exists to catch. Reported to the tool's owners; recorded here as measured behaviour rather than as a defect ruling, which is theirs to make.
-
-**A zero is not an absence until you have checked the shelf.** `pbq scope --root <collection>` says what is staged and when it was built. A class that was never staged returns exactly the clean nothing a real absence returns, and a collection built before the thing you are asking about cannot answer at any confidence. Measured on this fleet: a seat searched one root holding 2 books, read `NOTHING MATCHED` as a fact about the world, and the four roots together held 1,011.
-
-**IN SPIRIT IF NOT IN NAME is doing real work in Joe's sentence, and the spool-audit case is why.** `pbq` searches this fleet's own record. It would not have found `cancel -a -x`, because that is CUPS' manual, not ours. The principle is **find out what already exists before you build it**, and the instrument varies with the question: the fleet record for anything we have done before, the platform's own documentation for anything the platform might already do, the tracker for anything already decided and disposed of. Reaching for the wrong one of those and getting a clean nothing is the failure mode, not an exemption from the rule.
-
-**Status per §1, stated because this principle arrives with more evidence behind it than §2.9 and less than §2.5.** The mechanism is proven: the refusal is wired, and refuses the common spellings; it has known holes (a searcher after `if`/`while`/`!`, searches in python or jq), so it is a strong nudge rather than a wall. It fired on the author of this section while the section was being researched, naming its own fix in the refusal text. What is NOT established is a JP_TOOLS-native cycle. The spool-audit instance is this repo's and it is real, but it was caught by Joe reading his own tool rather than by any search, so it demonstrates the cost of the failure and not yet the value of the cure. The fleet instances that demonstrate the cure are session tooling, not this codebase. That gap is the test this principle has still to pass.
+**A wrapper is documented with its own contract, not its wrappee's.** A wrapper that passes its command's exit status through is easy to describe with the wrapped tool's exit codes, and the description will survive review because it is true of the tool underneath. Check the wrapper itself.
 
 ### 2.11 Clean up after yourself
 
-Joe, 2026-09-15: **"our methodology really needs a clean up after yourself sestion, this is stupid"**. It came half an hour after he found the same thing on the filesystem, relayed by `a reviewer`: *"wtf are you doing not accounting for the secret scanner and leaving shit around on the fs"*.
+**What a change leaves behind is read by other tools.** A fixture under `/tmp` with a credential-shaped string in it becomes a finding for any secret scanner that reads the disk, and someone has to rule on it. Deleting the tree afterwards does not close the finding. The cheapest finding is the one that was never written to disk.
 
-**What a change leaves behind is read by other tools, and some of those tools raise findings.** The fleet's leak sweep (`scan-credential-shapes`) reads the disk. A fixture left under `/tmp` with a credential-shaped string in it becomes a finding that someone has to rule on. Deleting the tree afterwards does not close the finding; only a verdict does. On the night this section was written, 57 CERTAIN-tier findings on the build server were routed to one seat. Four sat in live corpus inputs. The other 53 were in trees nobody was using: a test shelf's work directory untouched for six days, and a hardlinked copy of a staging directory. **The cheapest finding is the one that was never written to disk.**
-
-**It never announces itself, for the same reason as §2.10.** The run that left the mess succeeded, and the mess sits on a path nobody opens. It is found by the sweep, by the next seat, or by Joe. Here is what one evening of a coverage round left, found and measured on 2026-09-14/15:
-
-- **Test fixtures removed only on the test's last line.** A test that fails or crashes part-way leaves the whole fake HOME, the stub tools and the fake repositories under `/tmp`. Found on a laptop: four `pb-pbq-grep-*` directories and one `pb-t-vocab-book-*`. That last one was left by a mutation run that hung and was killed, so its cleanup never ran at all.
-- **A probe that printed its temporary directory and never removed it**, written by the author of this section (`/tmp/proto-cc-*`).
-- **A full-suite run started before a context compaction, then forgotten.** It ran from 00:24 to 02:16, shared its output directory with a later measurement, which then carried a caveat, and overlapped another seat's port window.
-- **Worktrees under `/tmp`**: fifteen were registered in the build server's another repo at once. Removing one with `rm` leaves it registered, and the next `git worktree add` on that path refuses.
-
-**The rules, each for the reason above:**
-
-1. **Register the cleanup when you create the thing, not on your last line.** Call `atexit.register(shutil.rmtree, d, ignore_errors=True)` right after `mkdtemp`, or use a context manager. A cleanup on the last line runs only if every line before it did.
-2. **A killed process runs no cleanup at all, so whatever kills a run cleans up after it.** Joe, on that point: *"yeah, thats what happens when you kill a run, wipe your ass"*. A harness with a timeout should give each run its own `TMPDIR` and remove it afterwards, whatever happens. `atexit` cannot help once the process is gone, and every leftover another repo found that night came from a killed run: out of memory, or a timeout.
-3. **Never put a secret-shaped value in a fixture.** Use the canonical placeholders the guards accept: a `$VAR` for any assignment, `example` for a user or password, a reserved host (`example.com`, `host.invalid`, `*.test`). A fixture that has to look real to be worth testing is a fixture the sweep will find.
-4. **A long-running job gets its own output directory, and a line where the next session will look.** Put its PID, its directory and how to stop it in the checklist or on the board. A job started before a compaction is invisible after it; its only record is the one you wrote.
-5. **Remove a worktree with `git worktree remove`, never `rm`.** Do it only after checking that what it held has landed: an ancestor check, or byte-identical files when the branch was rebased.
-6. **A scratch script either earns a place in `tools/lab` (§2.9) or is deleted.** Check each one against the repositories before deleting it: a draft of something that already landed goes, and anything that exists only in the scratchpad is read before it goes.
-7. **Before you stop, list what you created and account for each item:** temporary directories, worktrees, background jobs, board claims, branches. Remove each one or hand it off, and say which you did. For a test, the check is one command: list `/tmp` for your fixture prefixes after the suite has run, and expect nothing.
-
-**Status per §1.** The evidence is one evening across four seats, all of it from the same round. Rule 1 has been measured: thirteen tests changed to register their cleanup at creation all pass, and they leave nothing under their prefixes afterwards. Rule 2 is closed for the mutation runner, by another repo in another repo `b91ab5e`. `tools/lab/mutate-on-target.py` now gives each test run its own `TMPDIR` and removes it whatever happens; at the timeout it kills the test's whole process group, so nothing it started lingers. Any other harness that can kill a run owes the same, and none has yet been checked.
-
-### 2.12 One long run for everything that is ready
-
-Joe, 2026-09-15: **"dot run 5 fucking tests ina row that take 15-20 miues
-each if you could run all the etst ina singe fuckign rn"**.
-
-The sibling of §2.8. That rule is about the shape of a sweep; this one is
-about how many times you pay for a long one. When several changes are waiting
-on the same slow suite, the suite runs once, over all of them together.
-
-**What it replaced, measured the same night.** another repo's full suite runs
-as a two-arm comparison on the build server: `origin/main` against the branch, on
-one box at one moment (`vm/lab/i8-two-arm-suite.sh`). Each ready branch got
-its own run, one after another. One chain alone was three two-arm runs and a
-coverage measurement, announced at about 40 minutes. Over the night six such
-runs were reported as landed, and **the arms matched on every one of them**.
-Five of those six runs bought nothing that a single run over the stack would
-not have. And while they ran, the box's fixed ports were held, so every other
-seat's port window waited behind the queue.
+It never announces itself, for the same reason as §2.10: the run that left the mess succeeded, and the mess sits on a path nobody opens. The usual leftovers are fixtures removed only on a test's last line, probes that print their temporary directory and never remove it, long runs started and forgotten, and worktrees deleted with `rm` so git still has them registered.
 
 **The rules:**
 
-1. **Stack every READY branch onto one integration branch** (`land-<date>`,
-   each branch cherry-picked onto main) and run the suite once, main against
-   the stack. The comparison takes any branch name; a stack is a branch.
-2. **If the arms match, fast-forward main to the stack.** If main moved
-   during the run, rebase the stack onto it again first.
-3. **If the arms differ, bisect the stack.** Drop half the branches and
-   rerun; never fall back to one run per branch. A failure costs a few extra
-   runs; running every branch alone costs one run per branch, every time.
-4. **Still one suite on a box at a time.** The artefact tests bind fixed
-   ports, so two suites on one box skew or break each other. Stacking is also
-   what makes this cheap: one run holds the ports once.
-5. **A branch that is not ready waits for the next stack.** It does not get
-   a run of its own because it happened to finish first.
+1. **Register the cleanup when you create the thing, not on your last line.** Call `atexit.register(shutil.rmtree, d, ignore_errors=True)` right after `mkdtemp`, or use a context manager. A cleanup on the last line runs only if every line before it did.
+2. **A killed process runs no cleanup at all, so whatever kills a run cleans up after it.** A harness with a timeout gives each run its own `TMPDIR`, kills the run's whole process group at the timeout, and removes the directory whatever happens.
+3. **Never put a secret-shaped value in a fixture.** Use placeholders scanners accept: a `$VAR` for any assignment, `example` for a user or password, a reserved host (`example.com`, `host.invalid`, `*.test`).
+4. **A long-running job gets its own output directory, and a note where the next person will look**: its PID, its directory, and how to stop it.
+5. **Remove a worktree with `git worktree remove`, never `rm`.** Do it only after checking that what it held has landed.
+6. **A scratch script either earns a place in the lab (§2.9) or is deleted.** A draft of something that already landed goes; anything that exists only in scratch is read before it goes.
+7. **Before you stop, list what you created and account for each item:** temporary directories, worktrees, background jobs, branches. Remove each one or hand it off. For a test suite the check is one command: list `/tmp` for your fixture prefixes after the suite has run, and expect nothing.
 
-**Status per §1.** The evidence is one night on one repository.
-`a reviewer` confirmed that nothing in the two-arm design needs one
-branch per run, and applied the rule the same hour: its last two branches
-(`fix-live-cache`, `fleet-docs-class`) went into one stack, `land-0915`, with
-one run. Rule 3's bisection has not yet been needed, so its cost is argued,
-not measured.
+### 2.12 One long run for everything that is ready
+
+The sibling of §2.8. That rule is about the shape of a sweep; this one is about how many times you pay for a slow one. When several changes are waiting on the same slow suite, the suite runs once, over all of them together.
+
+1. **Stack every ready branch onto one integration branch** (each cherry-picked onto main) and run the suite once, main against the stack.
+2. **If the results match, fast-forward main to the stack.** If main moved during the run, rebase the stack onto it again first.
+3. **If they differ, bisect the stack.** Drop half the branches and rerun; never fall back to one run per branch. A failure costs a few extra runs; running every branch alone costs one run per branch, every time.
+4. **One suite per machine at a time** when the suite binds fixed ports or other shared resources, or two runs skew each other.
+5. **A branch that is not ready waits for the next stack.** It does not get a run of its own because it finished first.
+
+Rule 3's bisection cost is argued, not yet measured.
+
+### 2.13 One fact, one home
+
+Every fact has exactly one home: a number, a list, a contract, a decision, a version pin. Everything else points to that home, or is generated from it. A copy is allowed only when something checks it against the home and fails when they disagree.
+
+A second copy is correct the day it is written and wrong after the first change to either one, and nothing reports the drift. From then on a reader holding one copy cannot tell whether it is the current one, and the reader who finds out is usually the one who acted on the stale copy.
+
+The shapes it takes:
+
+- **One name, defined twice.** A module constant assigned in two places with different contents. The later one wins at runtime, and every linter passes, because redefining a name is legal.
+- **One behaviour, described in several places.** A docstring, a README and the code each state what an exit code means, and they disagree. The code is the only one that runs.
+- **One pin, in several manifests.** A tool version pinned in a requirements file and again in each CI workflow's install line (§7, "Declare the instrument's own dependencies").
+- **One component, in two repos** (§9 item 8).
+- **A comment that restates a fact.** "Nothing in this repo measures coverage" is true until coverage is wired up, and then it is a false statement someone will quote. A comment that says **why** cannot go stale that way; a comment that says **what the repo does** is a copy of a fact whose home is elsewhere.
+
+How to apply it:
+
+- **Point, don't restate.** A doc that describes behaviour links to the code, or to a test that asserts the behaviour. A README's exit-code line becomes a test that runs the tool and checks the codes, so a wrong README fails a build instead of misleading a reader.
+- **A copy must be generated or checked.** If a CI line or a README table has to exist, generate it from the home, or add a check that fails when they disagree.
+- **A pointer is not a copy.** A note that lists open items drifts as soon as the list changes; a note that points at the list cannot.
+- **Splitting along a false seam makes two homes** (§2.14).
+
+Nothing in the gate detects duplication yet.
+
+### 2.14 Size is a smell; responsibility is the rule
+
+**The rule is responsibility.** A file should have one reason to change. That is §2.2 and §4 at file scale: a file that parses argv, holds domain decisions and performs IO has collapsed the layering into one place, whatever its length. A 300-line file doing three jobs is the defect. A 1,400-line file doing one well-documented job may not be.
+
+**The number is the smell.** Past **1,000 physical lines** a file answers, in its own header, what its responsibilities are and why they belong together, so the claim is visible and can be disagreed with (§2.6, §2.9). A file that cannot state its responsibilities in a few lines has usually answered the question already. Count physical lines, because that is what a reader scrolls; counting only code rewards a large file that has stopped explaining itself.
+
+Crossing the line is not a violation, and it is not a reason to split on its own. Splitting a file to get under a number, along a seam that is not a responsibility, makes two files that must change together (§2.13). That is worse than one large file, and it hides the coupling the number was pointing at.
+
+Complexity is the better measure and belongs per function: ruff's `C90` (cyclomatic complexity) and the `PLR09xx` counts (branches, statements, arguments). Measure what they would find before selecting them; a rule that is red everywhere on day one is how a gate gets switched off (§9 item 1).
+
+JP_TOOLS is past the smell itself: `check.py`, `spool-audit.py` and `tests/test_spool_audit.py` are each over 1,000 lines, and `check.py` has at least three responsibilities (running and parsing a dozen external tools, the baseline recorder and comparer, and the coverage-exemption inventory). Named here as §9 item 10 asks, so it reads as a decision rather than a surprise.
 
 ---
 
 ## 3. The canonical exemplar: FileScanner
 
-`FileScanner` is the reference implementation, and everything in iteration8-utilities and the quality-tooling scripts follows this pattern. It's in PHP, but the pattern translates directly to any language.
+`FileScanner` is the reference implementation. It's in PHP, but the pattern translates directly to any language.
 
-**Where it lives.** FileScanner is *not* in this repo. It ships in `iteration8/utilities` under the `Iteration8\Utilities\FileScanner` namespace, and JP_TOOLS consumes it through composer as an optional dependency (`composer require iteration8/utilities:dev-master`). `find-dupes.php` here is the composition root that wires it up. Keeping the library out of the toolbox is itself the methodology working: the toolbox depends on the contract, not on a vendored copy.
+**Where it lives.** FileScanner is *not* in this repo. It ships in the `iteration8/utilities` package under the `Iteration8\Utilities\FileScanner` namespace, and JP_TOOLS consumes it through composer as an optional dependency. `find-dupes.php` here is the composition root that wires it up. Keeping the library out of the toolbox is itself the methodology working: the toolbox depends on the contract, not on a vendored copy.
 
 ```
 Iteration8\Utilities\FileScanner\
@@ -375,7 +277,7 @@ Iteration8\Utilities\FileScanner\
 
 **Read the CLI entry point:** `find-dupes.php` is the composition root. It reads CLI flags, picks adapters based on those flags (`--workers 4` gives `WorkerPoolScheduler`, `--db path` gives `SqliteCache`), and hands them to `Scanner`. All framework-specific concerns (CLI parsing, argv handling, output formatting) live here. The library knows nothing about argv.
 
-This pattern is what `iteration8-utilities/CLAUDE.md` means when it says "follows the FileScanner pattern." Use it as the template for any new library or tool.
+Use it as the template for any new library or tool.
 
 ---
 
@@ -415,17 +317,11 @@ Dependencies flow downward only. Domain depends on nothing but the language. Inf
 
 **Cycles are a smell.** If you find infrastructure importing from delivery, or domain importing from infrastructure, one of two things is true: (a) you've placed the code in the wrong layer, or (b) the port interface is missing or too narrow.
 
-### Reference application: the iteration8 stack
-
-- `iteration8-core`, the domain. 100% coverage. PHP 8.3 plus nothing. Entities (`Project`, `Piece`, `BlogPost`), port interfaces (`ProjectRepositoryInterface`, `AuthenticatorInterface`, `SessionInterface`, `ImageProcessorInterface`), services.
-- `iteration8-utilities`, the infrastructure. 97.7%+ coverage. FileScanner, ImageProcessor (ImageMagick adapter). Depends only on core's ports.
-- `a website repo`, the delivery. 99.2% coverage. Laravel 12. `IterationServiceProvider` binds ports to Eloquent/Laravel adapters in `Infrastructure/`. Thin controllers, Blade views, REST API.
-
-If Laravel is ever replaced, core and utilities don't move. You write new adapters in a new delivery package.
+A typical web stack: a `core` package (entities, port interfaces, services, language runtime only), a `utilities` package (adapters such as an image processor or file scanner, depending only on core's ports), and a `site` package (the framework, a service provider binding ports to framework adapters, thin controllers). If the framework is ever replaced, core and utilities don't move; you write new adapters in a new delivery package.
 
 ### Reference application: the JP_TOOLS toolbox itself
 
-This repo is methodology applied to itself. `find-dupes.php` is a delivery layer over the FileScanner library in `iteration8/utilities`, and it depends on that package's contracts rather than vendoring a copy. `check.py` and `fix.py` are language-agnostic delivery layers that dispatch to adapters per language (`ruff` for Python, `phpstan` for PHP, `eslint` for JS). `install-hooks.py` and `init-ci.py` are the propagation mechanism: they install the methodology into other repos.
+This repo is methodology applied to itself. `find-dupes.php` is a delivery layer over the FileScanner library, and it depends on that package's contracts rather than vendoring a copy. `check.py` and `fix.py` are language-agnostic delivery layers that dispatch to adapters per language (`ruff` for Python, `phpstan` for PHP, `eslint` for JS). `install-hooks.py` and `init-ci.py` are the propagation mechanism: they install the methodology into other repos.
 
 ---
 
@@ -433,28 +329,23 @@ This repo is methodology applied to itself. `find-dupes.php` is a delivery layer
 
 The principles are medium-agnostic. The same structure works for:
 
-### Portfolio & content CMS (a website repo)
-Domain = pieces, projects, blog posts, voice text, piece layouts derived from aspect ratio. Ports = repositories, image processor, authenticator, session. Adapters = Eloquent, ImageMagick, GitHub OAuth, Laravel session. Delivery = Laravel + Blade + a carefully-constrained CSS token system where `tokens-base.css` / `tokens-theme.css` / `typography.css` are the PORT (plain CSS, survives any framework) and Tailwind `@theme` in `app.css` is the ADAPTER (disposable). `tools/lint-css-layers.sh` fails commits that leak hex colors outside the theme tokens.
+### Content site / CMS
+Domain = content items, projects, posts, layouts derived from content. Ports = repositories, image processor, authenticator, session. Adapters = an ORM, an image library, an OAuth provider, the framework's session. Delivery = the web framework and templates. Design tokens in plain CSS are the port (they survive any framework); a utility-CSS framework's theme layer is the adapter (disposable). A lint step that fails on colours outside the tokens keeps the boundary honest.
 
-### Fractal research engine (MandelbrotExplorer)
-Domain = pure 2D Mandelbrot iteration `z = z² + c` (never modified) and its 2D escape trajectory. Ports = displacement formulas (`escapingZ`, `cloudLengthFilter`, `cloudIterationFilter`, `dualZMultiplier`, `particleFilter`), rendering backend, audio analyser (planned). Adapters = concrete displacement implementations (magnitude / determinant / angular / sine), Three.js/WebGL renderer, future non-Three.js renderer, future `AudioAnalyserAdapter` feeding GLSL uniforms. Delivery = the web UI, eval-compiled formula slots editable live.
+### Research visualizer
+Domain = the pure computation (for a fractal explorer, the iteration and its trajectory, never modified). Ports = the formulas under study, the rendering backend, an audio analyser. Adapters = concrete formula implementations, a WebGL renderer. Delivery = the UI. When each formula is a port, each is a hypothesis about the data and swapping one is a one-line change: the method of investigation becomes the structure of the code.
 
-The novelty of MBE is that the displacement formula IS a port: each formula is a research hypothesis about what structure is hidden in the 2D data, and swapping them is a one-line change. The domain math doesn't move. The hypothesis-testing methodology becomes the structure of the code.
+### Simulation / generative art
+Domain = the model (cellular automata, wave equations, iteration). Ports = rendering backend, sampling, clock coupling. Adapters = a plotting library for a proof of concept, a GPU renderer later. The proof of concept is a delivery layer over the same core.
 
-### Generative art / living simulation (Brots Alive)
-Domain = pure 2D Mandelbrot + cellular automata + wave equation. Ports = rendering backend, audio sampling point, clock-to-iteration coupling, displacement formulas applied to bodies-as-skins. Adapters = matplotlib (current POC), future Three.js / native / VR. The Python POC (`~/projects/brots-alive/`) is a delivery layer disguised as a research sandbox: same math core as MBE, different rendering aesthetic.
+### Networked interactive fiction
+Domain = game state, player session, room graph, message bus. Ports = input/output, session store, persistence, broadcast. Adapters = telnet, WebSocket, in-memory store, SQLite. Two delivery surfaces on the same domain. A bug where session cleanup is entangled with one transport's lifecycle is a missing port; factoring it out is the hexagonal move.
 
-### Interactive fiction (Telnet Dungeon Crawler)
-Domain = game state, player session, room graph, message bus. Ports = input/output, session store, persistence, broadcast. Adapters = telnet protocol, WebSocket protocol, in-memory store, SQLite persistence. Delivery = the systemd service + Apache WS proxy + web client, OR raw telnet. Two delivery surfaces on the same domain. (The WS disconnect bug that cost a session to fix was exactly a missing port: session lifecycle cleanup was entangled with WS lifecycle, and factoring that out is the hexagonal move.)
+### Data recovery and archive management (the JP_TOOLS recovery tools)
+Domain = file integrity, hunk-level dedup, provenance tracking. Ports = raw disk access, hash algorithm, CHD operations, photorec profile. Adapters = `ddrescue`, native vs shell hashing, `chdman`, photorec. Delivery = `recover.py`, `image-disk.py`, `chd.py`, `undelete.py`, each a thin composition root picking adapters per invocation.
 
-### Data recovery & archive management (JP_TOOLS recovery tools)
-Domain = file integrity, hunk-level dedup, provenance tracking. Ports = raw disk access, hash algorithm, CHD operations, photorec profile. Adapters = `ddrescue`, native PHP hashing vs shell hashing, `chdman`, photorec. Delivery = `recover.py`, `image-disk.py`, `chd.py`, `undelete.py`. Each delivery is a thin composition root picking adapters per invocation.
-
-### Spoken-word work (planned convergence with MBE)
-Domain = an audio artifact + optional transcript/score + optional reactive visual. Ports = audio source, audio analyser (FFT / envelope / onset), visual renderer, transcript renderer. Adapters = Web Audio analyser, MBE as visual adapter (with audio feeding GLSL uniforms), plain-text transcript. The iteration8 design doc explicitly flags this: *"the visualizer is MBE with audio as a new input source, not a separate tool."* The port/adapter discipline is how that convergence happens without retrofitting: the `AudioAnalyserAdapter` slot is planned into MBE's module boundaries now, years before the spoken-word visualizer ships.
-
-### Hardware rehab / firmware tooling
-Domain = device capabilities + driver abstraction + boot-mode state. Ports = USB / ACPI / fingerprint sensor / webcam / touchscreen driver. Adapters = kernel modules, userspace drivers, vendor blobs. Delivery = installer scripts, systemd units. The U810 project, SA510 firmware rescue, and retro-VM consolidation on x3550 Proxmox all fit this pattern, because hardware is another framework.
+### Hardware and firmware tooling
+Domain = device capabilities, driver abstraction, boot-mode state. Ports = USB, ACPI, sensors, display. Adapters = kernel modules, userspace drivers, vendor blobs. Delivery = installer scripts, service units. Hardware is another framework.
 
 ---
 
@@ -487,7 +378,7 @@ Principles are language-agnostic. Tools are language-specific. `check.py` auto-d
 
 Checklist for greenfield work that should inherit this discipline:
 
-0. **Search before you scaffold (§2.10).** Ask the fleet record, the platform's own documentation, and the tracker whether this exists already. Numbered zero because it is the only step that can make the other ten unnecessary, and because it is the step whose omission never produces a failure -- a duplicate passes every gate below. `~/projects/another repo/bin/pbq-grep --phrase TERM -- <command>`, by full path, and `pbq scope` before believing any zero.
+0. **Search before you scaffold (§2.10).** Ask the project record, the platform's own documentation, and the tracker whether this exists already. Numbered zero because it is the only step that can make the other ten unnecessary, and because its omission never produces a failure: a duplicate passes every gate below.
 
 1. **Three-or-fewer packages.** Minimum: domain. If the project has IO, add infrastructure. If the project has a UI or CLI, add delivery. Don't start with one mega-package that mixes layers.
 
@@ -495,13 +386,13 @@ Checklist for greenfield work that should inherit this discipline:
 
 3. **Port interfaces before implementations.** Sketch the interfaces first. The first adapter can be `InMemoryFooRepository`, good enough to run the domain tests without touching a real database.
 
-4. **Install the hook**: `python ~/JP_TOOLS/install-hooks.py /path/to/repo`. Commits fail until the code is clean.
+4. **Install the hook**: `python /path/to/JP_TOOLS/install-hooks.py /path/to/repo`. Commits fail until the code is clean.
 
-5. **Install the CI**: `python ~/JP_TOOLS/init-ci.py /path/to/repo`. PR blocks on the same gates.
+5. **Install the CI**: `python /path/to/JP_TOOLS/init-ci.py /path/to/repo`. PR blocks on the same gates.
 
 6. **Set coverage gate to 95%** in your test config. Use `@codeCoverageIgnore` / `pragma: no cover` sparingly and only on IO leaves.
 
-7. **Write the CLAUDE.md** for each package. Copy from `iteration8-core/CLAUDE.md` and adapt. This is the prescriptive doc that future-you and future-collaborators read before touching the code.
+7. **Write the contributor rules** for each package: what the layer may and may not depend on, and how it is tested. This is the prescriptive doc people read before touching the code.
 
 8. **Composition root is a single file.** Service provider in Laravel, `main()` in Python, app entry in JS. One place where "this project uses these adapters" is declared.
 
@@ -523,403 +414,190 @@ Checklist for greenfield work that should inherit this discipline:
 
 ### Declare the instrument's own dependencies
 
-Joe's call, 2026-09-01: guessing at dependencies is a PITA nobody wants to deal
-with. It earns a checklist item because JP_TOOLS itself got two of the three
-languages right and the third had nothing at all, which is the shape this fails
-in -- not total neglect, but one arm nobody noticed was undeclared.
+Item 9 fails in one characteristic shape: not total neglect, but one language's tools declared nowhere while the others are declared properly. Check every arm the gate runs.
 
-    composer.json    declares phpstan, phpcs, rector          DECLARED
-    package.json     declares eslint, prettier, stylelint     DECLARED
-    python runners   ruff, mypy, pip-audit                    NOWHERE
+**A pin that lives only in a CI install line is not a declaration.** You cannot install from it locally and it does not diff against anything, and two copies of such a line drift apart without anyone noticing.
 
-The Python pins existed only inside a `pip install` line in a CI workflow, which
-is not a declaration: you cannot install from it locally, and it does not diff
-against anything. **Two copies of that line had already drifted.** JP_TOOLS' own
-`check.yml` pins `ruff`, `mypy` and `coverage`; the template `init-ci.py` ships
-to every adopting project pins `ruff`, `mypy` and `pip-audit`. Neither is a
-superset of the other, and the divergence is visible only by opening both files.
+**The cost of an undeclared tool is silent.** A runner whose tool is missing contributes no findings, so a run where an arm never executed looks like a run where everything passed. `check.py` exits 2 when a check could not run, so a missing tool is reported rather than read as a pass.
 
-**The cost is silent, and it is the denominator problem from §10.** A runner
-whose tool is missing returns `"unavailable"`, which contributes no issues, and
-`_summarize` counts only issues. So a run where an arm never executed is
-indistinguishable -- in the summary, and in the exit code -- from a run where
-everything passed. The gate does not lie about it. It simply never mentions it,
-and nobody reads a per-tool block when the total says zero.
+**Declaring is not enough: the declaration and the resolution have to agree.** If the manifest installs a tool into `vendor/bin` or `node_modules/.bin`, the runner must look there too. Otherwise installing from the manifest satisfies the manifest and still leaves the gate reporting the tool as unavailable.
 
-**Declaring is not enough on its own: the declaration and the resolution have to
-agree.** JP_TOOLS gets this right for PHP, where `_php_bin` prefers
-`vendor/bin/<tool>` and falls back to `PATH`, so `composer install` is sufficient
-and the error message even says so. It gets it wrong for JS, where
-`package.json` declares prettier and stylelint while `run_prettier` resolves
-through `shutil.which` alone and never looks in `node_modules/.bin`. **Running
-`npm install` therefore satisfies the manifest and leaves the gate reporting the
-tool as unavailable** -- the worst of both, because the manifest now says the
-dependency is handled.
+**Over-declaring is the mirror error.** A manifest that pins a tool nothing consumes is the same defect pointed the other way, and harder to notice, because installing more than you need always succeeds. The check that catches both directions is short: walk the manifest, run each tool's `--version`, and assert the pin matches.
 
-**Over-declaring is the mirror error and it is easier to commit.** The first
-draft of `requirements-dev.txt` pinned `coverage==7.15.4`, copied from CI. It is
-not installed on a working dev box, and `check.py`'s own comment says nothing in
-the repo measures coverage at all -- so the manifest would have asserted a
-dependency nothing consumes. A manifest that over-claims is not safer than one
-that under-claims; it is the same defect pointed the other way, and harder to
-notice later because installing more than you need always succeeds.
+### Adopting from day one
 
-The check that catches both directions costs about fifteen lines: walk the
-manifest, run each tool's `--version`, and assert the pin matches. It caught the
-phantom `coverage` entry within a minute of the file being written, which is the
-only reason it is described here as an error rather than as a rule.
-### The first from-inception adoption, and what it bought on day one
+Adopting the discipline at inception, rather than as a retrofit (§9), is stricter: there is no baseline and no exemption list to measure against. Two things follow:
 
-Everything above was written as a prescription and applied, until 2026-09-01, only
-as a retrofit -- which is section 9, a different and more forgiving problem. A
-retrofit gets a baseline and an exemption list, so the discipline is measured
-against where the code already was. `another repo` is the first project to take this
-from inception, with no baseline to hide behind, and the checklist stopped being
-theory the same day.
+- **The exemption you write on day one is the one nobody revisits.** A retrofit's exemption list is understood to be debt. A greenfield ignore is written as policy, reads as intent, and is invisible thereafter.
+- **A high hit count is evidence about a rule's reach, not about its worthlessness.** Hundreds of findings for one rule in a young repo means the pattern is load-bearing there. That is a reason to look at what it covers, not to turn it off. Style rules hide bugs: a one-line `except` folded onto its `try` can hide a reused variable that a reader would otherwise catch.
 
-It paid before the first review round, on item 6 and on the rule under it. The
-project's `ruff.toml` records the decision it nearly made instead:
-
-> NOTHING IS IGNORED HERE ON PURPOSE. The first draft of this file was going to
-> silence UP031 (113 hits) and E701/E702 (126), on the grounds that percent format
-> and one-line statements are style rather than substance. Joe, the same day:
-> "poor style hides bugs"
-
-And the repo had already proved it, in `prior-art/scan.py`:
-
-    except Exception as e: return ('unreadable',[])    # E701
-    ...
-    e = head[root+i*32:root+i*32+32]                   # `e` reused as a loop var
-
-mypy flagged the reuse. It is not a crash, it is genuinely confusing, and **the
-confusion is invisible BECAUSE the except was folded onto one line.** The style
-rule and the legibility problem were one finding, so silencing the first would have
-hidden the second -- and 239 hits is exactly the volume that makes silencing feel
-like housekeeping rather than like a decision.
-
-Two things generalise from that, and they are the argument for adopting at
-inception rather than later:
-
-- **The exemption you write on day one is the one nobody ever revisits.** A
-  retrofit's exemption list is understood to be debt and gets a ticket. A
-  greenfield ignore is written as policy, reads as intent, and is invisible
-  thereafter.
-- **A high hit count is evidence about the rule's reach, not about its
-  worthlessness.** 239 findings across a young repo means the pattern is
-  load-bearing there. That is a reason to look at what it is covering, not a
-  reason to turn it off.
-
-Where the discipline is worth its cost is not evenly spread, and item 4's hook is
-what makes any of it survive contact: a gate that runs only in CI is a gate the
-author meets after they have stopped thinking about the change.
+A gate that runs only in CI is a gate the author meets after they have stopped thinking about the change. The pre-commit hook (item 4) is what makes the rest survive.
 
 ---
 
 ## 8. Before opening a PR
 
-Section 7 inverted. Those are the claims you make at the start of a project;
-these are the same claims **verified** at the end of a change, which is the only
-point at which anyone finds out whether they were true.
+Section 7 inverted. Those are the claims you make at the start of a project; these are the same claims **verified** at the end of a change, which is the only point at which anyone finds out whether they were true. Linters catch very little of what review finds; each item below is a review round saved.
 
-Written from JP_TOOLS PR #24, where fourteen review rounds produced about 112
-findings and `ruff` plus `mypy` together caught **none of them**. Every item
-below is here because its absence cost a round.
+1. **Read your own diff as if someone else wrote it.** Most of what review finds is visible in the diff. A reviewer's attention is the scarcest thing in the loop; don't spend it on work nobody has read once.
 
-1. **Read your own diff as if someone else wrote it.** Most of what those
-   fourteen rounds found was visible in the diff. A reviewer's attention is the
-   scarcest thing in the loop and it was spent three times on work that had not
-   been read once.
+2. **Run the real gate, not a convenient approximation.** `python check.py <file>`, not `ruff check <file>`. They disagree: check.py enables a stricter ruleset. Two tools disagreeing about one file is a bug signal on its own.
 
-2. **Run the real gate, not a convenient approximation.** `python check.py
-   <file>`, not `ruff check <file>`. They disagree: check.py enables a stricter
-   ruleset, and "ruff clean" was claimed all session on a file the gate failed.
-   Two tools disagreeing about one file is a bug signal on its own.
+3. **Check coverage, and check what it is measuring.** `.coveragerc` traces subprocesses and does **not** honour `pragma: no cover`, both deliberately. Without subprocess tracing, code exercised through a CLI reads as untested; honouring the pragma adds coverage nobody earned. A naive setup is wrong in the flattering direction. See `docs/coverage.md`.
 
-3. **Check coverage, and check what it is measuring.** `.coveragerc` traces
-   subprocesses and does **not** honour `pragma: no cover`, both deliberately.
-   Untraced subprocesses cost 11 points on `spool-audit.py` and honouring the
-   pragma added 10 it had not earned, so a naive setup reports a number that is
-   wrong in the flattering direction. See `docs/coverage.md`.
+4. **Read the exemptions**: `python list-exemptions.py <file>`. §2.6 says `pragma: no cover` belongs only on IO leaves. The `no-cover` check refuses an unjustified branchy exemption, but **a reason is not a justification**: three words can satisfy the check and justify nothing. Only a person reading the list catches that.
 
-4. **Read the exemptions**: `python list-exemptions.py <file>`. §7.6 says
-   `pragma: no cover` belongs "only on IO leaves". On this branch it covered
-   430 lines of 1350, holding 51 branch, loop and try statements, and every
-   serious defect came from inside it. The `no-cover` check refuses an
-   unjustified branchy exemption, but **a reason is not a justification**: two
-   of the first four written here said three words and justified nothing.
-   Nothing but a person reading the list catches that.
+5. **Confirm CI actually covers the file, by name.** The file list in `.github/workflows/check.yml` is manual. A green badge on a file no job touches is not a pass, it is a check that did not run.
 
-5. **Confirm CI actually covers the file, by name.** The list in
-   `.github/workflows/check.yml` is manual. `spool-audit.py` was merge-ready
-   with a green badge while no job in that file touched it, so "CI is green"
-   was true and said nothing about the code. Green on a file nobody checks is
-   not a pass, it is a check that did not run.
+6. **Run the thing itself, including its destructive paths.** Against a real fixture, and on a real machine if it touches one. A fixture you invented can only contain bugs you already suspect.
 
-6. **Run the thing itself, including its destructive paths.** Against a real
-   fixture, and on a real machine if it touches one. Every real-machine run on
-   this branch found something the fixtures did not, because a fixture you
-   invented can only contain bugs you already suspect.
+7. **Make sure the decisions have seams.** If a function mixes a decision with the IO around it, the decision cannot be tested and that is where the bugs will be. Extract the decision; leave a wrapper with no branches in it. That is what §2.6 means by "thin".
 
-7. **Make sure the decisions have seams.** If a function mixes a decision with
-   the IO around it, the decision cannot be tested and that is where the bugs
-   will be. Extract the decision; leave a wrapper with no branches in it. That
-   is what §2.6 has always meant by "thin".
+8. **Push, then confirm CI by SHA.** Not by badge, not by the last run you remember. After a force-push, a PR's checks can still be reporting the old commit.
 
-8. **Push, then confirm CI by SHA.** Not by badge, not by the last run you
-   remember. A force-push leaves `gh pr checks` reporting a stale commit.
+9. **Have nothing outstanding before you request review, and freeze while it runs.** If the message that launches a review also proposes more work, the launch was premature. A round that reports on a tree that has moved is worth nothing.
 
-9. **Have nothing outstanding before you request review, and freeze while it
-   runs.** If the same message that launches a review also proposes more work,
-   the launch was premature. A round that reports on a tree that has moved is
-   worth nothing, and cancelling it costs nothing.
+10. **Leave nothing behind (§2.11).** Every temporary directory, worktree, background job and scratch script this change created is either removed or handed off, and no fixture carries a secret-shaped value. After the tests have run, list `/tmp` for your fixture prefixes and expect nothing.
 
-10. **Leave nothing behind (§2.11).** Every temporary directory, worktree,
-    background job and scratch script this change created is either removed or
-    handed off, and no fixture carries a secret-shaped value. The check: after
-    the tests have run, list `/tmp` for your fixture prefixes and expect
-    nothing.
+The one to keep if only one survives: **a check that did not run looks exactly like a check that passed.**
 
-The through-line, and the one worth keeping if only one survives: **a check
-that did not run looks exactly like a check that passed.** Twelve instances in
-a single session, in twelve different tools, three of them committed while
-actively writing about that failure mode.
 ---
 
 ## 9. Adopting this in a codebase you inherited
 
-§7 is for a repo that starts clean. This section is for the case that covers
-most working days: a codebase that is already valuable, already load-bearing,
-has never met the bar, and cannot be stopped while it learns.
+§7 is for a repo that starts clean. This section is for the common case: a codebase that is already valuable, already load-bearing, has never met the bar, and cannot be stopped while it learns. Adoption is a rate, not an event.
 
-Written from a consuming repo: 14,000 lines across 31 Python scripts and 11 PHP
-files, four separate products sharing one directory, one test, and a 604-line
-`CLAUDE.md` of accumulated traps. `python3 check.py .` reported **924 errors**.
-Every rule in §7 assumes a gate that can be switched on in a single move, and
-two separate plans for that repo were wrong before this section existed, both
-of them because they treated adoption as an event rather than a rate.
+1. **Make the gate incremental before you make it mandatory.** A whole-repo gate on a repo with hundreds of pre-existing errors has two outcomes: a cleanup nobody scheduled, or `--no-verify` as a daily habit. Check the **staged files**, so the only code that has to meet the bar is code you were already editing. The number then falls as a side effect of doing the work. `install-hooks.py` does this.
 
-1. **Make the gate incremental before you make it mandatory.** A whole-repo
-   gate on a repo with 924 pre-existing errors has two possible outcomes: a
-   cleanup nobody scheduled, or `--no-verify` as a daily habit, which the
-   anti-patterns section lists for good reason. Check the **staged files**, so the only
-   code that has to meet the bar is code you were already editing. The number
-   then falls as a side effect of doing the work, and no calendar entry is
-   required.
+2. **Record the baseline the same way the gate measures, and hold the line at "no worse".** Ratcheting needs a number to ratchet against. Commit a **per-file** run (`check.py --record-baseline`) and have the gate compare against it rather than against zero. Without that stored number, a file that got worse and a file that was always bad are indistinguishable.
 
-   This was a defect in the toolbox itself, fixed in `9fa6803`.
-   `install-hooks.py` stated in its own docstring that it "runs check.py
-   against staged files", collected them into `$STAGED`, used that list only to
-   test whether anything was staged at all, and then ran `check.py .` against
-   the repo root. On greenfield the difference is invisible, because the whole
-   tree is clean either way. On anything inherited it is the difference between
-   an on-ramp and a wall.
+   **Name it `quality-baseline.json` at the repo root.** The pre-commit hook looks for exactly that path and passes `--baseline` when it is there; with no such file the gate fails on any finding, which is what a clean repo wants. A fixed path rather than a setting, so a repo either has a baseline the hook uses or has none, never a baseline that is recorded, committed, and invoked by nothing.
 
-   It is left recorded here rather than deleted, because the same mismatch came
-   straight back through step 2: the hook was fixed to measure per-file while
-   the instruction for recording a baseline still said to measure the whole
-   repo. Fixing one half of a scope mismatch leaves the other half looking
-   correct.
+   **Per-file, because that is what step 1 made the gate do.** A whole-repo run and a per-file run are different quantities in the same units, and comparing one against the other looks exactly like tool drift. Only tools that resolve across files (`mypy`, `phpstan`) differ between the two modes; tools that judge a file in isolation (`ruff`, `phpcs`, `rector`) do not. If a baseline disagrees with a fresh run on exactly the import-sensitive tools and nothing else, suspect scope before versions. Say "per-file" when you write the instruction down: "a full run" reads as "the full repo" as easily as "every tool".
 
-2. **Record the baseline the same way the gate measures, and hold the line at
-   "no worse".** Ratcheting needs a number to ratchet against. Commit a
-   **per-file** run (`check.py --record-baseline`) and have the gate compare
-   against it rather than against zero. Without that stored number, a file that
-   got worse and a file that was always bad are indistinguishable, so no one
-   can tell progress from noise and the effort stops being visible to anyone
-   including you.
+   A per-file baseline is the **worse** measurement for `mypy` and `phpstan`: in isolation they cannot resolve imports and report more. That is the right trade: the gate can only compare against what it can reproduce, and the excess is mostly real findings rather than noise.
 
-   **Name it `quality-baseline.json` at the repo root.** The pre-commit hook
-   looks for exactly that path and passes `--baseline` automatically when it is
-   there; with no such file the gate is unchanged and still fails on any
-   finding, which is what a clean repo wants. A fixed path rather than a
-   setting, so a repo either has a baseline the hook uses or has none, never a
-   third state where a baseline is recorded, committed, and invoked by nothing.
-   That third state is exactly what #32 shipped in: `--baseline` was merged and
-   unreachable from the only place that enforces anything, because
-   `install-hooks.py` named it zero times. Written, merged, and not running.
+3. **Find out which checks are not running before believing the total.** An inherited repo will be missing toolchains a greenfield one installs on day one, and a check that did not run contributes zero findings. A total that covers one language while another is entirely unmeasured reads as authoritative. On unfamiliar code you have no intuition to contradict the number.
 
-   **Per-file, because that is what step 1 made the gate do**, and the two
-   measurements are different quantities in the same units. This sentence used
-   to read "commit the output of a full run", which is how the a consuming repo
-   baseline came to be recorded at the repo root while the hook it had to be
-   compared against ran file by file. The result looked exactly like tool
-   drift: 2472 recorded against 2870 measured, +398 across seven files that
-   nobody had touched since the baseline was taken.
+4. **Map the dependency graph before planning the order.** One search for cross-imports settles whether piecemeal extraction is cheap or a fantasy. Plans drawn before that measurement tend to be built around avoiding a cost that does not exist. Measure the coupling first.
 
-   The signature is worth knowing, because it will happen again to someone.
-   Only the tools that **resolve across files** move between the two modes:
-   `mypy` and `phpstan`. The ones that judge a file in isolation, `ruff`,
-   `phpcs` and `rector`, were byte-identical on every file. If a baseline
-   disagrees with a fresh run on exactly the import-sensitive tools and on
-   nothing else, suspect scope before you suspect versions.
+5. **Let the work choose the order.** The component that most deserves a rewrite and the component you have open are rarely the same one, and only the second rewrite is free, because you were paying to understand that code anyway. `git log --since=<a month ago> --name-only` names the real order in one command.
 
-   Note also that "a full run" reads two ways, and both are natural: a run over
-   the full **repo**, and a full run of every **tool** rather than a partial
-   one. Whoever records a baseline tends to read it the first way, which is
-   also the way that produces the larger and more impressive number, and
-   nothing downstream contradicts them. Say per-file, and say why, or it gets
-   helpfully "improved" back.
+6. **One component leaves at a time, and the tree runs between every step.** No freeze, no big-bang split, no branch that lives for a month. If a component's rewrite cannot be finished in a sitting, the unit is too large. The test of a good unit is that abandoning the project immediately after it lands leaves the repo better than before, with nothing half-migrated.
 
-   A per-file baseline is the **worse** measurement for `mypy` and `phpstan`:
-   in isolation they cannot resolve imports and report more. That is the right
-   trade anyway: the gate can only compare against what it can reproduce, and
-   the excess is real findings rather than noise. On `audit_roms.py` the extra
-   172 were `no-untyped-call` and `no-untyped-def`, not import errors.
+7. **Extract when you touch, never on a schedule.** The new repo gets created the day real work lands on that component, with the hook and CI on from its first commit. Whatever never moves is what nobody needed, and the effort spent on it is correctly zero.
 
-3. **Find out which checks are not running before believing the total.** Those
-   924 errors covered Python only. `phpstan`, `phpcs` and `rector` all reported
-   `unavailable` and contributed zero, so 11 PHP files were entirely unmeasured
-   while the summary read as authoritative. An inherited repo will be missing
-   toolchains that a greenfield one installs on day one. A check that did not
-   run looks exactly like a check that passed, and that costs more here than
-   anywhere else, because on unfamiliar code you have no intuition to
-   contradict the number.
+8. **A component leaves by moving, and leaves nothing behind.** Copying it forward produces two versions that both keep receiving fixes, each holding a repair the other lacks. This is the vendoring anti-pattern arriving one convenient copy at a time.
 
-4. **Map the dependency graph before planning the order.** One grep for
-   cross-imports settles whether piecemeal is cheap or a fantasy. In
-   a consuming repo, 31 scripts held **three** internal edges between them, which
-   made extraction close to free; both plans drawn before that measurement had
-   assumed it would be expensive and were built around avoiding a cost that
-   did not exist. Measure the coupling first. It is the input that decides the
-   entire strategy, and it takes one command.
+9. **Treat the gotchas document as a coverage report.** A long file of "do not step here" is a list of defects no test was in a position to catch, so the mitigation lives in prose and has to be re-read before every session. Each entry is a test case waiting for a seam. Port them into the suite as components move, and let the shrinking of that file measure whether the seams arrived.
 
-5. **Let the work choose the order.** The component that most deserves a
-   rewrite and the component you have open are rarely the same one, and only
-   the second rewrite is free, because you were paying to understand that code
-   anyway. On a 400-line script the gap between editing it and rebuilding it
-   properly is small. `git log --since=<a month ago> --name-only` names the
-   real order in one command: in a consuming repo the finished, quiet component
-   was proposed first, while the four files carrying 26 commits in the previous
-   month were proposed last.
+10. **Say in the README which packages meet the bar and which are grandfathered.** At any moment part of the repo does not comply, and a reader cannot tell an exempt package from a neglected one by looking. A gap that is written down is a decision; a gap that is discovered is a surprise.
 
-6. **One component leaves at a time, and the tree runs between every step.** No
-   freeze, no big-bang split, no branch that lives for a month. If a
-   component's rewrite cannot be finished in a sitting, the unit is too large;
-   split it again until it can. The test of a good unit is that abandoning the
-   project immediately after it lands leaves the repo in a better state than
-   before, with nothing half-migrated.
+11. **When a component cannot be extracted, strangle it instead.** Some components are one program rather than a collection. The strangler fig pattern (Fowler, 2004) routes call by call: find a point where the program already dispatches (a route switch, a file-extension switch), send one case to a new implementation, leave the rest on the old path, and repeat until the old path has no callers and can be deleted. Deleting the host is part of the pattern: a strangler that never completes leaves two systems and a facade.
 
-7. **Extract when you touch, never on a schedule.** The new repo gets created
-   the day real work lands on that component, with the hook and CI on from its
-   first commit. Six months later, whatever never moved is precisely what
-   nobody needed, and the effort spent on it is correctly zero. A migration
-   plan that names all components up front commits you to finishing the ones
-   that turn out not to matter.
+12. **Pin current behaviour before rewriting it, including the parts that look wrong.** A characterisation test (Feathers, *Working Effectively with Legacy Code*, 2004) asserts what the code does today rather than what it should do. Write an assertion you know is false, run it, read the real value out of the failure, and paste it in as expected. Some surprising behaviour is load-bearing, and you will not know which until later. The gotchas file from item 9 is the shortlist. The bulk form, a golden master, is often already on disk as a cache of past results: freeze a copy and diff after the rewrite. Manufacture determinism first (timestamps, ordering, live dependencies), and delete a characterisation test the day you decide the behaviour it pins was wrong.
 
-8. **A component leaves by moving, and leaves nothing behind.** Copying it
-   forward produces two versions that both keep receiving fixes.
-   `ntfs-inventory.py` exists in both JP_TOOLS and a consuming repo, diverged by
-   119 lines, each copy holding a repair the other lacks: one has the usage
-   block and the repo's first test, the other has the fix for the 285,471 sudo
-   invocations that wrote 857,000 lines into `auth.log`. Neither is the version
-   to keep, which is the cost of having allowed two. This is the vendoring
-   anti-pattern arriving through the side door, one convenient copy at a time.
+13. **Add the project file with the first change, not in a sweep.** §7.10 on a repo that has none. It is a few lines and changes nothing that runs, so it rides along with whatever change first touches the repo, per item 7. Fill `dependencies` from the imports, not from memory.
 
-9. **Treat the gotchas document as a coverage report.** A long file of "do not
-   step here" is a list of defects that no test was in a position to catch, so
-   the mitigation had to live in prose and be re-read by a human before every
-   session. a consuming repo's ran to 604 lines. Each entry is a test case
-   waiting for a seam: `/runningGame` returns 201 when idle, the audit cache
-   keys on `(size, mtime)` so a fix outside the file replays the old verdict,
-   `ok` means two different things in the same summary. Port them into the
-   suite as the components move, and let the shrinking of that file be the
-   measure of whether the seams actually arrived.
-
-10. **Say in the README which packages meet the bar and which are
-    grandfathered.** Adoption is a rate, so at any moment part of the repo does
-    not comply, and a reader cannot tell an exempt package from a neglected one
-    by looking. Name them. JP_TOOLS carries its own "this repo does not yet
-    meet its own bar" section for the same reason: a gap that is written down
-    is a decision, and a gap that is discovered is a surprise.
-
-11. **When a component cannot be extracted, strangle it instead.** Some
-    components are one program rather than a collection, and there is no
-    version of "take a third of it out" that leaves the tree running. The
-    strangler fig pattern (Fowler, 2004) routes call by call: find a point
-    where the program already dispatches, send one case to a new
-    implementation, leave the rest on the old path, and repeat until the old
-    path has no callers and can be deleted. The whole technique rests on
-    finding that dispatch point, and everything after it is bookkeeping.
-
-    Both of a consuming repo's large files have one already. `batocerawatch.py`
-    switches on `route` in `do_GET` (`/ping`, `/running`, `/audit`,
-    `/controls`), so `/manual` can move onto a layered package while
-    `/controls` still runs the old module-level functions in the same process,
-    serving the same handheld, with no cutover. `audit_roms.py` switches on
-    file extension in `structural()`, so `.chd` and `.cue` can move behind
-    ports one format at a time. Deleting the host is part of the pattern, not
-    an optional finish: a strangler that never completes leaves two systems and
-    a facade, which is three things to maintain instead of one.
-
-12. **Pin current behaviour before rewriting it, including the parts that look
-    wrong.** A characterisation test (Feathers, *Working Effectively with
-    Legacy Code*, 2004) asserts what the code does today rather than what it
-    should do. It is a tripwire, not a certificate. The mechanic is to write an
-    assertion you know is false, run it, read the real value out of the failure
-    message, and paste that in as expected, which turns "I cannot test this
-    because I do not understand it yet" into a mechanical job. This matters on
-    inherited code because some of its surprising behaviour is load-bearing,
-    and you will not know which parts until later.
-
-    The gotchas file from item 9 is the shortlist. `/runningGame` returning 201
-    when idle is not a note to remember, it is an assertion: rewrite the client
-    to read the body instead of the status and the bug comes straight back,
-    while the change feels like an improvement. The bulk form, a golden master,
-    is often already lying around: a full `audit_roms.py` cache is a recorded
-    verdict for every ROM in the library, so freezing a copy and diffing after
-    a rewrite turns every changed verdict into a question that has to be
-    answered out loud. Two limits. Determinism has to be manufactured first,
-    since timestamps, dict ordering and anything with a live box in the loop
-    will differ on every run, which is why this suits the structural pass and
-    not the 25-minute launch pass. And these tests freeze bugs deliberately, so
-    deleting one the day you decide the behaviour was wrong is correct
-    behaviour rather than a lapse.
-
-13. **Add the project file with the first change, not in a sweep.** §7.10 on
-    a repo that has none. It is a few lines and changes nothing that runs, so
-    it rides along with whatever change first touches the repo, per item 7.
-    Fill `dependencies` from the imports, not from memory.
-
-The through-line: **the discipline arrives one file at a time, or it does not
-arrive.** Every rule in §7 is affordable on a repo with no history. On a repo
-with history, the only budget that reliably exists is the file already open on
-the screen, and any adoption plan costing more than that will be abandoned
-while still looking, from the commit log, like it is going fine.
+**The discipline arrives one file at a time, or it does not arrive.** On a repo with history, the only budget that reliably exists is the file already open on the screen, and any adoption plan costing more than that will be abandoned while still looking, from the commit log, like it is going fine.
 
 ---
 
-## 10. Anti-patterns
+## 10. Reading an instrument
+
+§8 is about verifying claims on code you wrote. This is about the tools you point at something else to find out what is true: a driver, a running service, another machine, a message queue, an archive. The code under test may not be yours, may not be readable, and may not be changeable. The instrument is the only thing you control, and it is the thing that will be wrong.
+
+1. **Ask whether the instrument can return a confident nothing.** An empty list, a zero count, an absent file, no output, exit 0. This is the best predictor of whether you will catch your own error, and it is a property of the tool you can check before running it. A wireless tool's "dump all stations" command can exit 0 with no output on a driver that implements only per-station lookup, while "get station X" on the same card returns a signal level. Nothing in an empty list looks wrong. Instruments that return a wrong *something* get caught by whoever ran them; instruments that return a confident *nothing* do not.
+
+2. **Before running one that can return nothing, write down what a non-nothing would look like.** This is the positive control, stated as a prediction. The output is uncheckable from the inside; the prediction is what gets checked.
+
+   **The control must run the instrument's configuration**, or it answers a different question. `ruff --isolated` against files the gate calls clean can report dozens of errors that are all line-length findings the project's own config allows. Zero and dozens are both correct answers to different questions.
+
+   **A control that can only run where the bug is absent is not a control.** Pin the environment alongside the violation. For a gate that can fail to load its config, the matrix has three rows, and the middle one is the one that never gets written:
+
+       config resolves, file dirty   ->  fail, issue count > 0
+       config MISSING,  file dirty   ->  error. never pass, never skip
+       config resolves, file clean   ->  pass, 0 issues
+
+3. **When you build the instrument, make absence countable; never encode it in a value.** A wrapper that emits `counter=` both for a counter the hardware does not implement and for a counter reading zero has one encoding for two facts. A sentinel string (`unavailable`) is no better: the next parser crashes on it or coerces it. **Omit the field and print a count** (`fields=2/8`). Omission cannot be misread as a value, and a change in the count is itself a signal.
+
+   **A wrapper that discards the exit status does this by construction.** A tool that writes a config-load failure to stderr and exits 2 with empty stdout parses as `[]`, and a wrapper that ignores the code publishes "pass, 0 issues". `check=True` is not the fix: many tools exit 1 for "found violations" and 2 for "could not run", so the wrapper needs both codes rather than an exception.
+
+4. **Prefer the instrument that returns a quantity to the one that returns a verdict.** A number, a name or a unit is partly self-checking; a verdict is not. `443071.182s` in a column headed milliseconds is absurd on sight. A quantity also carries a moment: a count taken before a sleep and printed after it describes the earlier instant. Print a count beside the instant it describes.
+
+5. **Ask what question the tool actually answers, not what you asked it.** The failing case is a tool that *succeeds*. A green CI badge on a file no job touches answers "did the jobs pass", not "is this file clean". The sharpest version is querying the wrong artefact and reporting the absence as a property of the thing: a driver's header lists numbered ioctls while its capabilities live as named variables in the binary's string table; a crash-log mount is empty because it was cleared. **Before concluding a system cannot do something, establish that you queried the place where the answer would live.**
+
+6. **Your own output truncation manufactures silent failures.** An excerpt, a `tail` that turns a crash into a partial read that looks complete, a `head` that drops rows from a count, `$?` read after a pipe (the last command's status, not the tool's). Every one produces a plausible number. Measure exit status without a pipe (or use `PIPESTATUS`), and never conclude from an excerpt whose boundaries you did not choose.
+
+7. **The adequate sampling window depends on a period you do not know yet.** Two machines running the same query can refresh a cache every 100 ms and every 300 s; a window that settles one is a fifth of a cycle on the other. Measure the period first, or state the window as a fraction of a period you are declaring unknown.
+
+8. **A control that varies many variables at once feels stronger than a single-machine comparison and is usually weaker.** A table of differences between two machines reads as rigour because it produces an artefact; columns are not evidence of isolation. One machine varying one thing across its own history excludes a variable. State what a control is worth on each axis separately. And "not exposed" is not "absent": "structurally impossible" closes an avenue that "not plumbed out" leaves open.
+
+9. **When two measurements disagree, suspect the instruments before the fact. When two agree, ask whether the agreement was designed.** Two people independently running the same command is one measurement, not a cross-check; label an agreement *designed cross-check* or *collision*. When two accurate instruments disagree, suspect the question: sockets in `SYN_SENT` and sockets in `ESTABLISHED` are both "connections".
+
+10. **A guard often holds for a different reason than its comment claims.** The behaviour is right, the stated reason is wrong, and the next person edits against the reason. Prove a guard fires; do not prove it exists.
+
+11. **Whoever is on the machine owns the facts about that machine.** Ask rather than infer. **A quoted measurement becomes the quoter's measurement in one hop, and the hedge does not survive the hop**: write *X measured this*, not *this is true*. Relay people verbatim or say plainly that you are inferring; never paraphrase a person into a table, because a table reads as settled.
+
+12. **A brief written before a retraction is a confident wrong brief, and it is the durable artefact.** Correct it by stating **what survives**, not by striking text. Put a tool's known limits in the tool's own header, where the next reader already has it open.
+
+13. **Before a destructive test, the thing at risk is whatever nobody owns.** The pre-flight has two halves: *what do I hold*, from everyone on the target, **and** *what does this machine hold that nobody claimed*: logs, caches, un-backed-up history. The second half needs someone assigned to it.
+
+14. **A denominator you printed is not a bound the reader will apply.** `checked 3 file(s)` above `no errors` is read as "the corpus is clean". Put the denominator inside the verdict (`PASS (3 of 47 files)`), or refuse to emit a verdict when the scope is narrower than the target named. A tool that cannot say how much it covered says INCONCLUSIVE.
+
+15. **A detector for this family is itself an instrument, and it returns a confident nothing about everything it has no rule for.** Its coverage is its rule list. And **a detector establishes that instances share a SHAPE, never that they share a FIX**: ten identically phrased findings invite ten identical repairs, and some of them will need a different one.
+
+16. **An absence encoded as a number gets arithmetic done to it, and comes out plausible.** A parser that returns `-1` on failure, subtracted from a baseline, publishes a crash as a delta in range for a bad day. Return `None`, abort on a failed baseline instead of printing differences from nothing, and count unmeasurable rows separately.
+
+17. **`returncode != 0` is a proxy for "the tool failed", and its strength is a property of the tool. Measure it per tool, with the arguments and config the wrapper actually uses.** `curl -s` exits 0 on a 404; `curl -fsS` is the fix. Four conventions among common linters:
+
+        ruff, prettier      0 clean, 1 findings, 2 refusal     (0,1) rule correct
+        cppcheck            0 clean AND findings, 1 refusal     (0,1) rule wrong
+        node-run linters    0 ran, nonzero = runner crashed     (0,1) rule wrong
+        phpcs               0 clean, 2 findings, 3 refusal      (0,1) rule harmful
+
+    Even for ruff, rc=0 does not mean "nothing found" (a syntax error reports at rc=0) and rc=1 does not only mean "violations" (a missing path reports there too). The refusal code must never be a pass, and the success codes still require parsing the output. When two unrelated checks agree on which case to skip, that case is unrepresentative of the model both were built from: measure it by hand.
+
+18. **A fix that makes the test pass can leave the defect class untouched. Ask which way the next gap fails.** Of two incomplete lists (terminators or continuations), prefer the one whose gaps degrade toward "unknown", because item 3 gives you a way to count unknowns.
+
+19. **Nobody catches their own error by looking harder. It is caught by observing differently.** Move the window, add a control, drop the pipe, use real input. More attention on the same observation returns the same answer with more conviction.
+
+20. **A success message over a no-op is the strongest form of this defect.** A tool that prints `sent (1 recipient)` with exit 0 for an empty body has reported a delivery that carried nothing. Check the payload before sending. And when a tool offers no way to correct a record, people stop correcting; fix the coupling in the tool.
+
+21. **A peer's better-phrased claim will overwrite your own measurement, and you will not notice.** When you adopt someone else's formulation, re-read your own record first, because agreement is exactly the condition under which nobody re-reads anything.
+
+**Knives and broken glass.** A knife is meant to be sharp; broken glass is sharp by accident. The test is whether the edge was designed. Ruff exiting 2 on an unloadable config, or cppcheck exiting 0 whether or not it finds defects, is a knife: documented and intended, and the reading is yours to get right. A linter that cannot start on the installed runtime, or a parser returning `-1` into a subtraction, is broken glass: a defect the next person will meet too. Documentation is evidence of intent, not intent itself.
+
+The usual mishandling is **widening the question**: an instrument answers narrowly and the reader promotes it to a broader answer with nothing marking it. `"ruff": "pass"` honestly answers "did the parsed output contain issues", not "did ruff find nothing". As a tool author, stop issuing the invitation: report what was asked, at the width it was answered.
+
+The through-line, §8 one layer out: **an instrument reports on itself, not on the world.** Exit 0 means the tool ran. An empty list means the tool had nothing to say.
+
+---
+
+## 11. Anti-patterns
 
 Things that look like they save time but defeat the methodology:
 
-- **Framework imports in the domain.** `use Illuminate\...` in `iteration8-core` is a bug, not a shortcut. Once it's there, the package is no longer framework-agnostic.
+- **Framework imports in the domain.** A framework `use`/`import` in the core package is a bug, not a shortcut. Once it's there, the package is no longer framework-agnostic.
 - **Service location inside domain code.** `$container->get(...)` inside a service means the service has a hidden dependency. Constructor inject it.
 - **Mutable value objects.** If `FileEntry` has setters, every piece of code that ever saw it is a suspect when state looks wrong. Make it `readonly`.
-- **Framework-coupled tests in the core suite.** If `iteration8-core/tests/` needs Laravel to run, the core isn't pure. Move the test to `a website repo/tests/`.
+- **Framework-coupled tests in the core suite.** If the core's tests need the framework to run, the core isn't pure. Move the test to the delivery package's suite.
 - **God adapters.** An adapter implementing six port interfaces at once is a sign the ports are carved wrong. Split the adapter or merge the ports.
-- **Vendoring a shared library instead of depending on it.** Copying FileScanner into a consumer would give two divergent copies and no contract. Depend on `iteration8/utilities` and let composer resolve it.
-- **Skipping the hook.** `git commit --no-verify` is sometimes legitimate (you're mid-refactor, CI will catch it). Make it rare. If you're doing it daily, the quality gate is misconfigured or the code has accumulated debt that should be paid.
+- **Vendoring a shared library instead of depending on it.** Copying a library into a consumer gives two divergent copies and no contract. Depend on the package and let the package manager resolve it.
+- **Skipping the hook.** `git commit --no-verify` is sometimes legitimate (you're mid-refactor, CI will catch it). Make it rare. If you're doing it daily, the gate is misconfigured or the code has accumulated debt that should be paid.
 - **One mega-package.** Mixing domain, infrastructure, and delivery in one package makes the layering invisible. The layers are the point.
-- **Placeholder content where silence would do.** The aesthetic rule from the portfolio applies to APIs too. Don't synthesize fake data to fill a slot that's meant to be optional.
-- **Reimplementing what the platform, or this fleet, already does (§2.10).** The only anti-pattern on this list that passes every gate in §2.5, because a duplicate is correct code. `spool-audit.py`'s `--fix` was `cancel -a -x` plus one config line; fifteen review rounds priced the implementation and none of them asked whether it should exist. Search first, and treat "could not look" as distinct from "not there".
-- **Reading a search result as an answer.** A hit is an address: `collection / book / nid / title / snippet`. Summarising snippets back is the same error as quoting a grep hit instead of reading the function it points at, and a pointer that no longer resolves is a finding about the pointer rather than evidence the thing is gone.
+- **Placeholder content where silence would do.** Don't synthesize fake data to fill a slot that's meant to be optional (§2.7).
+- **Reimplementing what the platform already does (§2.10).** The only anti-pattern here that passes every gate in §2.5, because a duplicate is correct code. Search first, and treat "could not look" as distinct from "not there".
+- **Reading a search result as an answer.** A hit is an address. Summarising snippets back is the same error as quoting a search hit instead of reading the function it points at, and a pointer that no longer resolves is a finding about the pointer, not evidence the thing is gone.
 
 ---
 
-## 11. Related reading
+## 12. Related reading
 
-- `~/projects/iteration8-core/CLAUDE.md`, domain layer rules (24 lines, prescriptive).
-- `~/projects/iteration8-utilities/CLAUDE.md`, infrastructure layer rules (30 lines), and the FileScanner reference implementation itself.
-- `~/projects/a website repo/CLAUDE.md`, delivery layer rules, CSS token/adapter pattern (55 lines).
-- `find-dupes.php` in this repo, the composition root that consumes FileScanner.
-- `~/portfolio_notes/iteration8-design-doc.md`, the full content-and-aesthetic model for the portfolio site, including the silence rule and the planned MBE/spoken-word convergence. **`a Windows laptop` only** -- `~/portfolio_notes/` exists on no other fleet machine.
-- `~/portfolio_notes/TODO.md`, live task state across all projects. **`a Windows laptop` only**, same as above.
-- `~/projects/mandelbrotexplorer/`, displacement formulas as research hypotheses (domain example from MBE). **The `JULIA_TUNNEL_LINEAGE.md` this line used to name resolves nowhere**, at either the old `~/mandelbrotexplorer/` path or the real one; the tree holds `julia-tunnel.html` and a `docs/` directory that does not contain it. Left pointing at the tree rather than deleted, because the subject is real and only the address is lost.
-- `~/projects/brots-alive/CONTINUATION.md`, same-math-different-medium example (domain example from Brots Alive). Verified present.
-- `~/projects/iteration8-continuation.md`, live state of the production stack applying this methodology. **Unverified: absent from `~/projects` on `a laptop`.**
-
-**Five of the nine pointers above did not resolve on this box when checked on 2026-09-08, and that is a finding about this section rather than about the projects.** The `~/mandelbrotexplorer/` path is the instructive one: `CLAUDE.md` had already corrected exactly that path once, on 2026-09-06, after a session looked there, found nothing, and reported the tree as a Windows laptop-only when it is on two machines. The same wrong address survived here because nothing checks a link in a document. Per §2.10 a pointer that does not resolve is a finding about the pointer, so verify before quoting one, and fix it where it was read.
-
----
-
-*The toolbox comes with a manual. Read it, apply it, improve it.*
+- `README.md`: what each tool does and how to install the toolbox.
+- `check.py`: the gate itself, and the source of truth for what it enforces.
+- `install-hooks.py` and `init-ci.py`: how the gate is installed into another repo.
+- `list-exemptions.py` and `docs/coverage.md`: coverage exemptions and how coverage is measured.
+- `tools/lab/README.md`: the lab index (§2.9).
+- `find-dupes.php`: the composition root that consumes FileScanner (§3).
+- Alistair Cockburn, *Hexagonal Architecture* (2005); Martin Fowler, *StranglerFigApplication* (2004); Michael Feathers, *Working Effectively with Legacy Code* (2004).
