@@ -1,13 +1,14 @@
 # PhotoRec's file-format list, and the interface that is not in it
 
-Fetched 2026-09-16 because `recover.py` drives PhotoRec non-interactively and
-was passing it type names PhotoRec does not have. The page is the vendor's own
-list of what PhotoRec can recover.
+Kept because `recover.py` drives PhotoRec non-interactively, and type names
+taken from this page are not all names PhotoRec accepts. The page is the
+vendor's own list of what PhotoRec can recover; PROVENANCE.tsv records where
+and when it was fetched, with its hash.
 
 ## Read the version line before using this list
 
-The page describes the CURRENT PhotoRec. `a laptop` ships **PhotoRec
-7.1, July 2019** (`testdisk 7.1-5+nmu1build2`), and the two do not agree.
+The page describes the CURRENT PhotoRec. Ubuntu 24.04 ships **PhotoRec 7.1,
+July 2019** (`testdisk 7.1-5+nmu1build2`), and the two do not agree.
 
 ## The trap this find exists to record
 
