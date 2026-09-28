@@ -85,12 +85,18 @@ def _mypy_config_args(target: str) -> list[str]:
     Project-local config wins, same precedence as _ruff_config_args, and
     setup.cfg and pyproject.toml count only when they carry mypy's section,
     as mypy itself reads them.
+
+    The project's config is passed by path rather than left to mypy to find.
+    mypy looks for it from its working directory, not from the file it
+    checks, so a config in a subdirectory would be found here and missed by
+    a mypy run from the repository root.
     """
-    if _find_project_config(target, ["mypy.ini", ".mypy.ini", "setup.cfg",
-                                     "pyproject.toml"],
-                            {"setup.cfg": "mypy", "pyproject.toml": "tool.mypy"},
-                            stop_at_repo_root=True):
-        return []
+    project = _find_project_config(target, ["mypy.ini", ".mypy.ini", "setup.cfg",
+                                            "pyproject.toml"],
+                                   {"setup.cfg": "mypy", "pyproject.toml": "tool.mypy"},
+                                   stop_at_repo_root=True)
+    if project:
+        return ["--config-file", str(project)]
     shared = TOOLS_ROOT / "configs" / "mypy.ini"
     return ["--config-file", str(shared)] if shared.exists() else []
 
