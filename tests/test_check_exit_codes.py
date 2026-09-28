@@ -3,18 +3,18 @@
 JP_TOOLS/tests/test_check_exit_codes.py
 check.py's exit code must say whether the checks RAN, not only what they found.
 
-THE BUG THIS PINS DOWN (#29)
-    The exit code was `1 if errors else 0`, with errors counted from issues, so
-    no tool status could ever fail a run. Measured 2026-09-14: a file with one
-    ruff and one mypy error exited 1 with the tools on PATH and 0 with them
-    removed, reporting both as "unavailable". A CI job whose linters were not
-    installed went green having checked nothing.
+THE RULE THIS PINS DOWN
+    An exit code counted from issues alone lets no tool status fail a run: a
+    file with one ruff and one mypy error exits 1 with the tools on PATH and 0
+    with them removed, both reported as "unavailable", and a CI job whose
+    linters are not installed goes green having checked nothing. So a check
+    that did not run is exit 2.
 
-    Two relatives fixed alongside, each with a case below:
-      - run_ruff discarded ruff's return code, so a config that fails to load
-        (ruff exit 2, empty stdout) read as "pass".
-      - Directory mode merged per-file runners by keeping only "fail", so an
-        unavailable eslint read as "pass".
+    Two relatives, each with a case below:
+      - ruff's own return code counts: a config that fails to load (ruff exit
+        2, empty stdout) is not a pass.
+      - Directory mode merging per-file runners keeps "did not run" as well as
+        "fail", so an unavailable eslint is not a pass.
 
 Every case that expects 2 has a matching control: the same input, with the
 tools present, gives a verdict. Without the controls these would pass on a

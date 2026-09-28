@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 JP_TOOLS/tests/test_ignore.py
-check.py leaves out what a repo's .jp-tools-ignore names, and says so (#90).
+check.py leaves out what a repo's .jp-tools-ignore names, and says so.
 
 A scratch git repository holds a vendor copy under oob/ and a file of its own
 under src/, each with a real unused import (ruff F401), and a .jp-tools-ignore

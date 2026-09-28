@@ -4,7 +4,7 @@ JP_TOOLS/tests/test_ci_smells_base.py
 CI judges a smell against the PR's base, not against the commit under test.
 
 check.py's smells arm fails a smell that is NEW against --smells-base and
-warns on one that already existed (#55). Its default base is HEAD, which is
+warns on one that already existed. Its default base is HEAD, which is
 right for the pre-commit hook and wrong in CI: there the change is already
 committed, so HEAD is the commit under test, every new smell reads as
 existing, and it only ever warns. And actions/checkout is shallow by default,

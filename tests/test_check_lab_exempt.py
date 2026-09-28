@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
 JP_TOOLS/tests/test_check_lab_exempt.py
-A lab file under its METHODOLOGY 2.9 header is listed, not counted. #68.
+A lab file under its METHODOLOGY 2.9 header is listed, not counted.
 
-THE CONTRADICTION THIS PINS DOWN
+THE RULE THIS PINS DOWN
     2.9 says a tools/lab instrument has no bar at entry: it owes a header
-    (ANSWERS, TESTED AGAINST, NOT TESTED AGAINST), not zero findings. The gate
-    held lab files to zero anyway, so editing one with an old finding blocked
-    the commit. another repo has 56 such files.
+    (ANSWERS, TESTED AGAINST, NOT TESTED AGAINST), not zero findings. Holding
+    lab files to zero would block a commit that edits one with an old finding.
 
-    The rule is another repo's ratchet's, with one hole closed: "TESTED AGAINST"
-    is a substring of "NOT TESTED AGAINST", so a header missing the
-    tested-against field still passed a plain `in` test. That case is here.
+    "TESTED AGAINST" is a substring of "NOT TESTED AGAINST", so a header that
+    lacks the tested-against field would pass a plain `in` test. That case is
+    here.
 
 Skips without ruff, which is what produces the finding.
 

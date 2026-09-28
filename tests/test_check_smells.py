@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
 JP_TOOLS/tests/test_check_smells.py
-check.py's smells arm: a smell that is NEW fails, one that EXISTS warns. #55.
+check.py's smells arm: a smell that is NEW fails, one that EXISTS warns.
 
-THE RULING THIS PINS DOWN
-    Joe, 2026-09-14: "a 1000 line file is a stink... a 100 line fucntion is a
-    stink... compexity of a function is a stink... complexity of a file is a
-    stink", then "fail on new warn on existing", and "the base 0 fro...
-    well... thats new": the base is today. So each of the four smells FAILS
-    when it was not there at the base (HEAD by default, --smells-base in CI)
-    and WARNS when it already was.
+THE RULE THIS PINS DOWN
+    Four smells (METHODOLOGY 2.14): a file too long, a function too long, a
+    function too complex, a file too complex. Each FAILS when it was not there
+    at the base (HEAD by default, --smells-base in CI) and WARNS when it
+    already was, so adopting the gate never blocks on what is already there,
+    and nothing new gets worse.
 
 Runs `check.py --tools smells` in a throwaway git repo, so ruff and mypy
 cannot blur the verdict. One small function per group: this file is held to
@@ -162,9 +161,9 @@ def the_base(repo: Path) -> None:
 
 
 def moves(repo: Path) -> None:
-    """a reviewer's rows D and E, reviewing #82: a smell that MOVES is
-    not new, or the arm fails the split the file-length smell asks for."""
-    print("\nMoving a smell (#82 review):")
+    """A smell that MOVES (a renamed file, a function moved to another file) is
+    not new, or the arm fails the very split the file-length smell asks for."""
+    print("\nMoving a smell:")
     old = repo / "old.py"
     old.write_text(long_func("lng", 100) + "\n\n" + complex_func("cpx", 11), encoding="utf-8")
     commit(repo, "old smells")

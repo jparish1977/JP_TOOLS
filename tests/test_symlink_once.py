@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 JP_TOOLS/tests/test_symlink_once.py
-A file reached through symlinks is measured once (#99).
+A file reached through symlinks is measured once.
 
-A repo-mode baseline used to follow every symlink to a file and key each
-link's findings to the file it resolves to, so a file with N links was
-recorded N+1 times too loose and the per-file hook compared its real count
-against that. Found by another repo: vm/sbxrun-reader.sh and four links,
-shellcheck 15 in the baseline against 3 on the file alone.
+A repo-mode baseline that followed every symlink to a file, keying each
+link's findings to the file it resolves to, would record a file with N links
+N+1 times over (a script with four links: 15 findings in the baseline, 3 on
+the file alone), and the per-file hook would compare its real count against
+that inflated one.
 
 A scratch git repository holds src/real.py with two unused imports (ruff
 F401), two links to it inside the tree, one link to a file outside the tree,

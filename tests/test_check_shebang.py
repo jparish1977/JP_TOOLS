@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
 JP_TOOLS/tests/test_check_shebang.py
-check.py finds Python by its #! line in a file with no suffix. #57.
+check.py finds Python by its #! line in a file with no suffix.
 
 THE GAP THIS PINS DOWN
-    Language was detected by suffix alone, so `bin/tool` with
-    `#!/usr/bin/env python3` read as "Cannot detect language" (exit 2), and
-    the pre-commit hook, which passes --skip-unsupported, let it through
-    unchecked. another repo alone has 10 such tools. ruff and mypy both check an
-    extensionless file when it is named, so the gap was detection, nothing else.
+    Detected by suffix alone, `bin/tool` with `#!/usr/bin/env python3` reads
+    as "Cannot detect language" (exit 2), and the pre-commit hook, which passes
+    --skip-unsupported, lets it through unchecked. ruff and mypy both check an
+    extensionless file when it is named, so the gap is detection alone.
 
-    Directory mode had the same hole one level down: ruff and mypy run once on
-    the directory and discover files by suffix, so a detected script still
-    never reached them unless it is named to them.
+    Directory mode has the same hole one level down: ruff and mypy run once on
+    the directory and discover files by suffix, so a detected script never
+    reaches them unless it is named to them.
 
 Skips when ruff or mypy is missing, because then check.py cannot fail a file.
 
@@ -83,8 +82,8 @@ def main() -> int:
         shell = d / "hook"
         shell.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
         rc, out = run(str(shell))
-        # #57 part 2 gave shell a tool, so a sh script is shell now, not unknown.
-        # Whether it then passes or exits 2 depends on shellcheck being
+        # A sh script is shell, not unknown. Whether it then passes or exits
+        # 2 depends on shellcheck being
         # installed; tests/test_check_shell.py covers both.
         check("a '#!/bin/sh' script is detected as shell, not unknown",
               "Cannot detect language" not in out and '"language": "shell"' in out, out[:300])

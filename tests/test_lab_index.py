@@ -4,20 +4,14 @@ JP_TOOLS/tests/test_lab_index.py
 tools/lab/README.md indexes every tool in tools/lab, and nothing that is gone.
 
 WHY IT IS A TEST, NOT A HABIT
-    Joe, 2026-09-14: "if the methodology covers the labs it should say an idex
-    is required and must be maintained", "if we have a lab it should have an
-    index", "those indexes are what i hope will keep yall from duplicating
-    effort", and "the idea is once i start working out proper prompting i
-    suspect you will all stop rebuilding the same tools over and over".
-
-    An index kept by hand goes stale the first time someone is in a hurry:
-    another repo's read 72 of 123 tools unlisted on 2026-09-14. A seat
-    checking for prior art then reads a list that is wrong and builds the tool
-    again. So this fails when a tool lands without a row, at the moment its
-    author is still there to write one.
+    The index is what stops the same tool being built twice (METHODOLOGY
+    2.9), and an index kept by hand goes stale the first time someone is in a
+    hurry. Someone checking for prior art then reads a list that is wrong and
+    builds the tool again. So this fails when a tool lands without a row, at
+    the moment its author is still there to write one.
 
 WHAT IT DOES NOT CHECK: whether a row's description is any good. A row that is
-merely present still tells the next seat the tool exists, which is the job.
+merely present still tells the next person the tool exists, which is the job.
 
 Controls, in a throwaway copy, so the check cannot pass by reading nothing: a
 planted unlisted file must be reported, a row whose file is gone must be
