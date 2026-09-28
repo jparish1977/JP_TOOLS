@@ -86,6 +86,8 @@ Enforcement is mechanical: the pre-commit hook (`python /path/to/JP_TOOLS/instal
 
 These gates are not tech-debt mitigation. They are architectural enforcement: if a piece of code can't pass static analysis at level 8, it is probably structured wrong.
 
+**Suppress only when it is necessary, never for convenience.** A `# noqa`, a `# type: ignore`, a coverage pragma, a baseline entry or an ignore-file line is a claim that the rule is wrong for this code and that the code cannot be written to satisfy it. When the code can be changed to pass, change the code: fix the import order, restructure the function, remove the hack that made the finding. The suppression states why it is necessary on the same line, so the claim can be read and disagreed with, and `check.py` refuses one without a reason. An existing finding is not a licence either: a smell or error the baseline grandfathers is debt to pay down, not a pass.
+
 ### 2.6 IO leaves are allowed to be untested
 
 At the boundary between your code and the OS, there's always a line that actually opens the file / dispatches the HTTP request / invokes the subprocess / writes to the GPU. Don't chase 100% coverage through that line with brittle mocks. Instead, factor the adapter so the IO-touching method is a thin `protected` wrapper tagged `@codeCoverageIgnore` (`pragma: no cover` in Python), and unit-test subclasses that fake it.
