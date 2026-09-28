@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
-"""Find all call sites of a function across a codebase.
+"""Find every line that names a function across a codebase, sorted into kinds.
 
 Usage:
     python count-callers.py processEscapePath /path/to/project
     python count-callers.py processEscapePath /path/to/project --type js
     python count-callers.py processEscapePath /path/to/project --exclude vendor,node_modules
+
+Each line holding the name as a whole word is one of: DEF (a definition in
+JS or Python form), COMMENT (the line starts a comment), CALL (the name
+followed by `(`), or REF (anything else). Line-based: a call split across
+lines, or one inside a string, is classified by its own line only.
+
+Directories named in the exclude list are skipped wherever they sit below
+the root; the root's own path is never matched against it. A file that
+cannot be read is named on stderr and not counted.
 """
 
+from __future__ import annotations
+
 import argparse
+import json
+import os
 import re
 import sys
+from collections.abc import Iterator
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
-# Default directories to exclude
-DEFAULT_EXCLUDE = {"node_modules", "vendor", ".git", "__pycache__", "dist", "build"}
+DEFAULT_EXCLUDE = frozenset({"node_modules", "vendor", ".git", "__pycache__", "dist", "build"})
 
-# File extensions by type
 EXT_MAP = {
     "js": {".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx"},
     "py": {".py"},
@@ -24,130 +37,99 @@ EXT_MAP = {
     "html": {".html", ".htm"},
 }
 
-
-def find_callers(root: Path, func_name: str, extensions: set[str], exclude: set[str]):
-    """Find all references to func_name in files under root."""
-    results = []
-    pattern = re.compile(r'\b' + re.escape(func_name) + r'\b')
-
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        if path.suffix not in extensions:
-            continue
-        if any(ex in path.parts for ex in exclude):
-            continue
-
-        try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except (OSError, UnicodeDecodeError) as e:
-            # Said, not skipped: a file left out of the count makes the count
-            # read lower than the truth, and a caller count is a claim.
-            print(f"count-callers: {path} unreadable ({e}); NOT counted", file=sys.stderr)
-            continue
-
-        for i, line in enumerate(lines):
-            if pattern.search(line):
-                stripped = line.strip()
-                # Classify: definition vs call vs reference
-                kind = classify(stripped, func_name)
-                results.append({
-                    "file": str(path.relative_to(root)),
-                    "line": i + 1,
-                    "kind": kind,
-                    "text": stripped[:120],
-                })
-
-    return results
+_DEFINITIONS = (
+    r'^\s*"?{name}"?\s*\(.*\)\s*\{{',  # name(...) {
+    r'^\s*"?{name}"?\s*:\s*function',  # "name": function
+    r"function\s+{name}\s*\(",  # function name(
+    r"(const|let|var)\s+{name}\s*=",  # const name =
+    r"def\s+{name}\s*\(",  # def name(  (Python)
+)
+_COMMENT_STARTS = ("//", "#", "/*")
+KINDS = ("DEF", "CALL", "REF", "COMMENT")
 
 
-def classify(line: str, func_name: str) -> str:
-    """Classify a line as definition, call, or reference."""
-    # Definition patterns
-    def_patterns = [
-        rf'^\s*"?{re.escape(func_name)}"?\s*\(.*\)\s*\{{',  # funcName(...) {
-        rf'^\s*"?{re.escape(func_name)}"?\s*:\s*function',    # "funcName": function
-        rf'function\s+{re.escape(func_name)}\s*\(',           # function funcName(
-        rf'(const|let|var)\s+{re.escape(func_name)}\s*=',     # const funcName =
-        rf'def\s+{re.escape(func_name)}\s*\(',                # def funcName( (Python)
-    ]
-    for pat in def_patterns:
-        if re.search(pat, line):
-            return "DEF"
+@dataclass(frozen=True)
+class Hit:
+    file: str
+    line: int
+    kind: str
+    text: str
 
-    # Comment
-    if line.lstrip().startswith("//") or line.lstrip().startswith("#") or line.lstrip().startswith("/*"):
+
+def classify(line: str, name: str) -> str:
+    """DEF, COMMENT, CALL or REF, for a line known to hold NAME."""
+    escaped = re.escape(name)
+    if any(re.search(p.format(name=escaped), line) for p in _DEFINITIONS):
+        return "DEF"
+    if line.lstrip().startswith(_COMMENT_STARTS):
         return "COMMENT"
-
-    # Call pattern: funcName( or .funcName(
-    if re.search(rf'\.?{re.escape(func_name)}\s*\(', line):
+    if re.search(rf"{escaped}\s*\(", line):
         return "CALL"
-
     return "REF"
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Find all call sites of a function")
+def source_files(root: Path, extensions: set[str], exclude: set[str]) -> Iterator[Path]:
+    """Files under ROOT with EXTENSIONS, in sorted order, never entering EXCLUDE dirs."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in exclude)
+        for name in sorted(filenames):
+            if Path(name).suffix in extensions:
+                yield Path(dirpath) / name
+
+
+def find_callers(root: Path, name: str, extensions: set[str], exclude: set[str]) -> list[Hit]:
+    """Every line under ROOT naming NAME as a whole word."""
+    pattern = re.compile(rf"\b{re.escape(name)}\b")
+    hits = []
+    for path in source_files(root, extensions, exclude):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError as exc:
+            # reason: named rather than skipped silently, because a file left
+            # out makes the count read lower than the truth
+            print(f"count-callers: {path} unreadable ({exc}); NOT counted", file=sys.stderr)
+            continue
+        hits += [Hit(str(path.relative_to(root)), i, classify(line.strip(), name), line.strip()[:120])
+                 for i, line in enumerate(lines, 1) if pattern.search(line)]
+    return hits
+
+
+def report(name: str, hits: list[Hit]) -> list[str]:
+    by_kind = {k: [h for h in hits if h.kind == k] for k in KINDS}
+    counts = ", ".join(f"{len(by_kind[k])} {label}" for k, label in
+                       zip(KINDS, ("definitions", "calls", "references", "comments"), strict=True))
+    lines = [f"Function: {name}", f"Found: {counts}", ""]
+    for kind, title in (("DEF", "DEFINITIONS"), ("CALL", "CALLS"), ("REF", "REFERENCES")):
+        if by_kind[kind]:
+            lines += [f"{title}:", *(f"  {h.file}:{h.line}  {h.text}" for h in by_kind[kind]), ""]
+    return lines
+
+
+def _extensions(kind: str | None) -> set[str]:
+    if kind is None:
+        return set().union(*EXT_MAP.values())
+    return EXT_MAP.get(kind) or {f".{kind}"}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("function", help="Function name to search for")
     parser.add_argument("path", help="Root directory to search")
-    parser.add_argument("--type", help="File type filter: js, py, php, css, html")
+    parser.add_argument("--type", help="File type: js, py, php, css, html, or any extension")
     parser.add_argument("--exclude", help="Comma-separated dirs to exclude (added to defaults)")
     parser.add_argument("--json", action="store_true", help="JSON output")
-    args = parser.parse_args()
-
+    args = parser.parse_args(argv)
     root = Path(args.path).resolve()
     if not root.is_dir():
         print(f"Error: {args.path} is not a directory", file=sys.stderr)
         return 1
-
-    # Determine extensions
-    if args.type:
-        extensions = EXT_MAP.get(args.type, set())
-        if not extensions:
-            extensions = {f".{args.type}"}
-    else:
-        extensions = set()
-        for exts in EXT_MAP.values():
-            extensions.update(exts)
-
-    exclude = set(DEFAULT_EXCLUDE)
-    if args.exclude:
-        exclude.update(args.exclude.split(","))
-
-    results = find_callers(root, args.function, extensions, exclude)
-
+    exclude = set(DEFAULT_EXCLUDE) | set(filter(None, (args.exclude or "").split(",")))
+    hits = find_callers(root, args.function, _extensions(args.type), exclude)
     if args.json:
-        import json
-        print(json.dumps(results, indent=2))
-        return 0
-
-    # Summary
-    defs = [r for r in results if r["kind"] == "DEF"]
-    calls = [r for r in results if r["kind"] == "CALL"]
-    refs = [r for r in results if r["kind"] == "REF"]
-    comments = [r for r in results if r["kind"] == "COMMENT"]
-
-    print(f"Function: {args.function}")
-    print(f"Found: {len(defs)} definitions, {len(calls)} calls, {len(refs)} references, {len(comments)} comments")
-    print()
-
-    if defs:
-        print("DEFINITIONS:")
-        for r in defs:
-            print(f"  {r['file']}:{r['line']}  {r['text']}")
-        print()
-
-    if calls:
-        print("CALLS:")
-        for r in calls:
-            print(f"  {r['file']}:{r['line']}  {r['text']}")
-        print()
-
-    if refs:
-        print("REFERENCES:")
-        for r in refs:
-            print(f"  {r['file']}:{r['line']}  {r['text']}")
-
+        print(json.dumps([asdict(h) for h in hits], indent=2))
+    else:
+        print("\n".join(report(args.function, hits)))
     return 0
 
 
