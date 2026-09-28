@@ -71,7 +71,9 @@ def test_subdirs_and_missing_root() -> None:
         run_main(INV.main, str(vol), str(tsv), "B")
         check("only B", _rows(tsv), ["B/w.bin", "B/z.bin"])
         check("missing root", run_main(INV.main, str(Path(tmp) / "nope"), str(tsv))[0], 1)
-    check("drive letter", INV.win_to_wsl_path("F:\\Roms\\x"), "/mnt/f/Roms/x")
+    for given, root in (("F:\\Roms\\x", "/mnt/f/Roms/x"), ("F:", "/mnt/f"), ("F:\\", "/mnt/f"),
+                        ("/media/me/RED/", "/media/me/RED")):
+        check(f"mount root {given}", INV.mount_root(given), root)
 
 
 if __name__ == "__main__":

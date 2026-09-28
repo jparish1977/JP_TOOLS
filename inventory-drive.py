@@ -38,21 +38,16 @@ import time
 from typing import TextIO
 
 from inventory.resume import mark_done, resume_state
-from platformtools.windows import is_system_area
+from platformtools.windows import is_system_area, wsl_path
 
-WIN_DRIVE = re.compile(r"^([A-Za-z]):[\\/]?$")
+# A Windows path, given to the WSL side: F:, F:\Roms, F:/Roms.
+WIN_PATH = re.compile(r"^[A-Za-z]:")
 HEADER = "#path\tsize\tmtime\n"
 
 
-def win_to_wsl_path(win_path: str) -> str:
-    """Convert C:\\foo\\bar or C: to /mnt/c/foo/bar."""
-    m = WIN_DRIVE.match(win_path)
-    if m:
-        return "/mnt/" + m.group(1).lower()
-    if len(win_path) > 2 and win_path[1] == ":":
-        rest = win_path[2:].replace("\\", "/").lstrip("/")
-        return "/mnt/" + win_path[0].lower() + "/" + rest
-    return win_path
+def mount_root(mountpoint: str) -> str:
+    """Where to read MOUNTPOINT from: a Windows drive path as WSL sees it, anything else as given."""
+    return (wsl_path(mountpoint) if WIN_PATH.match(mountpoint) else mountpoint).rstrip("/")
 
 
 def _row(rel: str, st: os.stat_result) -> str:
@@ -120,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rescan", action="store_true",
                         help="ignore an existing inventory and start again")
     args = parser.parse_args(argv)
-    root = win_to_wsl_path(args.mountpoint).rstrip("/")
+    root = mount_root(args.mountpoint)
     if not os.path.isdir(root):
         print(f"not a directory: {root}", file=sys.stderr)
         return 1

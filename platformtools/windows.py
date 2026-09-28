@@ -66,10 +66,12 @@ def relaunch_elevated() -> int:
 
 
 def wsl_path(path: Path | str) -> str:
-    """C:\\foo\\bar as WSL sees it, /mnt/c/foo/bar; any other path with forward slashes."""
+    """C:\\foo\\bar as WSL sees it, /mnt/c/foo/bar (a bare C: is /mnt/c); any other
+    path with forward slashes."""
     p = str(path)
     if len(p) >= 2 and p[1] == ":":
-        return f"/mnt/{p[0].lower()}/{p[2:].replace(chr(92), '/').lstrip('/')}"
+        rest = p[2:].replace("\\", "/").strip("/")
+        return f"/mnt/{p[0].lower()}" + (f"/{rest}" if rest else "")
     return p.replace("\\", "/")
 
 
