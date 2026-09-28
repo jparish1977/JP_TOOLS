@@ -127,7 +127,7 @@ def test_import_never_overwrites_an_existing_intermediate() -> None:
 
 
 def test_import_archive_converts_only_what_it_held() -> None:
-    with fake_tools(chdman=FAKE_CHDMAN, **{"7z": FAKE_7Z}) as (w, log):
+    with fake_tools(chdman=FAKE_CHDMAN, named={"7z": FAKE_7Z}) as (w, log):
         with zipfile.ZipFile(w / "game.zip", "w") as z:
             z.writestr("game.cue", CUE)
             z.writestr("game.bin", "bin")
