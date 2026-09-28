@@ -41,19 +41,14 @@ WHAT --purge REMOVES, AND WHY THE ANSWER IS A TYPE
     nothing it removes has one -- and no flag widens the set.
 
 WHAT IT WILL NEVER DO, BY CONSTRUCTION
-    The first destructive half of this file was cut entirely on 2026-08-14,
-    after sixteen review rounds kept finding bugs in it: a --fix that could
-    destroy a device node, a --fix that truncated cupsd.conf to zero bytes, a
-    --purge that followed a symlinked TempDir out of the directory it was told
-    to audit. Most of what it did -- retention off, jobs cancelled -- was
-    re-implementing work CUPS already does correctly, and deleting it removed
-    the bugs with it. What returned is only the residue removal above, built
-    so those bugs have no code to live in rather than so they are checked for:
+    Turning retention off and cancelling jobs is work CUPS already does
+    correctly (`cancel -a -x` plus one config line), so this tool does not do
+    it. The only removal is the residue removal above, built so the dangerous
+    bugs have no code to live in rather than so they are checked for:
 
-      - No file is ever written and no daemon is ever touched. --fix is not
-        back: it was `cancel -a -x` plus one config line, and even a version
-        that shells out to CUPS re-imports its worst bug -- acting on the
-        LIVE daemon while pointed at some other --conf or --spool. Nothing
+      - No file is ever written and no daemon is ever touched. Even a version
+        that shells out to CUPS would risk acting on the LIVE daemon while
+        pointed at some other --conf or --spool. Nothing
         here opens cupsd.conf for writing, so nothing can truncate it, and
         nothing calls os.replace, so nothing can destroy a device node.
       - Removal cannot traverse a symlink. Every path component is opened
@@ -71,9 +66,8 @@ WHAT IT WILL NEVER DO, BY CONSTRUCTION
 
 WHY THE PROBLEM EXISTS AT ALL
     CUPS documents PreserveJobFiles as defaulting to No, so document files
-    should never survive a completed job. They do. Measured in a clean Ubuntu
-    24.04 container on 2026-08-12, stock cupsd.conf with no PreserveJobFiles
-    directive present:
+    should never survive a completed job. They do. In a clean Ubuntu 24.04
+    container, stock cupsd.conf with no PreserveJobFiles directive present:
 
         t+1s  d-files=1     t+30s  d-files=1
         t+10s d-files=1     t+60s  d-files=1
@@ -148,25 +142,21 @@ DOCUMENT = re.compile(r"^d(\d+)-(\d+)$")
 CONTROL = re.compile(r"^c(\d+)$")
 
 # CUPS keeps its own runtime files in TempDir alongside spooled document data.
-# Measured on joe-a laptop-17-7778, 2026-08-12: tmp/ held eight opaque document
-# temporaries and one `cups-dbus-notifier-lockfile`. Counting the lockfile as
+# A typical tmp/ holds opaque document temporaries and a
+# `cups-dbus-notifier-lockfile`. Counting the lockfile as
 # leaked content inflates every total, and deleting it removes a lock from
 # under a running cupsd. Named artifacts are reported separately and are never
 # purged.
-# The `|^cups-dbus-` alternative used to be here and dismissed ANY name with
-# that prefix on the name alone: tmp/cups-dbus-secret holding a password
-# printed "VERDICT: spool is clean" with exit 0, while byte-identical content
-# named notes.txt exited 1. That is the one thing the docstring says this tool
-# must never do, and it was redundant: the measured real artifact,
-# cups-dbus-notifier-lockfile, already matches the lockfile alternative.
+# Deliberately no bare `^cups-dbus-` prefix: that would dismiss any name with
+# the prefix, a tmp/cups-dbus-secret holding a password included. The real
+# artifact, cups-dbus-notifier-lockfile, matches the lockfile alternative.
 ARTIFACT = re.compile(r"^cups-.*(lockfile|notifier|socket)$")
 
 
 
-# Directory levels below TempDir that are walked. Both traversals must agree:
-# _walk_temp allowed one level more than `find -maxdepth`, and find exits 0
-# with no marker when it truncates, so a document nested past the limit on a
-# sudo path yielded "spool is clean".
+# Directory levels below TempDir that are walked. Every traversal must agree
+# on it: find exits 0 with no marker when it truncates, so a traversal that
+# stops a level early reports a document nested past the limit as "clean".
 MAX_TEMP_DEPTH = 8
 
 # Print-job formats. Content beats location: a file whose first bytes say it is
@@ -202,10 +192,10 @@ class Entry:
     kind: Kind
     job: int | None = None
     # Where the file was found, recorded at the point classify() knows it
-    # rather than recovered from the name later. render() used to re-derive it
-    # by matching the "tmp/" prefix, which made the name a second source of
-    # truth for a fact the listing already had -- and re-applied the name trust
-    # that is_harmless_temp explicitly refuses at the top level.
+    # rather than recovered from the name later. Re-deriving it from a "tmp/"
+    # prefix would make the name a second source of truth for a fact the
+    # listing already has, and re-apply the name trust that is_harmless_temp
+    # explicitly refuses at the top level.
     in_temp: bool = False
 
 
@@ -215,7 +205,7 @@ class TempFile:
 
     `head` is the first few bytes, decoded lossily, used only to recognise
     known-harmless formats. It is never printed. A file whose header could not
-    be read never becomes a TempFile: it is listed as unexamined (#42). An
+    be read never becomes a TempFile: it is listed as unexamined. An
     empty string is a file that read as empty, which is "unknown", not
     "harmless".
     """
@@ -362,49 +352,43 @@ def identified_as_print(f: TempFile) -> bool:
 def is_harmless_temp(f: TempFile, in_tempdir: bool = True) -> bool:
     """Is this TempDir file known NOT to be document content?
 
-    TempDir is not one kind of thing. Measured on joe-a laptop-17-7778,
-    2026-08-12, after a plain CUPS restart with nothing printed:
+    TempDir is not one kind of thing. After a plain CUPS restart with nothing
+    printed it can hold:
 
         0777f6a7dc4fa  10917 bytes  PPD file, version "4.3"
         0777f6a8bdd78  10068 bytes  PPD file, version "4.3"
         cups-dbus-notifier-lockfile  0 bytes  empty
 
     Those are the driver cache cupsd regenerates on startup, not printed
-    documents. Treating everything here as leaked content reported a user's own
-    driver cache back to them as a secret, and --purge would have deleted it.
+    documents. Treating everything here as leaked content would report a user's
+    own driver cache back to them as a secret, and --purge would delete it.
 
     Only recognised-harmless things return True. An unreadable header is
     "unknown", which stays classified as possible document content: the safe
     direction is to over-report, not to dismiss.
     """
     # Checked first, so nothing below can excuse an actual document. Calls
-    # the positive question rather than repeating its body: the two were
-    # identical expressions over the same constant, and duplicated blocks
-    # drifting apart is the defect this file has produced most often.
+    # the positive question rather than repeating its body, so the two cannot
+    # drift apart.
     if identified_as_print(f):
         return False
     # Content that could NOT be read. Every rule below reasons from the first
     # bytes or the size, so a file whose header is unavailable must not be
-    # excused by where it sits. This originally keyed on size == -1, a sentinel
-    # only the removed sudo listing produced -- so deleting that path silently
-    # disarmed the guard, and an unreadable file under tmp/.cache/ was
-    # classified a harmless cache and reported "spool is clean".
+    # excused by where it sits: an unreadable file under tmp/.cache/ is not
+    # known to be a harmless cache.
     if not f.head and f.size > 0:
         return False
     # CUPS runtime names, and only inside TempDir. CUPS never creates cups-*
-    # files at the top level of the spool, so honouring the name there let a
-    # file called cups-dbus-secret holding a password be dismissed unread:
-    # "VERDICT: spool is clean", exit 0, while the identical content named
-    # notes.txt exited 1. Dismissal on a name alone, which is the one thing
-    # this tool must not do -- and it sat BEFORE the unreadable-content guard,
-    # so an unreadable file with a cups- name was excused as well.
+    # files at the top level of the spool, so honouring the name there would
+    # let a file called cups-dbus-secret holding a password be dismissed
+    # unread. Dismissal on a name alone is the one thing this tool must not
+    # do, which is also why this sits AFTER the unreadable-content guard.
     if in_tempdir and ARTIFACT.match(f.name.rsplit("/", 1)[-1]):
         return True
     # CUPS runs filters with HOME pointed at TempDir, so a filter's XDG cache
-    # lands in tmp/.cache/. Measured in a container with a real filter chain:
-    # 24 fontconfig cache files, which the recursive walk reported as possible
-    # document content and --purge deleted. They are caches by definition of
-    # where they are. Twenty-four false positives is noise that trains you to
+    # lands in tmp/.cache/: with a real filter chain, dozens of fontconfig
+    # cache files. They are caches by definition of where they are, and
+    # reporting them as possible document content is noise that trains you to
     # skim the report, which is the failure this tool exists to avoid.
     if in_tempdir and (f.name.startswith(".cache/") or "/.cache/" in f.name):
         return True
@@ -550,9 +534,8 @@ def render(
 
     `retention` is whether CUPS is currently configured to keep documents, read
     from cupsd.conf. It is deliberately a separate input: inferring it from
-    "are there files here" told Joe the host still retained data immediately
-    after a successful --fix had turned retention off, because leftover
-    documents from before the fix were still on disk.
+    "are there files here" would say the host still retains data right after
+    retention was turned off, because documents from before are still on disk.
 
     `purge_failed` names the entries a purge THIS RUN already failed to
     remove. The identified paragraph and the VERDICT were written for a
@@ -617,12 +600,10 @@ def render(
     rest = [e for e in audit.others if e.kind not in (Kind.TEMP, Kind.UNRECOGNISED)]
 
     lines.append(f"OTHER RETAINED FILES: {len(audit.others)}")
-    # Stubborn first. The listing is capped at 20 and used to lead with the
-    # ordinary job files, so a spool with 25 documents plus one stray named
-    # passwords.txt and one TempDir leak printed neither of the last two
-    # ANYWHERE: the only two files --purge would not remove were the two the
-    # operator never saw. That is the "not worse than ls" promise failing at
-    # precisely the point it exists for.
+    # Stubborn first. The listing is capped at 20, so leading with the ordinary
+    # job files would hide a stray passwords.txt or a TempDir leak behind 25
+    # documents: the only files --purge would not remove would be the ones the
+    # operator never saw.
     ordered = unidentified + identified + rest
     # The delete set is marked per entry, not only counted. "N of these" above
     # an unmarked mixed listing left the operator unable to determine WHICH
@@ -767,15 +748,9 @@ def render(
         # the spool's entry while st_nlink said other hard links to the same
         # content survive. audit.total counts what is in the spool, so it is
         # correctly zero here, and "clean" read off that zero is a claim about
-        # the DOCUMENTS that nothing measured.
-        #
-        # This is the seventh path to print "spool is clean" over readable
-        # content -- see the incident comments at the head of this file for the
-        # other six -- and the first one created by a fix. The 2026-08-17 round
-        # added the honest per-entry line and raised the exit code, and stopped
-        # short of the verdict, which is the line meant to be read last and
-        # believed. A script could tell B from A by the exit code; a human read
-        # four lines of clean bill of health after the warning.
+        # the DOCUMENTS that nothing measured. The verdict is the line read
+        # last and believed, so it has to carry this too, not only the exit
+        # code and the per-entry line above.
         #
         # Same shape as the failed-purge branch above: name the condition, then
         # point at the detail line rather than restating it.
@@ -863,16 +838,15 @@ def _head(path: Path, n: int = 32) -> str | None:
     not be read. Used only to recognise known harmless formats such as PPDs.
     Never printed, never logged.
 
-    None, not "": "could not read" and "read nothing" used to be the same
-    value (#42), so the distinction lived in every caller's habit of failing
-    closed on "". A caller now has to decide what an unreadable file is, and
-    both callers list it as unexamined rather than classify it."""
+    None, not "": "could not read" and "read nothing" are different facts. A
+    caller has to decide what an unreadable file is, and both callers list it
+    as unexamined rather than classify it."""
     try:
         with path.open("rb") as fh:
             return fh.read(n).decode("utf-8", "replace")
     except OSError:
         # reason: None IS the recorded outcome, "could not read", and both
-        # callers list such a file as unexamined rather than classify it (#42)
+        # callers list such a file as unexamined rather than classify it
         return None
 
 
@@ -937,7 +911,7 @@ def _walk_temp(
         )
         if note is None:
             # st is already known; _head() answers None for a file it could
-            # not read, and that file is UNEXAMINED, never classified (#42).
+            # not read, and that file is UNEXAMINED, never classified.
             head = _head(f)
             if head is None:
                 unexamined.append(f"{safe_name(name)} (could not be read)")
@@ -1097,16 +1071,14 @@ def read_spool(
         unexamined.append(f"{TEMP_SUBDIR}/ (unreadable: {exc.__class__.__name__})")
 
     # Every top-level name is stat'd, including ones matching the document and
-    # control patterns. They used to skip straight past this check, so the
-    # never-follow-symlinks rule applied only to TempDir: a symlink named
-    # d00085-001 was unlinked, "1 removed" was printed, and the target survived.
-    # False assurance of destruction, the worst failure this tool can have.
+    # control patterns, so the never-follow-symlinks rule is not limited to
+    # TempDir: unlinking a symlink named d00085-001 and printing "1 removed"
+    # while the target survives is false assurance of destruction, the worst
+    # failure this tool can have.
     #
-    # That property is NOT unique to symlinks, and stating it as though it were
-    # is what hid the next instance: a HARD link passes S_ISREG, is unlinked
-    # correctly, and still leaves identical content readable under the other
-    # name. Three reviewers hit it independently on 2026-08-17. So this refusal
-    # is not the whole answer to "did the content actually die" -- _unlink_at
+    # That property is NOT unique to symlinks: a HARD link passes S_ISREG, is
+    # unlinked correctly, and still leaves identical content readable under the
+    # other name. So this refusal is not the whole answer to "did the content actually die" -- _unlink_at
     # reports st_nlink survivors, and purge_outcome raises the exit code, so the
     # claim matches what happened rather than what was attempted.
     #
@@ -1243,7 +1215,7 @@ def _unlink_at(root_fd: int, rel: str) -> tuple[str | None, int]:
             except FileNotFoundError:
                 # A PARENT that is gone is not the file being gone: a renamed
                 # parent leaves the content alive at its new path, and "gone"
-                # here reported a destruction this tool did not perform (#45).
+                # here reported a destruction this tool did not perform.
                 # Said as a note, so it is told apart from a real removal.
                 return (f"{safe_name(rel)} (a parent component vanished mid-run; "
                         "NOT removed by this tool, and it may survive elsewhere)"), 0
@@ -1351,10 +1323,8 @@ def parse_retention(body: bytes) -> bool:
     """Does this config body leave CUPS keeping job files?
 
     Pure, so the precedence rule can be tested without a filesystem or a CUPS
-    install. It used to live inside retention_state, under `pragma: no cover`,
-    where the rule below was got wrong once already and nothing could have
-    caught it: the exemption is why the only test of this was an end-to-end run
-    on a machine that happened to have the right config.
+    install, rather than only by an end-to-end run on a machine that happens
+    to have the right config.
     """
     # cupsd honours the LAST matching directive. Returning on the first made a
     # hand-edited config with "No" followed by "Yes" report RETENTION: OFF on a
