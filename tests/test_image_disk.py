@@ -8,15 +8,13 @@ real image of a file, compared byte for byte.
     python tests/test_image_disk.py
 """
 
-import importlib.util
 import shutil
 import sys
 import tempfile
 from pathlib import Path
-from types import ModuleType
 from unittest import mock
 
-from _harness import ROOT, check, check_true, run
+from _harness import check, check_true, load_script, run
 from fake_tools import calls, env, fake_tools, run_main
 
 # Copies the source (third from last) to the image (second from last). With
@@ -30,16 +28,7 @@ shutil.copyfile(source, image)
 """
 
 
-def _load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("image_disk", ROOT / "image-disk.py")
-    if spec is None or spec.loader is None:
-        raise ImportError("cannot load image-disk.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-IMAGE_DISK = _load()
+IMAGE_DISK = load_script("image-disk.py")
 
 
 def test_two_passes_then_done() -> None:

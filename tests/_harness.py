@@ -7,13 +7,16 @@ importable:
     from _harness import ROOT, check, run
     from jpcheck.suppressions import run_noqa
 
+A script whose file name is not a module name is loaded with load_script().
 The ruff config forces it to the top of its import section. Bytecode is off,
 so a mutation run that rewrites a module in place is never answered by a
 cached copy of the original.
 """
 
+import importlib.util
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -23,6 +26,22 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 FAILURES: list[str] = []
+
+
+def load_script(filename: str) -> ModuleType:
+    """Import a checkout script whose name is not a module name (chd-hunkmap.py).
+
+    Registered in sys.modules before it runs, which a dataclass defined in it
+    needs in order to resolve its own annotations.
+    """
+    name = filename.removesuffix(".py").replace("-", "_")
+    spec = importlib.util.spec_from_file_location(name, ROOT / filename)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {filename}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def check(label: str, actual: object, expected: object) -> None:

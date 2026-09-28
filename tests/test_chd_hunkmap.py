@@ -9,20 +9,19 @@ the CRC16 it carries.
     python tests/test_chd_hunkmap.py
 """
 
-import contextlib
-import importlib.util
-import io
 import json
 import sys
 import tempfile
 
-from _harness import ROOT, check, check_true, run
+from _harness import ROOT, check, check_true, load_script, run
 from chdmap.bits import BitReader, HuffmanDecoder, crc16
 from chdmap.header import Header, read_header
 from chdmap.hunkmap import Hunk, Kind, read_map
 from chdmap.trace import self_ref_groups, shared_pairs, tar_members
+from fake_tools import run_main
 
 FIX = ROOT / "tests" / "fixtures" / "chd"
+HUNKMAP = load_script("chd-hunkmap.py")
 
 
 def _read(name: str) -> tuple[Header, list[Hunk]]:
@@ -32,14 +31,7 @@ def _read(name: str) -> tuple[Header, list[Hunk]]:
 
 
 def _cli(*args: str) -> tuple[int, str]:
-    spec = importlib.util.spec_from_file_location("chd_hunkmap", ROOT / "chd-hunkmap.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-        code = module.main(list(args))
-    return code, out.getvalue()
+    return run_main(HUNKMAP.main, *args)
 
 
 def test_crc16_is_ccitt_false() -> None:

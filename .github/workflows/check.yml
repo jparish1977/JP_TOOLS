@@ -48,7 +48,7 @@ jobs:
             base=HEAD
           fi
           rc=0
-          for f in check.py jpcheck/*.py fix.py install-hooks.py init-ci.py spool-audit.py spoolaudit/*.py chd.py chdtool/*.py chd-hunkmap.py chdmap/*.py recover.py recovery/*.py image-disk.py platformtools/*.py list-exemptions.py; do
+          for f in check.py jpcheck/*.py fix.py install-hooks.py init-ci.py spool-audit.py spoolaudit/*.py chd.py chdtool/*.py chd-hunkmap.py chdmap/*.py recover.py recovery/*.py image-disk.py platformtools/*.py diff-functions.py snapshot-test.py list-exemptions.py; do
             echo "--- $f ---"
             python check.py "$f" --pretty --smells-base "$base" || rc=1
           done
@@ -62,7 +62,7 @@ jobs:
           # to any diff. Silently excluding them is how spool-audit.py reached
           # a PR with a green badge that said nothing about it, so the gap is
           # printed instead of hidden. Not a failure; a standing reminder.
-          checked="check.py fix.py install-hooks.py init-ci.py spool-audit.py chd.py chd-hunkmap.py recover.py image-disk.py list-exemptions.py"
+          checked="check.py fix.py install-hooks.py init-ci.py spool-audit.py chd.py chd-hunkmap.py recover.py image-disk.py diff-functions.py snapshot-test.py list-exemptions.py"
           echo "Linted: $checked"
           echo "NOT linted:"
           for f in *.py; do
