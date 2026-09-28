@@ -3,8 +3,8 @@
 Each JSON file is a set of deliberate breakages ("mutants") of one source
 file, each aimed at ONE named check in one test. Running a spec breaks the code
 one mutant at a time and requires that exact check to read FAIL: proof the test
-notices what it claims to. pytest collects only `test_*.py`, so nothing here
-runs with the suite.
+notices what it claims to. CI runs only `tests/test_*`, so nothing here runs
+with the suite.
 
 A spec's `about` ends with its run line, which names the file it mutates and
 the test that must catch each mutant:
