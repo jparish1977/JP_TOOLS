@@ -12,6 +12,10 @@ THE GAP THIS PINS DOWN
     declared its own name and dependencies would run on the tools' built-in
     defaults, with every rule configs/ruff.toml adds switched off.
 
+AND mypy stops looking at the repository root (.git or .hg) where ruff does
+not, so a [tool.mypy] above a repo is not that repo's config: counting it
+handed mypy nothing, the same silent loss of the defaults one level up.
+
 The config choice is checked directly, and once end to end through ruff.
 The end-to-end part skips when ruff is missing.
 
@@ -121,6 +125,25 @@ def main() -> int:
               _mypy_config_args(str(t)) == [])
         t = tree(base, {"mypy.ini": "[mypy]\n"})
         check("a mypy.ini is the project's own",
+              _mypy_config_args(str(t)) == [])
+        above = BARE_PYPROJECT + "\n[tool.mypy]\nstrict = true\n\n[tool.ruff]\nline-length = 90\n"
+        t = tree(base, {"pyproject.toml": above, "sub/.git/HEAD": "ref: refs/heads/main\n",
+                        "sub/m.py": "x = 1\n"})
+        check("a [tool.mypy] ABOVE a git repo is not the repo's: still the JP_TOOLS defaults",
+              uses_defaults(_mypy_config_args(str(t))))
+        check("...while ruff, which walks past the repo root, still counts it",
+              _ruff_config_args(str(t)) == [])
+        t = tree(base, {"pyproject.toml": above, "sub/.hg/requires": "store\n",
+                        "sub/m.py": "x = 1\n"})
+        check("the same above an hg repo",
+              uses_defaults(_mypy_config_args(str(t))))
+        t = tree(base, {"pyproject.toml": above, "sub/m.py": "x = 1\n"})
+        check("control: with no repo root between, mypy's walk reaches it",
+              _mypy_config_args(str(t)) == [])
+        t = tree(base, {"sub/.git/HEAD": "ref: refs/heads/main\n",
+                        "sub/pyproject.toml": BARE_PYPROJECT + "\n[tool.mypy]\n",
+                        "sub/m.py": "x = 1\n"})
+        check("a [tool.mypy] AT the repo root is the project's own",
               _mypy_config_args(str(t)) == [])
 
         print("\nEnd to end:")
