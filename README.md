@@ -216,7 +216,7 @@ original image. PPM to PNG conversion is stdlib-only: no Pillow, no ImageMagick.
 
 | Script | Purpose |
 |---|---|
-| `chd.py` | CHD archive management — create, verify, extract, import, delta, batch |
+| `chd.py` | CHD archive management: create, verify, extract, import, delta, merge, batch |
 | `chd-hunkmap.py` | CHD hunk map analysis — block-level dedup intelligence |
 
 ### Deployment
@@ -451,8 +451,9 @@ python chd.py batch-create ~/roms/psx --format iso
 python chd.py verify game.chd
 python chd.py batch-verify ~/roms/chd
 
-# Delta (incremental) CHD
+# Delta (incremental) CHD, and back to a standalone one
 python chd.py delta base.chd updated.img updated.chd
+python chd.py merge base.chd updated.chd standalone.chd
 
 # Analyze block-level deduplication
 python chd-hunkmap.py archive.chd --self-refs --trace archive.tar
