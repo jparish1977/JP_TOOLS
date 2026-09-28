@@ -18,9 +18,8 @@ Exit status: 0 nothing retained, 1 content still on disk (including anything
 --purge failed to remove), 2 could not be read.
 
 Reads directly, so it must run as root for the real spool (sudo). There is no
-privilege-escalation path inside the tool: a second implementation of the same
-listing kept disagreeing with the first, and that divergence caused a large
-share of this file's history of bugs.
+privilege-escalation path inside the tool: one listing implementation, with one
+set of rules.
 
 WHAT --purge REMOVES, AND WHY THE ANSWER IS A TYPE
     Exactly the files whose own first bytes prove them to be print data and
@@ -88,7 +87,7 @@ HOW TO CLEAR IT
         sudo nano /etc/cups/cupsd.conf    # add: PreserveJobFiles No
         sudo systemctl restart cups       # and stop it happening again
 
-    The explicit "No" matters — see above, an unset directive is not the same
+    The explicit "No" matters: as above, an unset directive is not the same
     thing. Re-run this tool afterwards to check the spool is actually empty,
     which is the job it is for. Whatever `cancel` could not reach -- content
     with no job id -- is what --purge is for.
@@ -123,26 +122,18 @@ WHAT COUNTS AS A LEAK
 from __future__ import annotations
 
 import argparse
-import contextlib
+import io
 import sys
 
 from spoolaudit.classify import classify, purgeable
 from spoolaudit.config import retention_state
-from spoolaudit.model import DEFAULT_CONF, DEFAULT_SPOOL
+from spoolaudit.model import DEFAULT_CONF, DEFAULT_SPOOL, Audit
 from spoolaudit.purge import delete_residue, purge_outcome
 from spoolaudit.read import read_spool
 from spoolaudit.render import render
 
 
-def main(argv: list[str] | None = None) -> int:
-    # Filenames are bytes on Linux and arrive as str with lone surrogates, from
-    # both listing paths. print() encodes strictly and dies mid-report with
-    # UnicodeEncodeError, exit 1 -- which this tool uses for "content is still
-    # there", so a wrapper cannot tell a crash from a finding. The parsing side
-    # was hardened for hostile names; the output side undid it.
-    with contextlib.suppress(AttributeError, ValueError):  # reason: a stdout with no reconfigure (a StringIO under test) keeps strict encoding, as above
-        sys.stdout.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
-
+def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -161,52 +152,61 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--spool", default=DEFAULT_SPOOL, help=f"spool directory (default {DEFAULT_SPOOL})")
     ap.add_argument("--conf", default=DEFAULT_CONF, help=f"cupsd.conf path (default {DEFAULT_CONF})")
-    args = ap.parse_args(argv)
+    return ap
 
+
+def _print(lines: list[str]) -> None:
+    for line in lines:
+        print(line)
+
+
+def _purge(args: argparse.Namespace, audit: Audit, jobs: frozenset[int]) -> int:
+    victims = purgeable(audit)
+    if not victims:
+        # An incomplete audit lands here too, with victims empty or not:
+        # removing what WAS positively seen is safe regardless, and the exit
+        # code stays 2 through audit.exit_code either way.
+        _print(["--purge: nothing here is identified as print data by its own",
+                "content, so there is nothing this tool will remove. Job files",
+                "belong to `cancel`; unidentified files are yours to judge.", ""])
+        _print(render(audit, jobs, retention_state(args.conf)))
+        return audit.exit_code
+    result = delete_residue(args.spool, victims)
+    after = classify(read_spool(args.spool), frozenset(), args.include_control)
+    lines, code = purge_outcome(result, after, retention_state(args.conf))
+    _print(lines)
+    return code
+
+
+def main(argv: list[str] | None = None) -> int:
+    # Filenames are bytes on Linux and arrive as str with lone surrogates.
+    # print() encodes strictly and would die mid-report with
+    # UnicodeEncodeError, exit 1, which this tool uses for "content is still
+    # there", so a wrapper could not tell a crash from a finding. A stdout
+    # that is not a text wrapper (a StringIO under test) keeps its own rules.
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(errors="backslashreplace")
+    ap = _parser()
+    args = ap.parse_args(argv)
     if args.purge and args.jobs:
-        # Refused, not reinterpreted and not silently ignored: the scoped
-        # purge ("85 --purge") is the invocation that fired `&& echo SAFE` in
-        # four separate review rounds of the deleted half. Nothing --purge
-        # removes carries a job id, so a job-scoped purge is a request this
-        # tool cannot mean anything by. Job files are CUPS' own.
+        # Refused, not reinterpreted and not silently ignored: nothing --purge
+        # removes carries a job id, so `85 --purge && echo SAFE` would be a
+        # request this tool cannot mean anything by. Job files are CUPS' own.
         ap.error(
             "--purge cannot be scoped by job id; nothing it removes has one. "
             "For job files use: cancel -x "
             + " ".join(str(j) for j in sorted(set(args.jobs)))
         )
-
     jobs = frozenset(args.jobs)
     audit = classify(read_spool(args.spool), jobs, args.include_control)
-
     if not audit.readable:
-        for line in render(audit, jobs):
-            print(line)
+        _print(render(audit, jobs))
         return 2
-
     if args.purge:
-        victims = purgeable(audit)
-        if not victims:
-            # An incomplete audit lands here too, with victims empty or not:
-            # removing what WAS positively seen is safe regardless, and the
-            # exit code below stays 2 through audit.exit_code either way.
-            print("--purge: nothing here is identified as print data by its own")
-            print("content, so there is nothing this tool will remove. Job files")
-            print("belong to `cancel`; unidentified files are yours to judge.")
-            print("")
-            for line in render(audit, jobs, retention_state(args.conf)):
-                print(line)
-            return audit.exit_code
-        result = delete_residue(args.spool, victims)
-        after = classify(read_spool(args.spool), frozenset(), args.include_control)
-        lines, code = purge_outcome(result, after, retention_state(args.conf))
-        for line in lines:
-            print(line)
-        return code
-
-    for line in render(audit, jobs, retention_state(args.conf)):
-        print(line)
-    # On the report path the exit code means one thing and only one thing:
-    # nothing is left. It never reports on an action, because none was taken.
+        return _purge(args, audit, jobs)
+    _print(render(audit, jobs, retention_state(args.conf)))
+    # On the report path the exit code means one thing only: nothing is left.
+    # It never reports on an action, because none was taken.
     return audit.exit_code
 
 

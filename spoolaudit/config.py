@@ -16,9 +16,9 @@ def parse_retention(body: bytes) -> bool:
     install, rather than only by an end-to-end run on a machine that happens
     to have the right config.
     """
-    # cupsd honours the LAST matching directive. Returning on the first made a
-    # hand-edited config with "No" followed by "Yes" report RETENTION: OFF on a
-    # host that was retaining documents -- danger reported as safety.
+    # cupsd honours the LAST matching directive. Returning on the first would
+    # make a hand-edited config with "No" followed by "Yes" report RETENTION:
+    # OFF on a host that is retaining documents: danger reported as safety.
     setting: bytes | None = None
     for line in body.splitlines():
         m = re.match(rb"^\s*PreserveJobFiles\s+(\S+)", line, re.IGNORECASE)
@@ -35,8 +35,8 @@ def parse_retention(body: bytes) -> bool:
 def retention_state(conf: str) -> bool | None:
     """Is CUPS configured to keep job files? None if the config is unreadable.
 
-    Nothing but the read lives here now, and it reads bytes: a printer config
-    is not guaranteed UTF-8, and decoding it is a step that can fail or corrupt
+    Nothing but the read lives here, and it reads bytes: a printer config is
+    not guaranteed UTF-8, and decoding it is a step that can fail or corrupt
     for no benefit when all that is wanted is a directive match.
     """
     try:
@@ -56,10 +56,10 @@ def _read_conf(path: str) -> bytes:
     --conf takes an arbitrary path, so the type is checked before opening.
 
     Character devices are deliberately still allowed: `--conf /dev/null` is a
-    legitimate "empty config" used throughout this repo's own suites, and it
-    reads as EOF immediately. That is why this refuses less than a writer
-    would have to, which requires a regular file because REPLACING /dev/null is a very
-    different act from reading it.
+    legitimate "empty config", used throughout the suites, and it reads as
+    EOF immediately. A writer would have to demand a regular file, because
+    REPLACING /dev/null is a very different act from reading it; a reader
+    need not.
     """
     st = os.stat(path)
     if stat.S_ISFIFO(st.st_mode) or stat.S_ISSOCK(st.st_mode):

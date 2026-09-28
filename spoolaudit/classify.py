@@ -29,11 +29,10 @@ def temp_child_note(
 ) -> str | None:
     """Why this TempDir entry was not examined, or None if it is a plain file.
 
-    Pure so it can be tested without a filesystem. This decision lived inside
-    read_spool, which carries `pragma: no cover`, and it silently dropped
-    everything that was not a regular file. A FIFO and a broken symlink
-    vanished from the report entirely, and a symlink to a document was counted,
-    unlinked, and reported as destroyed while the target stayed readable.
+    Pure, so it is tested without a filesystem. Anything that is not a regular
+    file gets a note, so it appears in the report: a FIFO or a broken symlink
+    must not vanish, and a symlink to a document must not be counted, unlinked
+    and reported as destroyed while the target stays readable.
 
     Order matters: is_dir() and is_file() both FOLLOW symlinks, so symlinks
     must be tested first.
@@ -56,9 +55,8 @@ def identified_as_print(f: TempFile) -> bool:
     """Does this file's CONTENT say it is print data?
 
     The positive question, kept separate from is_harmless_temp's negative one.
-    "Not recognised as harmless" is not evidence of anything, and using it to
-    populate a delete set destroyed files whose only crime was being
-    unfamiliar.
+    "Not recognised as harmless" is not evidence of anything, and must never
+    put a file in a delete set.
     """
     return any(f.head.startswith(m) for m in DOCUMENT_MAGIC)
 
@@ -94,9 +92,8 @@ def is_harmless_temp(f: TempFile, in_tempdir: bool = True) -> bool:
         return False
     # CUPS runtime names, and only inside TempDir. CUPS never creates cups-*
     # files at the top level of the spool, so honouring the name there would
-    # let a file called cups-dbus-secret holding a password be dismissed
-    # unread. Dismissal on a name alone is the one thing this tool must not
-    # do, which is also why this sits AFTER the unreadable-content guard.
+    # dismiss readable content on its name alone, the one thing this tool
+    # must not do. That is also why this sits AFTER the unreadable guard.
     if in_tempdir and ARTIFACT.match(f.name.rsplit("/", 1)[-1]):
         return True
     # CUPS runs filters with HOME pointed at TempDir, so a filter's XDG cache
@@ -122,6 +119,46 @@ def parse_entry(name: str, include_control: bool) -> Entry | None:
     return None
 
 
+def _evidence_kind(f: TempFile) -> Kind:
+    """TEMP when the file's own bytes say print data, else UNRECOGNISED.
+
+    Evidence decides, not location: Kind drives the delete set, so a file
+    merely not ruled out must never be TEMP, wherever it sits.
+    """
+    return Kind.TEMP if identified_as_print(f) else Kind.UNRECOGNISED
+
+
+def _by_name(f: TempFile) -> str:
+    return f.name
+
+
+def _retained(listing: Listing, include_control: bool) -> list[Entry]:
+    """Every entry that may be document content: job files, then the rest by evidence.
+
+    Unrecognised top-level files go through exactly the same content check as
+    TempDir files, so a PostScript .bak is counted and an empty stray is not.
+    TempDir files carry no recoverable job id, so they can never be targeted
+    by job number; they still count as retained data.
+    """
+    entries = [e for e in (parse_entry(n, include_control) for n in listing.top) if e is not None]
+    entries += [Entry(name=f.name, kind=_evidence_kind(f))
+                for f in sorted(listing.extra, key=_by_name)
+                if not is_harmless_temp(f, in_tempdir=False)]
+    entries += [Entry(name=f"{listing.temp_label}/{f.name}", kind=_evidence_kind(f), in_temp=True)
+                for f in sorted(listing.temp, key=_by_name)
+                if not is_harmless_temp(f)]
+    return entries
+
+
+def _artifacts(listing: Listing) -> tuple[Entry, ...]:
+    """Files known not to be content: TempDir's first, then the top level's."""
+    in_temp = [Entry(name=f"{listing.temp_label}/{f.name}", kind=Kind.ARTIFACT, in_temp=True)
+               for f in sorted(listing.temp, key=_by_name) if is_harmless_temp(f)]
+    top = [Entry(name=f.name, kind=Kind.ARTIFACT)
+           for f in sorted(listing.extra, key=_by_name) if is_harmless_temp(f, in_tempdir=False)]
+    return tuple(in_temp + top)
+
+
 def classify(
     listing: Listing,
     jobs: frozenset[int] = frozenset(),
@@ -129,69 +166,21 @@ def classify(
 ) -> Audit:
     """Partition a spool listing into targeted and other retained files."""
     if listing.verdict in (Verdict.DENIED, Verdict.MISSING, Verdict.NOT_A_DIRECTORY):
-        # Carry unexamined through. Dropping it here is why the ELOOP/ESTALE
-        # class name never reached the report and the user was told to re-run
-        # with sudo, which would fail identically.
+        # Carry unexamined through: it names the error class, so the report
+        # does not tell the user to re-run with sudo over an ELOOP or ESTALE,
+        # which would fail identically.
         return Audit(
             listing.verdict, (), (),
             asked_for_jobs=bool(jobs), unexamined=listing.unexamined,
         )
-
-    entries = [e for e in (parse_entry(n, include_control) for n in listing.top) if e is not None]
-    # Unrecognised top-level files go through exactly the same content check as
-    # TempDir files, so a PostScript .bak is counted and an empty stray file is
-    # not.
-    extras = sorted(listing.extra, key=lambda f: f.name)
-    entries += [
-        Entry(
-            name=f.name,
-            kind=Kind.TEMP if identified_as_print(f) else Kind.UNRECOGNISED,
-            job=None,
-        )
-        for f in extras
-        if not is_harmless_temp(f, in_tempdir=False)
-    ]
-    # Temp files carry document content but no recoverable job id, so they can
-    # never be "targeted" by job number. They still count as retained data.
-    temps = sorted(listing.temp, key=lambda f: f.name)
-    entries += [
-        Entry(
-            name=f"{listing.temp_label}/{f.name}",
-            in_temp=True,
-            # Positively identified as print data, or merely not ruled out?
-            # Kind drove the delete set, and TempDir files were all TEMP, so
-            # `--purge` destroyed tmp/notes.txt while sparing an identical
-            # README at the top level. Evidence decides, not location.
-            kind=Kind.TEMP if identified_as_print(f) else Kind.UNRECOGNISED,
-            job=None,
-        )
-        for f in temps
-        if not is_harmless_temp(f)
-    ]
-    artifacts = tuple(
-        [
-            Entry(name=f"{listing.temp_label}/{f.name}", kind=Kind.ARTIFACT,
-                  job=None, in_temp=True)
-            for f in temps
-            if is_harmless_temp(f)
-        ]
-        + [
-            Entry(name=f.name, kind=Kind.ARTIFACT, job=None)
-            for f in extras
-            if is_harmless_temp(f, in_tempdir=False)
-        ]
-    )
-
-    targeted = tuple(sorted((e for e in entries if e.job in jobs), key=lambda e: e.name))
-    others = tuple(sorted((e for e in entries if e.job not in jobs), key=lambda e: e.name))
-    verdict = Verdict.RETAINED if entries else Verdict.CLEAN
+    entries = sorted(_retained(listing, include_control), key=lambda e: e.name)
     uncounted_control = 0 if include_control else sum(1 for n in listing.top if CONTROL.match(n))
     return Audit(
-        verdict,
-        targeted,
-        others,
+        Verdict.RETAINED if entries else Verdict.CLEAN,
+        tuple(e for e in entries if e.job in jobs),
+        tuple(e for e in entries if e.job not in jobs),
         asked_for_jobs=bool(jobs),
-        artifacts=artifacts,
+        artifacts=_artifacts(listing),
         unexamined=listing.unexamined,
         uncounted_control=uncounted_control,
     )
@@ -210,9 +199,8 @@ def purgeable(audit: Audit) -> tuple[Entry, ...]:
     so `cancel`'s own files are never in this set. DOCUMENT and CONTROL
     carry job ids and are CUPS' own to remove; UNRECOGNISED merely failed to
     be recognised as harmless, which is grounds to report and never grounds
-    to destroy (the old delete set deleted README-do-not-delete on exactly
-    that confusion); ARTIFACT is not content at all. There are no scope
-    flags to combine with, because there is nothing left to decide.
+    to destroy; ARTIFACT is not content at all. There are no scope flags to
+    combine with, because there is nothing left to decide.
 
     Both partitions are scanned so the selection cannot depend on how the
     audit was scoped -- although in practice a purge run has no targeted
@@ -224,29 +212,25 @@ def purgeable(audit: Audit) -> tuple[Entry, ...]:
 def safe_name(name: str) -> str:
     """A filename that cannot forge a report line.
 
-    Names are interpolated into the report, and a file called
-    "d00085-001\nVERDICT: spool is clean." printed a forged pass inside the
-    listing. Newlines and carriage returns are escaped; --spool is documented
-    for auditing directories this tool does not control.
+    Names are interpolated into the report, so a file called
+    "d00085-001\\nVERDICT: spool is clean." would print a forged pass inside
+    the listing. --spool is documented for auditing directories this tool
+    does not control.
     """
     out = name.replace("\\", "\\\\")
-    # ESC too, not just \n and \r: "\x1b[1A\x1b[2K" moves the cursor up and
-    # erases the line, so a filename could overwrite the verdict it appears
-    # under. Escaping only line breaks left the report forgeable on any real
-    # terminal.
+    # Every unprintable character, ESC included, not just \n and \r:
+    # "\x1b[1A\x1b[2K" moves the cursor up and erases the line, so a filename
+    # could overwrite the verdict it appears under.
     return "".join(ch if ch.isprintable() or ch == " " else repr(ch)[1:-1] for ch in out)
 
 
 def classify_top(e: TopEntry) -> TopDecision:
     """Which bucket a top-level spool entry belongs in.
 
-    This was two near-identical blocks inside read_spool, one for names
-    matching d<n>-<n> or c<n> and one for everything else, differing only in
-    whether the name was suppressed from `top`. Duplicated blocks that must
-    agree are the single most repeated defect on this branch: the
-    never-follow-symlinks rule was applied to TempDir and not here, and a
-    symlink named d00085-001 was unlinked, "1 removed" printed, and the target
-    left readable. One function now, so there is no second site to forget.
+    One function for every top-level name, job-shaped or not, so the
+    never-follow-symlinks rule cannot hold at one site and not the other: a
+    symlink named d00085-001 must not be unlinked and reported removed while
+    the target stays readable.
     """
     named = bool(DOCUMENT.match(e.name) or CONTROL.match(e.name))
     if e.is_symlink or not e.is_regular:

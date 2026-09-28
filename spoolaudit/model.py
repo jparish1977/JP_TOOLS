@@ -13,18 +13,15 @@ TEMP_SUBDIR = "tmp"
 DOCUMENT = re.compile(r"^d(\d+)-(\d+)$")
 CONTROL = re.compile(r"^c(\d+)$")
 
-# CUPS keeps its own runtime files in TempDir alongside spooled document data.
-# A typical tmp/ holds opaque document temporaries and a
-# `cups-dbus-notifier-lockfile`. Counting the lockfile as
-# leaked content inflates every total, and deleting it removes a lock from
-# under a running cupsd. Named artifacts are reported separately and are never
-# purged.
+# CUPS keeps its own runtime files in TempDir alongside spooled document data:
+# a typical tmp/ holds opaque document temporaries and a
+# `cups-dbus-notifier-lockfile`. Counting the lockfile as leaked content
+# inflates every total, and deleting it removes a lock from under a running
+# cupsd. Named artifacts are reported separately and are never purged.
 # Deliberately no bare `^cups-dbus-` prefix: that would dismiss any name with
 # the prefix, a tmp/cups-dbus-secret holding a password included. The real
 # artifact, cups-dbus-notifier-lockfile, matches the lockfile alternative.
 ARTIFACT = re.compile(r"^cups-.*(lockfile|notifier|socket)$")
-
-
 
 # Directory levels below TempDir that are walked. Every traversal must agree
 # on it: find exits 0 with no marker when it truncates, so a traversal that
@@ -95,20 +92,16 @@ class Listing:
     top: tuple[str, ...] = ()
     temp: tuple[TempFile, ...] = ()
     # Things known to exist but NOT examined: an unreadable TempDir, a
-    # subdirectory under it. Without this the model could not express "top
-    # level readable, TempDir not", and the code silently turned an unreadable
-    # TempDir into an empty one and announced "spool is clean".
+    # subdirectory under it. This is how the model says "top level readable,
+    # TempDir not", so an unreadable TempDir can never read as an empty one.
     unexamined: tuple[str, ...] = ()
-    # Always "tmp" now that --temp is gone. Kept as a field so classify() has
-    # one place to read it from rather than hardcoding the prefix twice.
+    # Always "tmp". A field so classify() has one place to read the prefix
+    # from rather than hardcoding it twice.
     temp_label: str = TEMP_SUBDIR
-    # Top-level entries matching neither d<n>-<n> nor c<n>. They were dropped
-    # silently, so a document left as d00085-001.bak was invisible while the
-    # tool printed "spool is clean" -- strictly worse than the `ls` this
-    # replaced. TempDir already uses over-report-never-dismiss; the top level
-    # now uses the same rule. LAST field on purpose: inserting it mid-struct
-    # shifted every positional construction in the tests, which is the same
-    # "changed one site, not its twins" failure this branch keeps hitting.
+    # Top-level entries matching neither d<n>-<n> nor c<n>, read for content
+    # so a document left as d00085-001.bak is counted rather than hidden:
+    # over-report, never dismiss, the same rule as TempDir. The last field,
+    # so positional constructions of the earlier fields stay valid.
     extra: tuple[TempFile, ...] = ()
 
 
@@ -155,20 +148,16 @@ class Audit:
     def exit_code(self) -> int:
         """0 satisfied, 1 something you care about is still there, 2 unknown.
 
-        When job ids were given, this answers the question that was asked --
-        "are MY documents gone?" -- rather than "is the spool empty?". Basing
-        it on the whole spool would re-merge the two states the data model
-        keeps apart, and `spool-audit.py 85 && echo SAFE` would never fire.
+        Whether the jobs you named are gone is answered in the report text;
+        the exit code says whether anything is still there (see below).
         """
         if not self.complete:
             return 2
         # STRICT: 0 means no print data is left anywhere, not "the jobs you
         # named are gone". Job identity is not content identity -- a copy of
         # job 85's document named d00085-001.bak carries no job id, so a
-        # scoped run reported "those documents are GONE" and exited 0 over a
-        # readable copy. That fired `85 --purge && echo SAFE` in four separate
-        # review rounds, each time in a different branch, because the scoped
-        # exit code kept being re-derived and kept being wrong.
+        # scoped exit code would be 0 over a readable copy and
+        # `85 --purge && echo SAFE` would fire.
         #
         # The scoped question is still answered, in the report text. The exit
         # code answers the only one a script can act on: is anything still
@@ -184,7 +173,7 @@ class Removal:
     links): the spool's directory entry was unlinked, but st_nlink said that
     many OTHER hard links to the same content remain, so the entry is removed
     and the document is not destroyed -- two different claims, and collapsing
-    them printed "removed:" plus exit 0 over readable content. `failed` is
+    them would print "removed:" and exit 0 over readable content. `failed` is
     report-safe notes for entries still present; `failed_names` mirrors it
     with the raw names, so the renderer can stop advising --purge for exactly
     the entries this run just failed on.
