@@ -13,7 +13,8 @@ import sys
 import zipfile
 
 from _harness import check, check_true, run
-from chd_support import FAKE_7Z, FAKE_CHDMAN, FAKE_COPIER, calls, cli, env, fake_tools
+from chd_support import FAKE_7Z, FAKE_CHDMAN, FAKE_COPIER, cli
+from fake_tools import calls, env, fake_tools
 
 CUE = 'FILE "game.bin" BINARY\n  TRACK 01 MODE1/2048\n    INDEX 01 00:00:00\n'
 

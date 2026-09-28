@@ -18,7 +18,7 @@ from chdtool.chdman import CONVERTIBLE, CreateOptions
 from chdtool.commands import create
 from chdtool.output import missing
 from chdtool.selection import select
-from chdtool.tools import find_tool, require, run
+from platformtools.tools import find_tool, require, run
 
 
 @dataclass(frozen=True)

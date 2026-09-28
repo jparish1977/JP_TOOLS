@@ -1,183 +1,145 @@
-#!/usr/bin/env python
-"""
-JP_TOOLS/image-disk.py
-Create a forensic disk image using ddrescue.
+#!/usr/bin/env python3
+"""Make a disk image with ddrescue, which survives bad sectors and resumes.
 
-ddrescue is fault-tolerant — it handles bad sectors, retries intelligently,
-and keeps a log so you can resume interrupted imaging.
+Two passes: a fast copy of everything readable, then a scrape that retries
+the bad areas three times. The map file (--log) records what is done, so an
+interrupted run picks up where it stopped.
 
 Usage:
-    python image-disk.py <source> <output.img> [--log <logfile>] [--dry-run]
+    python image-disk.py <source> <output.img> [--log <mapfile>] [--dry-run] [--no-scrape]
 
 Source can be:
-    /dev/sdX        — block device (Linux)
-    F:              — Windows drive letter (runs via WSL)
+    /dev/sdX        a block device (needs root)
+    F:              a Windows drive letter: prints how to attach it to WSL,
+                    since WSL cannot read a USB drive until it is attached
 
 Examples:
     python image-disk.py /dev/sdb ~/images/drive.img
-    python image-disk.py F: D:/images/drive.img
     python image-disk.py /dev/sdb ~/images/drive.img --log ~/images/drive.log
+
+Exit status: ddrescue's (the first pass that fails), 1 when the source cannot
+be read as given, 2 when ddrescue is not installed.
 """
 
-import os
-import sys
-import shutil
-import subprocess
+from __future__ import annotations
+
 import argparse
-import ctypes
+import subprocess
+import sys
+import time
 from pathlib import Path
-from datetime import datetime
+
+from platformtools.tools import find_tool
+from platformtools.windows import disk_number, drive_letter, is_admin, usb_drive_advice, wsl_path
+
+DDRESCUE_HINT = (
+    "Install with:\n"
+    "  Ubuntu/Debian: sudo apt install gddrescue\n"
+    "  macOS: brew install ddrescue"
+)
 
 
-def is_admin():
-    try:
-        return ctypes.windll.shell32.IsUserAnAdmin()
-    except AttributeError:
-        return os.geteuid() == 0
-
-
-def win_to_wsl_path(win_path):
-    """Convert C:\\foo\\bar to /mnt/c/foo/bar."""
-    p = str(win_path)
-    if len(p) >= 2 and p[1] == ":":
-        return f"/mnt/{p[0].lower()}/{p[2:].replace(chr(92), '/')}"
-    return p.replace("\\", "/")
-
-
-def resolve_source(source):
-    """Resolve Windows drive letter to WSL device path."""
-    if len(source) <= 3 and source[0].isalpha() and source.endswith(":"):
-        letter = source[0].upper()
-        result = subprocess.run(
-            ["powershell", "-Command",
-             f"Get-Partition -DriveLetter {letter} | "
-             f"Select-Object -ExpandProperty DiskNumber"],
-            capture_output=True, text=True
-        )
-        if result.returncode == 0 and result.stdout.strip().isdigit():
-            disk_num = result.stdout.strip()
-            # WSL maps Windows disks — but USB drives aren't usually visible.
-            # We need usbipd or to use the Windows \\.\PhysicalDriveN path.
-            print(f"Detected {source} as PhysicalDrive{disk_num}")
-            print()
-            print("For WSL ddrescue, the drive must be attached to WSL via usbipd,")
-            print("or you can use the native Linux boot approach.")
-            print()
-            print("To attach via usbipd:")
-            print("  usbipd list")
-            print("  usbipd bind --busid <BUSID>")
-            print("  usbipd attach --wsl --busid <BUSID>")
-            print("Then run again with the /dev/sdX device.")
-            print()
-            print("Or boot a Linux live USB and run:")
-            print(f"  ddrescue /dev/sdX {source}.img {source}.log")
-            sys.exit(1)
-        else:
-            print(f"Error: Could not find physical drive for {source}")
-            sys.exit(1)
-
-    return source
-
-
-def find_ddrescue():
-    """Find ddrescue binary."""
-    for name in ("ddrescue", "gddrescue"):
-        path = shutil.which(name)
-        if path:
-            return [path]
-
-    # Try WSL
-    result = subprocess.run(
-        ["wsl", "which", "ddrescue"],
-        capture_output=True, text=True
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        return ["wsl", result.stdout.strip()]
-
-    return None
-
-
-def main():
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Create a forensic disk image using ddrescue.",
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("source", help="Device or drive letter to image")
     parser.add_argument("output", help="Output image file path")
-    parser.add_argument("--log", help="ddrescue log file (enables resume). "
-                        "Defaults to <output>.log")
+    parser.add_argument("--log", help="ddrescue map file, which makes a run resumable "
+                                      "(default: <output>.log)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be done without imaging")
     parser.add_argument("--no-scrape", action="store_true",
                         help="Skip the scraping pass (faster, may miss bad sectors)")
-    args = parser.parse_args()
+    return parser
 
-    ddrescue = find_ddrescue()
-    if not ddrescue:
-        print("Error: ddrescue not found.")
-        print("Install with:")
-        print("  Ubuntu/Debian: sudo apt install gddrescue")
-        print("  macOS: brew install ddrescue")
-        sys.exit(2)
 
-    source = resolve_source(args.source)
-    output = Path(args.output).resolve()
-    log_file = Path(args.log).resolve() if args.log else output.with_suffix(".log")
+def find_ddrescue() -> list[str] | None:
+    """ddrescue's argv prefix; some distributions name it gddrescue."""
+    return find_tool("ddrescue") or find_tool("gddrescue")
 
-    output.parent.mkdir(parents=True, exist_ok=True)
 
-    # Convert paths for WSL if needed
-    if ddrescue[0] == "wsl":
-        out_path = win_to_wsl_path(output)
-        log_path = win_to_wsl_path(log_file)
-    else:
-        out_path = str(output)
-        log_path = str(log_file)
+def passes(prefix: list[str], source: str, image: str, mapfile: str,
+           scrape: bool) -> list[list[str]]:
+    """The ddrescue commands, in order: a fast copy, then (SCRAPE) the retries."""
+    fast = [*prefix, "-f", "-n", source, image, mapfile]
+    retry = [*prefix, "-f", "-d", "-r", "3", source, image, mapfile]
+    return [fast, retry] if scrape else [fast]
 
-    print(f"Source:  {source}")
-    print(f"Output:  {output}")
-    print(f"Log:     {log_file}")
-    print()
 
-    if args.dry_run:
-        print("[DRY RUN] No image created.")
-        return
+def _source(arg: str) -> str | None:
+    """The device to image, or None (having said why) for a Windows drive letter."""
+    letter = drive_letter(arg)
+    if letter is None:
+        return arg
+    number = disk_number(letter)
+    if number is None:
+        print(f"Error: Could not find the physical drive for {arg}")
+        return None
+    for line in usb_drive_advice(arg, number):
+        print(line)
+    return None
 
-    # Check if we need elevation (Linux)
-    if source.startswith("/dev/") and not is_admin():
-        if ddrescue[0] == "wsl":
-            ddrescue = ["wsl", "sudo", "ddrescue"]
-        else:
-            print("Error: Reading block devices requires root. Run with sudo.")
-            sys.exit(1)
 
-    start = datetime.now()
+def _privileged(prefix: list[str], source: str) -> list[str] | None:
+    """The prefix that can read SOURCE, or None when this needs root and is not it.
 
-    # First pass — fast copy of good sectors
-    cmd = ddrescue + ["-f", "-n", source, out_path, log_path]
-    print(f"Pass 1 (fast copy): {' '.join(cmd)}")
-    result = subprocess.run(cmd)
+    In WSL a device needs WSL's root, which Windows administrator rights do
+    not give, so a WSL ddrescue always runs under sudo there.
+    """
+    if not source.startswith("/dev/"):
+        return prefix
+    if prefix[0] == "wsl":
+        return ["wsl", "sudo", *prefix[1:]]
+    return prefix if is_admin() else None
 
-    if result.returncode != 0:
-        print(f"\nFirst pass failed with exit code {result.returncode}")
-        sys.exit(result.returncode)
 
-    # Second pass — scrape bad sectors (retry)
-    if not args.no_scrape:
-        cmd = ddrescue + ["-f", "-d", "-r", "3", source, out_path, log_path]
-        print(f"\nPass 2 (scrape): {' '.join(cmd)}")
-        result = subprocess.run(cmd)
-
-    elapsed = (datetime.now() - start).total_seconds()
+def _image(runs: list[list[str]], output: Path, mapfile: Path) -> int:
+    start = time.monotonic()
+    for label, argv in zip(("Pass 1 (fast copy)", "Pass 2 (scrape)"), runs, strict=False):
+        print(f"\n{label}: {' '.join(argv)}")
+        rc = subprocess.run(argv, check=False).returncode
+        if rc != 0:
+            print(f"\n{label} failed with exit code {rc}; run the same command again to resume.")
+            return rc
     size = output.stat().st_size if output.exists() else 0
-
     print("\nImaging complete:")
-    print(f"  Size:    {round(size / (1024**3), 1)} GB")
-    print(f"  Elapsed: {round(elapsed, 1)}s")
+    print(f"  Size:    {round(size / 1024**3, 1)} GB")
+    print(f"  Elapsed: {round(time.monotonic() - start, 1)}s")
     print(f"  Image:   {output}")
-    print(f"  Log:     {log_file}")
+    print(f"  Log:     {mapfile}")
     print("\nRecover files with:")
     print(f"  python recover.py {output} ./recovered --profile all")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    found = find_ddrescue()
+    if found is None:
+        print("Error: ddrescue not found.")
+        print(DDRESCUE_HINT)
+        return 2
+    source = _source(args.source)
+    if source is None:
+        return 1
+    output = Path(args.output).resolve()
+    mapfile = Path(args.log).resolve() if args.log else output.with_suffix(".log")
+    print(f"Source:  {source}")
+    print(f"Output:  {output}")
+    print(f"Log:     {mapfile}")
+    if args.dry_run:
+        print("\n[DRY RUN] No image created.")
+        return 0
+    prefix = _privileged(found, source)
+    if prefix is None:
+        print("Error: Reading a block device needs root. Run it again with sudo.")
+        return 1
+    output.parent.mkdir(parents=True, exist_ok=True)
+    as_seen = wsl_path if prefix[0] == "wsl" else str
+    runs = passes(prefix, source, as_seen(output), as_seen(mapfile), not args.no_scrape)
+    return _image(runs, output, mapfile)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

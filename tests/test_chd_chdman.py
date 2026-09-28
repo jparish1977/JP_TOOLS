@@ -20,7 +20,8 @@ from _harness import check, check_true, run
 from chd_support import cli
 from chdmap.header import read_header
 from chdmap.hunkmap import Kind, read_map
-from chdtool.tools import find_tool
+from chdtool.chdman import WINDOWS_CHDMAN
+from platformtools.tools import find_tool
 
 SECTOR = 2048
 
@@ -108,7 +109,7 @@ def test_cd_extracts_to_a_cue_sheet() -> None:
 
 
 if __name__ == "__main__":
-    if find_tool("chdman") is None:
+    if find_tool("chdman", WINDOWS_CHDMAN) is None:
         print("SKIP: chdman not found")
         sys.exit(0)
     sys.exit(run(globals(), "chd against chdman"))

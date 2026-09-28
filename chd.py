@@ -51,7 +51,7 @@ from pathlib import Path
 from chdtool import batch, commands
 from chdtool.chdman import COMPRESSION_PRESETS, CreateOptions
 from chdtool.importing import ImportOptions, import_image, tool_status
-from chdtool.tools import ToolMissingError
+from platformtools.tools import ToolMissingError
 
 _PRESETS = list(COMPRESSION_PRESETS)
 

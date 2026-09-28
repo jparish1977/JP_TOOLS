@@ -431,7 +431,11 @@ php find-dupes.php ~/data --ignore vendor,node_modules
 # Recover code files from a drive
 python recover.py /dev/sdb1 ./recovered --profile code
 
-# Recover everything
+# Image a failing drive first, then recover from the image
+python image-disk.py /dev/sdb ~/images/drive.img
+python recover.py ~/images/drive.img ./recovered --profile all
+
+# On Windows, a drive letter is read as its physical drive (as administrator)
 python recover.py F: ./recovered --profile all
 ```
 

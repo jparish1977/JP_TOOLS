@@ -1,18 +1,12 @@
-"""Finding and running the external programs: chdman and the format converters."""
+"""Finding and running external programs: on PATH, in a Windows folder, or in WSL."""
 
 from __future__ import annotations
 
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-
-# Where a MAME download usually leaves chdman on Windows, which puts nothing
-# on PATH.
-_WINDOWS_CHDMAN = (
-    Path.home() / "tools" / "mame" / "chdman.exe",
-    Path.home() / "tools" / "chdman.exe",
-)
 
 
 class ToolMissingError(Exception):
@@ -24,22 +18,25 @@ class ToolMissingError(Exception):
         self.hint = hint
 
 
-def find_tool(name: str) -> list[str] | None:
+def find_tool(name: str, windows_paths: Sequence[Path] = (), *,
+              windows_first: bool = True) -> list[str] | None:
     """The argv prefix that runs NAME, or None when it is not installed.
 
-    Looks in chdman's usual Windows folders (chdman only, Windows only), then
-    PATH, then inside WSL on Windows.
+    Looks on PATH and, on Windows, in WINDOWS_PATHS (the folders a download
+    that puts nothing on PATH usually lands in) and inside WSL. WINDOWS_PATHS
+    are tried before PATH when WINDOWS_FIRST, after WSL otherwise.
     """
-    if sys.platform == "win32" and name == "chdman":
-        for p in _WINDOWS_CHDMAN:
-            if p.exists():
-                return [str(p)]
+    windows = sys.platform == "win32"
+    native = next((str(p) for p in windows_paths if p.exists()), None) if windows else None
+    if native and windows_first:
+        return [native]
     path = shutil.which(name)
     if path:
         return [path]
-    if sys.platform == "win32":
-        return _in_wsl(name)
-    return None
+    in_wsl = _in_wsl(name) if windows else None
+    if in_wsl:
+        return in_wsl
+    return [native] if native else None
 
 
 def _in_wsl(name: str) -> list[str] | None:
@@ -54,9 +51,9 @@ def _in_wsl(name: str) -> list[str] | None:
     return ["wsl", found] if result.returncode == 0 and found else None
 
 
-def require(name: str, hint: str) -> list[str]:
+def require(name: str, hint: str, windows_paths: Sequence[Path] = ()) -> list[str]:
     """The argv prefix that runs NAME. Raises ToolMissingError when it is not installed."""
-    prefix = find_tool(name)
+    prefix = find_tool(name, windows_paths)
     if prefix is None:
         raise ToolMissingError(name, hint)
     return prefix

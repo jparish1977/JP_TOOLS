@@ -7,7 +7,14 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from chdtool.tools import require, run
+from platformtools.tools import require, run
+
+# Where a MAME download usually leaves chdman on Windows, which puts nothing
+# on PATH.
+WINDOWS_CHDMAN = (
+    Path.home() / "tools" / "mame" / "chdman.exe",
+    Path.home() / "tools" / "chdman.exe",
+)
 
 CHDMAN_HINT = (
     "Install with:\n"
@@ -84,7 +91,7 @@ def create_args(src: Path, dst: Path, opts: CreateOptions) -> list[str]:
 
 def chdman(args: list[str]) -> subprocess.CompletedProcess[str]:
     """Run chdman, captured. Raises ToolMissingError when it is not installed."""
-    return run(require("chdman", CHDMAN_HINT), args)
+    return run(require("chdman", CHDMAN_HINT, WINDOWS_CHDMAN), args)
 
 
 def info_text(chd: Path) -> str | None:
