@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Which remote branches hold nothing the base branch does not already have?
 
-ANSWERS a question asked on 2026-09-16, when joe/JP_TOOLS carried 29 branches
-  besides master and nobody could say which were finished. Reading a forge's
-  branch page does not answer it: a merged branch and an abandoned one look
-  identical there, and a branch that landed REBASED looks unmerged because
-  none of its commit ids are in the base. So the page invites two opposite
-  mistakes -- keeping dead refs forever, and deleting work that never landed.
+ANSWERS: which of a remote's branches are finished. A forge's branch page
+  cannot say: a merged branch and an abandoned one look identical there, and
+  a branch that landed REBASED looks unmerged because none of its commit ids
+  are in the base. So the page invites two opposite mistakes: keeping dead
+  refs forever, and deleting work that never landed.
 
 WHAT IT MEASURES, per branch, is reachability and nothing else:
   MERGED      the tip is an ancestor of the base, so deleting it loses no
@@ -14,43 +13,32 @@ WHAT IT MEASURES, per branch, is reachability and nothing else:
   AHEAD n     n commits are reachable from the tip and not from the base.
               Refused unless the branch is named to --also, and the commits
               are printed first so the caller sees what they are orphaning.
+  HELD        the branch the remote's HEAD points at, whatever it measures.
   A rebased-and-landed branch reads as AHEAD, which is correct: its CONTENT
   is in the base and its COMMITS are not, and only a person can say whether
   the second matters. The tool will not guess, because guessing wrong here is
   the unrecoverable direction.
 
-TESTED AGAINST: joe/JP_TOOLS on the build server, 2026-09-16. The positive control
-  is the classification itself -- run against origin with --base
-  origin/master it put 25 branches in MERGED and 5 in AHEAD, and each of the
-  five was checked by hand: suppress-reason (open PR #104, 3 commits),
-  feature/methodology-instruments (33, landed rebased as #72),
-  feature/autoit-triage and feature/vm-image-boot (1 each, files absent from
-  master), fix/photorec-fileopt-syntax (1, fix absent from recover.py:319).
-  A negative control was run too: with --base origin/feature/spool-purge the
-  same 29 branches split 20/9 instead of 25/4, so the verdict tracks the base
-  rather than being a property of the branch. A --also naming no branch at
-  all exits 2 and deletes nothing.
+  The remote is never inferred, and --base must be a ref ON that remote:
+  `--base master` for `--base origin/master` would measure the remote's
+  default branch against a local ref of the same name and put it in MERGED.
 
-REVIEW ROUND 1 found the hole this header's own reasoning had left open.
-  The remote is never inferred, "because 'prune the branches' against the
-  wrong one is exactly the mistake worth making impossible" -- and --base,
-  which is what decides MERGED, had no such check. `--base master` instead of
-  `--base origin/master` is one token shorter, matches no `origin/...` name,
-  measures `origin/master` against the LOCAL `master`, and puts the remote's
-  default branch in the class that is deleted without being named. Reproduced
-  on a throwaway bare remote by `another repo` and again here: 1 to delete, and
-  the one is `master`. --base must now name a ref on the remote, and the
-  remote's HEAD is HELD whatever the classification says.
+TESTED AGAINST: a remote with 29 branches besides its default, --base on its
+  default branch: 25 MERGED and 5 AHEAD, and each of the five checked by
+  hand (an open pull request; a branch landed rebased; two whose files were
+  absent from the base; one whose fix was absent from the base). Negative
+  control: against a different --base the same branches split 20/9, so the
+  verdict tracks the base rather than being a property of the branch. A
+  --also naming no branch exits 2 and deletes nothing; `--base master` is
+  refused; on a throwaway bare remote whose clone had no local HEAD ref, the
+  default branch was still HELD. Since restructured for the smell limits:
+  its dry-run output is byte-identical to that form on a throwaway remote.
 
 NOT TESTED AGAINST:
   - A push mirror. Whether a deletion here reaches a downstream mirror is the
-    mirror's business, and this tool neither checks nor claims it. JP_TOOLS
-    push-mirrors to GitHub; confirm there separately.
+    mirror's business, and this tool neither checks nor claims it.
   - A protected branch. The delete will simply fail and be reported; nothing
     tries to lift protection.
-  - Any remote other than one named on the command line. It never infers a
-    remote, because "prune the branches" against the wrong one is exactly the
-    mistake worth making impossible.
   - Worktrees and local branches. Remote refs only.
 """
 
@@ -59,15 +47,20 @@ import contextlib
 import ctypes
 import subprocess
 import sys
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Classes:
+    held: list[str] = field(default_factory=list)
+    merged: list[str] = field(default_factory=list)
+    kept: list[tuple[str, list[str]]] = field(default_factory=list)
+    forced: list[tuple[str, list[str]]] = field(default_factory=list)
 
 
 def set_proc_name(name: str) -> None:
-    """Name this process for btop and `pgrep -x`, per the fleet convention.
-
-    PR_SET_NAME is 15, and the kernel truncates to that. Best effort: a box
-    without a glibc prctl just keeps the name it had.
-    """
-    with contextlib.suppress(OSError, AttributeError):
+    """Name this process (what top, btop and `pgrep -x` see). PR_SET_NAME is 15."""
+    with contextlib.suppress(OSError, AttributeError):  # reason: best effort; without a glibc prctl the process keeps its name
         ctypes.CDLL(None).prctl(15, name.encode()[:15], 0, 0, 0)
 
 
@@ -75,8 +68,8 @@ def git(*args: str) -> str:
     """Run git and return its stdout, exiting with git's own message on error.
 
     check=True alone raises CalledProcessError, whose str() is "returned
-    non-zero exit status 128" and whose stderr -- the sentence naming the bad
-    ref -- is captured into the exception and never printed.
+    non-zero exit status 128" and whose stderr (the sentence naming the bad
+    ref) is captured into the exception and never printed.
     """
     out = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
     if out.returncode != 0:
@@ -87,34 +80,24 @@ def git(*args: str) -> str:
 def remote_head(remote: str) -> str | None:
     """The remote's default branch as `<remote>/<name>`, or None if unknown.
 
-    Asks the REMOTE, not the clone. A clone made with `git clone` has a local
-    `refs/remotes/<remote>/HEAD`, and one built any other way does not: the
-    fixture this guard was first tested against had none, so the protection
-    looked present and did nothing. ls-remote answers from the server.
+    Asks the REMOTE, not the clone: a clone made with `git clone` has a local
+    `refs/remotes/<remote>/HEAD` and one built any other way does not, and
+    trusting its absence would leave the default branch unprotected.
     """
-    out = subprocess.run(
-        ["git", "ls-remote", "--symref", remote, "HEAD"],
-        capture_output=True, text=True, check=False,
-    )
-    if out.returncode == 0:
-        for line in out.stdout.splitlines():
-            if line.startswith("ref:"):
-                ref = line.split()[1]
-                if ref.startswith("refs/heads/"):
-                    return f"{remote}/{ref[len('refs/heads/'):]}"
-    # Fall back to the clone's own idea, which may not exist either.
-    local = subprocess.run(
-        ["git", "symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD"],
-        capture_output=True, text=True, check=False,
-    )
-    return local.stdout.strip() or None if local.returncode == 0 else None
+    out = subprocess.run(["git", "ls-remote", "--symref", remote, "HEAD"],
+                         capture_output=True, text=True, check=False)
+    for line in out.stdout.splitlines() if out.returncode == 0 else []:
+        parts = line.split()
+        if line.startswith("ref:") and parts[1].startswith("refs/heads/"):
+            return f"{remote}/{parts[1][len('refs/heads/'):]}"
+    local = subprocess.run(["git", "symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD"],
+                           capture_output=True, text=True, check=False)
+    return (local.stdout.strip() or None) if local.returncode == 0 else None
 
 
 def remote_branches(remote: str, base: str) -> list[str]:
     """Every branch on `remote` except the base itself, in refname order."""
-    refs = git(
-        "for-each-ref", "--format=%(refname:short)", f"refs/remotes/{remote}"
-    ).splitlines()
+    refs = git("for-each-ref", "--format=%(refname:short)", f"refs/remotes/{remote}").splitlines()
     return [r for r in refs if r != base and not r.endswith("/HEAD")]
 
 
@@ -131,8 +114,7 @@ def validate_base(remote: str, base: str) -> None:
     without anyone naming it. A base off this remote never matches the
     remote's own branch by name, so the remote's default branch gets measured
     against a LOCAL ref of the same name, finds nothing unique, and joins the
-    delete set. `--base master` for `--base origin/master` is one token
-    shorter and does exactly that.
+    delete set.
     """
     prefix = f"{remote}/"
     if not base.startswith(prefix):
@@ -146,96 +128,81 @@ def validate_base(remote: str, base: str) -> None:
     git("rev-parse", "--verify", f"{base}^{{commit}}")
 
 
-def main() -> int:
-    set_proc_name("prune-branches")
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--remote", required=True, help="the remote to prune")
-    ap.add_argument(
-        "--base",
-        required=True,
-        help="the ref a branch must be an ancestor of, e.g. origin/master",
-    )
-    ap.add_argument(
-        "--also",
-        action="append",
-        default=[],
-        help="delete this branch even though it is AHEAD; short name, "
-        "repeatable. Its orphaned commits are printed first.",
-    )
-    ap.add_argument(
-        "--go",
-        action="store_true",
-        help="actually delete. Without it nothing is pushed.",
-    )
-    args = ap.parse_args()
-
-    prefix = f"{args.remote}/"
-    validate_base(args.remote, args.base)
-
-    # Belt and braces: validate_base is about a MISTYPED base, this is about
-    # the outcome. Nothing here should ever delete the branch the remote
-    # points HEAD at, however it was classified.
-    protected = remote_head(args.remote)
-
-    named = set(args.also)
-    merged, kept, forced, held = [], [], [], []
-
-    for ref in remote_branches(args.remote, args.base):
+def classify(remote: str, base: str, named: set[str]) -> Classes:
+    """Every branch on REMOTE, sorted into HELD, MERGED, AHEAD-kept and AHEAD-forced."""
+    prefix = f"{remote}/"
+    protected = remote_head(remote)
+    classes = Classes()
+    for ref in remote_branches(remote, base):
         short = ref[len(prefix):]
+        unique = [] if ref == protected else ahead(ref, base)
         if ref == protected:
-            held.append(short)
-            continue
-        unique = ahead(ref, args.base)
-        if not unique:
-            merged.append(short)
+            classes.held.append(short)
+        elif not unique:
+            classes.merged.append(short)
         elif short in named:
-            forced.append((short, unique))
+            classes.forced.append((short, unique))
         else:
-            kept.append((short, unique))
+            classes.kept.append((short, unique))
+    return classes
 
-    for short in sorted(held):
-        print(f"HELD    {short}  ({args.remote}/HEAD points here)")
-    for short, unique in sorted(kept):
-        print(f"KEEP    {short}  ({len(unique)} ahead)")
-    for short in sorted(merged):
-        print(f"MERGED  {short}")
-    for short, unique in sorted(forced):
-        print(f"FORCED  {short}  ({len(unique)} ahead, named to --also)")
-        for line in unique:
-            print(f"          {line}")
 
-    missing = named - {s for s, _ in forced} - set(merged)
-    if missing:
-        print(
-            f"\n--also named {', '.join(sorted(missing))}, which is not a "
-            f"branch on {args.remote}",
-            file=sys.stderr,
-        )
-        return 2
+def report(remote: str, c: Classes) -> list[str]:
+    lines = [f"HELD    {s}  ({remote}/HEAD points here)" for s in sorted(c.held)]
+    lines += [f"KEEP    {s}  ({len(u)} ahead)" for s, u in sorted(c.kept)]
+    lines += [f"MERGED  {s}" for s in sorted(c.merged)]
+    for short, unique in sorted(c.forced):
+        lines.append(f"FORCED  {short}  ({len(unique)} ahead, named to --also)")
+        lines += [f"          {line}" for line in unique]
+    return lines
 
-    doomed = merged + [s for s, _ in forced]
-    print(f"\n{len(doomed)} to delete, {len(kept)} kept")
-    if not args.go:
-        print("dry run -- pass --go to delete")
-        return 0
 
-    failed = []
+def delete(remote: str, doomed: list[str]) -> int:
+    """Delete each branch; 1 if any delete failed. One failure never stops the rest."""
+    failed = 0
     for short in doomed:
-        # check=False deliberately: one protected or already-gone branch must
-        # not abandon the rest of the list half-pruned.
-        r = subprocess.run(
-            ["git", "push", args.remote, "--delete", short],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        r = subprocess.run(["git", "push", remote, "--delete", short],
+                           capture_output=True, text=True, check=False)
         if r.returncode == 0:
             print(f"deleted {short}")
         else:
-            failed.append(short)
+            failed += 1
             print(f"FAILED  {short}: {r.stderr.strip()}", file=sys.stderr)
-
     return 1 if failed else 0
+
+
+def _parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    ap.add_argument("--remote", required=True, help="the remote to prune")
+    ap.add_argument("--base", required=True,
+                    help="the ref a branch must be an ancestor of, e.g. origin/master")
+    ap.add_argument("--also", action="append", default=[],
+                    help="delete this branch even though it is AHEAD; short name, "
+                         "repeatable. Its orphaned commits are printed first.")
+    ap.add_argument("--go", action="store_true",
+                    help="actually delete. Without it nothing is pushed.")
+    return ap
+
+
+def main() -> int:
+    set_proc_name("prune-branches")
+    args = _parser().parse_args()
+    validate_base(args.remote, args.base)
+    named = set(args.also)
+    c = classify(args.remote, args.base, named)
+    for line in report(args.remote, c):
+        print(line)
+    missing = named - {s for s, _ in c.forced} - set(c.merged)
+    if missing:
+        print(f"\n--also named {', '.join(sorted(missing))}, which is not a "
+              f"branch on {args.remote}", file=sys.stderr)
+        return 2
+    doomed = c.merged + [s for s, _ in c.forced]
+    print(f"\n{len(doomed)} to delete, {len(c.kept)} kept")
+    if not args.go:
+        print("dry run -- pass --go to delete")
+        return 0
+    return delete(args.remote, doomed)
 
 
 if __name__ == "__main__":
