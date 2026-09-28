@@ -34,7 +34,9 @@ function isModuleFile(filePath) {
     const src = readFileSync(filePath, "utf8");
     // Match import/export only at the start of a line (ignoring leading whitespace)
     // to avoid false positives from comments like "export/import"
-    return /^\s*(import\s+|export\s+(default\s+|const\s+|let\s+|var\s+|function\s+|class\s+|\{))/m.test(src);
+    return /^\s*(import\s+|export\s+(default\s+|const\s+|let\s+|var\s+|function\s+|class\s+|\{))/m.test(
+      src,
+    );
   } catch {
     return false;
   }
@@ -60,33 +62,59 @@ function collectFiles(targetPath) {
   return files;
 }
 
+// The quality limits, as warnings.
+const LIMITS = {
+  fileLines: 500,
+  complexity: 25,
+  depth: 5,
+  functionLines: 200,
+  statements: 50,
+  params: 6,
+};
+
 // Common rules: quality + correctness
 const commonRules = {
   // Correctness
-  "no-undef":              "error",
-  "no-unused-vars":        ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" }],
-  "eqeqeq":                ["error", "always", { null: "ignore" }],
-  "no-eval":               "error",
-  "no-implied-eval":       "error",
-  "no-new-func":           "error",
-  "no-shadow":             "warn",
-  "no-redeclare":          "error",
+  "no-undef": "error",
+  "no-unused-vars": [
+    "error",
+    { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" },
+  ],
+  eqeqeq: ["error", "always", { null: "ignore" }],
+  "no-eval": "error",
+  "no-implied-eval": "error",
+  "no-new-func": "error",
+  "no-shadow": "warn",
+  "no-redeclare": "error",
 
   // Quality
-  "max-lines":             ["warn", { max: 500, skipBlankLines: true, skipComments: true }],
-  "complexity":            ["warn", 25],
-  "max-depth":             ["warn", 5],
-  "max-lines-per-function": ["warn", { max: 200, skipBlankLines: true, skipComments: true }],
-  "max-statements":        ["warn", 50],
-  "max-params":            ["warn", 6],
-  "no-magic-numbers":      ["warn", { ignore: [-1, 0, 1, 2], ignoreArrayIndexes: true, ignoreDefaultValues: true }],
+  "max-lines": [
+    "warn",
+    { max: LIMITS.fileLines, skipBlankLines: true, skipComments: true },
+  ],
+  complexity: ["warn", LIMITS.complexity],
+  "max-depth": ["warn", LIMITS.depth],
+  "max-lines-per-function": [
+    "warn",
+    { max: LIMITS.functionLines, skipBlankLines: true, skipComments: true },
+  ],
+  "max-statements": ["warn", LIMITS.statements],
+  "max-params": ["warn", LIMITS.params],
+  "no-magic-numbers": [
+    "warn",
+    {
+      ignore: [-1, 0, 1, 2],
+      ignoreArrayIndexes: true,
+      ignoreDefaultValues: true,
+    },
+  ],
 
   // Style
-  "prefer-const":          "warn",
-  "no-var":                "warn",
-  "no-console":            ["warn", { allow: ["warn", "error"] }],
-  "object-shorthand":      "warn",
-  "prefer-template":       "warn",
+  "prefer-const": "warn",
+  "no-var": "warn",
+  "no-console": ["warn", { allow: ["warn", "error"] }],
+  "object-shorthand": "warn",
+  "prefer-template": "warn",
 };
 
 import globals from "globals";
@@ -124,10 +152,10 @@ async function lintFile(filePath) {
     // TypeScript files: use typescript-eslint parser
     // Disable rules that conflict with TS type system
     const tsRules = { ...commonRules };
-    delete tsRules["no-undef"];          // TS handles this
-    delete tsRules["no-unused-vars"];    // use @typescript-eslint version instead
-    delete tsRules["no-redeclare"];      // TS handles this
-    delete tsRules["no-shadow"];         // TS handles this
+    delete tsRules["no-undef"]; // TS handles this
+    delete tsRules["no-unused-vars"]; // use @typescript-eslint version instead
+    delete tsRules["no-redeclare"]; // TS handles this
+    delete tsRules["no-shadow"]; // TS handles this
 
     config.push({
       files: ["**"],
@@ -142,14 +170,30 @@ async function lintFile(filePath) {
       },
       rules: {
         ...tsRules,
-        "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" }],
+        "@typescript-eslint/no-unused-vars": [
+          "error",
+          {
+            argsIgnorePattern: "^_",
+            varsIgnorePattern: "^_",
+            caughtErrors: "none",
+          },
+        ],
       },
     });
   } else {
-    const scriptOverrides = isModule ? {} : {
-      // In script mode, top-level functions/vars are global exports, not truly unused
-      "no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" }],
-    };
+    const scriptOverrides = isModule
+      ? {}
+      : {
+          // In script mode, top-level functions/vars are global exports, not truly unused
+          "no-unused-vars": [
+            "warn",
+            {
+              argsIgnorePattern: "^_",
+              varsIgnorePattern: "^_",
+              caughtErrors: "none",
+            },
+          ],
+        };
     config.push({
       files: ["**"],
       languageOptions: {
@@ -181,7 +225,9 @@ for (const f of files) {
   } catch (err) {
     allResults.push({
       filePath: f,
-      messages: [{ ruleId: null, severity: 2, message: err.message, line: 0, column: 0 }],
+      messages: [
+        { ruleId: null, severity: 2, message: err.message, line: 0, column: 0 },
+      ],
       errorCount: 1,
       warningCount: 0,
       fixableErrorCount: 0,
@@ -190,4 +236,4 @@ for (const f of files) {
   }
 }
 
-console.log(JSON.stringify(allResults));
+process.stdout.write(`${JSON.stringify(allResults)}\n`);

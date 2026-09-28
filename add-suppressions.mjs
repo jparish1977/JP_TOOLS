@@ -9,7 +9,7 @@
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
-const files = process.argv.slice(2).map(f => resolve(f));
+const files = process.argv.slice(2).map((f) => resolve(f));
 
 for (const file of files) {
   const lines = readFileSync(file, "utf8").split("\n");
@@ -28,15 +28,27 @@ for (const file of files) {
 
     // no-eval
     if (line.includes("eval(")) {
-      lines.splice(i, 0, `${indent}// eslint-disable-next-line no-eval -- user-defined expression`);
+      lines.splice(
+        i,
+        0,
+        `${indent}// eslint-disable-next-line no-eval -- user-defined expression`,
+      );
       added++;
       continue;
     }
 
     // no-redeclare: var that shadows a parameter or earlier declaration
     // These are the patterns lebab flagged as "Unable to transform"
-    if (/^\s+var\s+(geometry|presetName|c|newX|newY|particleVector|index|len|pad|dir)\b/.test(line)) {
-      lines.splice(i, 0, `${indent}// eslint-disable-next-line no-redeclare -- var re-declaration in shared scope`);
+    if (
+      /^\s+var\s+(geometry|presetName|c|newX|newY|particleVector|index|len|pad|dir)\b/.test(
+        line,
+      )
+    ) {
+      lines.splice(
+        i,
+        0,
+        `${indent}// eslint-disable-next-line no-redeclare -- var re-declaration in shared scope`,
+      );
       added++;
       continue;
     }
@@ -45,6 +57,6 @@ for (const file of files) {
   if (added > 0) {
     writeFileSync(file, lines.join("\n"));
     const name = file.replace(/.*[/\\]/, "");
-    console.log(`${name}: ${added} suppressions added`);
+    process.stdout.write(`${name}: ${added} suppressions added\n`);
   }
 }

@@ -42,20 +42,20 @@ export default [
     },
     rules: {
       // Errors
-      "no-undef":           "error",
-      "no-unused-vars":     ["error", { argsIgnorePattern: "^_" }],
+      "no-undef": "error",
+      "no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
       "no-implicit-globals": "error",
-      "eqeqeq":             ["error", "always", { null: "ignore" }],
-      "no-eval":            "error",
-      "no-implied-eval":    "error",
+      eqeqeq: ["error", "always", { null: "ignore" }],
+      "no-eval": "error",
+      "no-implied-eval": "error",
 
       // Warnings: style / quality
-      "prefer-const":       "warn",
-      "no-var":             "warn",
-      "no-console":         ["warn", { allow: ["warn", "error"] }],
-      "curly":              ["warn", "multi-line"],
-      "object-shorthand":   "warn",
-      "prefer-template":    "warn",
+      "prefer-const": "warn",
+      "no-var": "warn",
+      "no-console": ["warn", { allow: ["warn", "error"] }],
+      curly: ["warn", "multi-line"],
+      "object-shorthand": "warn",
+      "prefer-template": "warn",
     },
   },
 ];

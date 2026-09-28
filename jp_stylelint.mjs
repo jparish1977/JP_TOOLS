@@ -11,7 +11,9 @@ import { existsSync } from "fs";
 
 const [target] = process.argv.slice(2);
 if (!target) {
-  console.error(JSON.stringify({ error: "Usage: node jp_stylelint.mjs <path>" }));
+  console.error(
+    JSON.stringify({ error: "Usage: node jp_stylelint.mjs <path>" }),
+  );
   process.exit(2);
 }
 
@@ -27,9 +29,9 @@ const config = {
   extends: ["stylelint-config-standard"],
   rules: {
     // Relax rules that are noisy for hand-written CSS
-    "color-named":               null,
-    "alpha-value-notation":      null,
-    "color-function-notation":   null,
+    "color-named": null,
+    "alpha-value-notation": null,
+    "color-function-notation": null,
     "declaration-block-no-redundant-longhand-properties": null,
   },
 };
@@ -55,7 +57,7 @@ try {
       text: w.text,
     })),
   }));
-  console.log(JSON.stringify(out));
+  process.stdout.write(`${JSON.stringify(out)}\n`);
 } catch (err) {
   console.error(JSON.stringify({ error: err.message }));
   process.exit(1);
