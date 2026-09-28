@@ -487,7 +487,7 @@ Principles are language-agnostic. Tools are language-specific. `check.py` auto-d
 
 Checklist for greenfield work that should inherit this discipline:
 
-0. **Search before you scaffold (§2.10).** Ask the fleet record, the platform's own documentation, and the tracker whether this exists already. Numbered zero because it is the only step that can make the other nine unnecessary, and because it is the step whose omission never produces a failure -- a duplicate passes every gate below. `~/projects/another repo/bin/pbq-grep --phrase TERM -- <command>`, by full path, and `pbq scope` before believing any zero.
+0. **Search before you scaffold (§2.10).** Ask the fleet record, the platform's own documentation, and the tracker whether this exists already. Numbered zero because it is the only step that can make the other ten unnecessary, and because it is the step whose omission never produces a failure -- a duplicate passes every gate below. `~/projects/another repo/bin/pbq-grep --phrase TERM -- <command>`, by full path, and `pbq scope` before believing any zero.
 
 1. **Three-or-fewer packages.** Minimum: domain. If the project has IO, add infrastructure. If the project has a UI or CLI, add delivery. Don't start with one mega-package that mixes layers.
 
@@ -506,6 +506,20 @@ Checklist for greenfield work that should inherit this discipline:
 8. **Composition root is a single file.** Service provider in Laravel, `main()` in Python, app entry in JS. One place where "this project uses these adapters" is declared.
 
 9. **Declare the tools the GATE itself runs, in a manifest, pinned.** Not in a CI `pip install` line, not in a README, not in a wiki. A manifest a person can read, install from, and diff. Then add the check that every declared pin is actually installed at that version, because a manifest nobody verifies is a second thing that can be quietly wrong.
+
+10. **Declare the project itself in its language's project file, from the first commit.** `pyproject.toml` for Python, `package.json` for JS, `composer.json` for PHP: its name, the language version it needs, and its runtime dependencies. Item 9 covers the gate's tools, not the project. The minimum for Python:
+
+    ```toml
+    [project]
+    name = "example"
+    version = "0.1.0"
+    requires-python = ">=3.12"
+    dependencies = []
+    ```
+
+    Write `dependencies = []` when the project uses only the standard library; an empty list is a declaration, a missing one is not. Take `requires-python` from what the code uses, not from whatever the machine has. Add `[project.scripts]` when the project installs a command.
+
+    **Leave `[tool.ruff]` and `[tool.mypy]` out unless the project means to replace the JP_TOOLS defaults.** Either table makes the file that tool's config, and `check.py` then uses the project's settings instead of the defaults.
 
 ### Declare the instrument's own dependencies
 
@@ -860,6 +874,11 @@ of them because they treated adoption as an event rather than a rate.
     not the 25-minute launch pass. And these tests freeze bugs deliberately, so
     deleting one the day you decide the behaviour was wrong is correct
     behaviour rather than a lapse.
+
+13. **Add the project file with the first change, not in a sweep.** §7.10 on
+    a repo that has none. It is a few lines and changes nothing that runs, so
+    it rides along with whatever change first touches the repo, per item 7.
+    Fill `dependencies` from the imports, not from memory.
 
 The through-line: **the discipline arrives one file at a time, or it does not
 arrive.** Every rule in §7 is affordable on a repo with no history. On a repo
