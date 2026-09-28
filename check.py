@@ -18,6 +18,7 @@ Exit codes:
 
 import argparse
 import ast
+import configparser
 import fnmatch
 import io
 import json
@@ -28,6 +29,7 @@ import subprocess
 import sys
 import time
 import tokenize
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -53,10 +55,11 @@ def _ruff_config_args(target: str) -> list[str]:
     ruff already implements precedence when it discovers a config itself, so
     passing --config on top of a project's own file would override the project
     rather than defer to it. Supply the default only when there is nothing to
-    discover. Note a bare pyproject.toml counts: --config would fail on one
-    with no [tool.ruff] section, and ruff handles that case correctly alone.
+    discover. A pyproject.toml is the project's ruff config only when it has a
+    [tool.ruff] table; ruff skips one without, and so does this.
     """
-    if _find_project_config(target, ["ruff.toml", ".ruff.toml", "pyproject.toml"]):
+    if _find_project_config(target, ["ruff.toml", ".ruff.toml", "pyproject.toml"],
+                            {"pyproject.toml": "tool.ruff"}):
         return []
     shared = Path(__file__).parent / "configs" / "ruff.toml"
     return ["--config", str(shared)] if shared.exists() else []
@@ -145,10 +148,12 @@ def _mypy_config_args(target: str) -> list[str]:
     Nothing passed this before, so configs/mypy.ini was dead file and the gate
     ran on mypy's defaults while README described the file and METHODOLOGY
     described something stricter than either. Project-local config wins, same
-    precedence as _ruff_config_args.
+    precedence as _ruff_config_args, and setup.cfg and pyproject.toml count
+    only when they carry mypy's section, as mypy itself reads them.
     """
     if _find_project_config(target, ["mypy.ini", ".mypy.ini", "setup.cfg",
-                                     "pyproject.toml"]):
+                                     "pyproject.toml"],
+                            {"setup.cfg": "mypy", "pyproject.toml": "tool.mypy"}):
         return []
     shared = Path(__file__).parent / "configs" / "mypy.ini"
     return ["--config-file", str(shared)] if shared.exists() else []
@@ -346,14 +351,47 @@ def _php_cmd() -> str | None:
     return shutil.which("php") or shutil.which("php.exe")
 
 
-def _find_project_config(target: str, filenames: list[str]) -> Path | None:
-    """Walk up from target looking for a project-local config file."""
+def _declares_section(path: Path, section: str) -> bool:
+    """Whether a config file shared by several tools carries SECTION.
+
+    SECTION is a dotted TOML table for a .toml file (`tool.ruff`) and an INI
+    section name otherwise (`mypy`). A file that cannot be read or parsed
+    counts as declaring it: the tool is then left to read the same file and
+    report why it cannot, instead of the gate quietly running the defaults.
+    """
+    try:
+        if path.suffix == ".toml":
+            with path.open("rb") as fh:
+                table: Any = tomllib.load(fh)
+            for key in section.split("."):
+                table = table.get(key) if isinstance(table, dict) else None
+            return table is not None
+        parser = configparser.ConfigParser()
+        parser.read(path, encoding="utf-8")
+        return parser.has_section(section)
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, configparser.Error):
+        # reason: unreadable counts as the project's, so the tool reports the broken file
+        return True
+
+
+def _find_project_config(target: str, filenames: list[str],
+                         sections: dict[str, str] | None = None) -> Path | None:
+    """Walk up from target looking for a project-local config file.
+
+    A file named in SECTIONS counts only if it carries that section, which is
+    how the tools themselves read a shared file: ruff skips a pyproject.toml
+    with no [tool.ruff] and mypy a setup.cfg with no [mypy]. Counting such a
+    file would hand the tool no config at all and switch off every rule the
+    JP_TOOLS defaults add.
+    """
+    sections = sections or {}
     p = Path(target).resolve()
     start = p if p.is_dir() else p.parent
     for directory in (start, *start.parents):
         for name in filenames:
             candidate = directory / name
-            if candidate.exists():
+            if candidate.exists() and (name not in sections
+                                       or _declares_section(candidate, sections[name])):
                 return candidate
     return None
 
