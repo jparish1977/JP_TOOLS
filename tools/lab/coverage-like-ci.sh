@@ -16,6 +16,9 @@
 #   render.py, config.py and model.py 100%, purge.py and read.py 93%,
 #   spool-audit.py 97%, exit 0, and no venv, .coverage file or /tmp entry
 #   left afterwards. The same numbers CI's Coverage step printed for master.
+#   Restructured into three functions (its top level measured as main was
+#   over the complexity line) and re-run: the same numbers, exit 0, nothing
+#   left in the tree.
 #
 # NOT TESTED AGAINST: the .pth's effect, by a run without it (the workflow's
 #   own comment says spool-audit.py measured 71% untraced, 82% traced, on an
