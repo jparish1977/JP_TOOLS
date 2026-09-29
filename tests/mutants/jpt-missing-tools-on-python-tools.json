@@ -1,0 +1,15 @@
+{
+  "about": "A missing Python runner names requirements-dev.txt. Run: mutate-on-target.py TREE jpcheck/python_tools.py tests/test_missing_tool_messages.py tests/mutants/jpt-missing-tools-on-python-tools.json",
+  "mutants": [
+    {
+      "name": "ruff missing says nothing about requirements-dev.txt",
+      "edits": [["        return _tool_missing(\"ruff\", PIP_INSTALL)", "        return _tool_missing(\"ruff\")"]],
+      "target": "t.py: ruff is unavailable by its own name, naming requirements-dev.txt"
+    },
+    {
+      "name": "mypy missing is reported under another name",
+      "edits": [["        return _tool_missing(\"mypy\", PIP_INSTALL)", "        return _tool_missing(f\"mypy ({PIP_INSTALL})\", PIP_INSTALL)"]],
+      "target": "t.py: mypy is unavailable by its own name, naming requirements-dev.txt"
+    }
+  ]
+}

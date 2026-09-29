@@ -15,6 +15,9 @@ from jpcheck.common import (
     _tool_missing,
 )
 
+# What a missing PHP tool tells the reader to run: composer.json declares them.
+COMPOSER_INSTALL = "run: composer install in JP_TOOLS"
+
 
 def run_phpstan(target: str) -> dict[str, Any]:
     php  = _php_cmd()
@@ -22,7 +25,7 @@ def run_phpstan(target: str) -> dict[str, Any]:
     if not php:
         return _tool_missing("php")
     if not bin_:
-        return _tool_missing("phpstan (run: composer install in JP_TOOLS)")
+        return _tool_missing("phpstan", COMPOSER_INSTALL)
     cfg = _find_project_config(target, ["phpstan.neon", "phpstan.neon.dist"])
     if cfg is None:
         cfg = TOOLS_ROOT / "configs" / "phpstan.neon"
@@ -61,7 +64,7 @@ def run_phpcs(target: str) -> dict[str, Any]:
     if not php:
         return _tool_missing("php")
     if not bin_:
-        return _tool_missing("phpcs (run: composer install in JP_TOOLS)")
+        return _tool_missing("phpcs", COMPOSER_INSTALL)
     cfg = _find_project_config(target, ["phpcs.xml", "phpcs.xml.dist", ".phpcs.xml", ".phpcs.xml.dist"])
     if cfg is None:
         cfg = TOOLS_ROOT / "configs" / "phpcs.xml"
@@ -97,7 +100,7 @@ def run_rector(target: str) -> dict[str, Any]:
     if not php:
         return _tool_missing("php")
     if not bin_:
-        return _tool_missing("rector (run: composer install in JP_TOOLS)")
+        return _tool_missing("rector", COMPOSER_INSTALL)
     cfg = _find_project_config(target, ["rector.php", "rector.php.dist"])
     if cfg is None:
         cfg = TOOLS_ROOT / "configs" / "rector.php"

@@ -197,12 +197,19 @@ def _status(issues: list[dict[str, Any]], returncode: int | None = None) -> str:
     return "fail" if issues else "pass"
 
 
-def _tool_missing(name: str) -> dict[str, Any]:
+def _tool_missing(name: str, install: str = "") -> dict[str, Any]:
+    """The report for a check whose tool is not installed.
+
+    `tool` stays the check's own name, so a reader looking a check up by name
+    finds it whether or not it ran. How to install it goes in `note`, which
+    check.py prints on stderr for every check that did not run.
+    """
     return {
         "tool":   name,
         "status": "unavailable",
         "issues": [],
-        "note":   f"'{name}' not found on PATH: install it to enable this check",
+        "note":   f"'{name}' not found: {install}" if install
+                  else f"'{name}' not found on PATH: install it to enable this check",
     }
 
 

@@ -33,9 +33,13 @@ def _ruff_config_args(target: str) -> list[str]:
     return ["--config", str(shared)] if shared.exists() else []
 
 
+# What a missing Python runner tells the reader to run: the pins live there.
+PIP_INSTALL = "pip install -r requirements-dev.txt"
+
+
 def run_ruff(target: str) -> dict[str, Any]:
     if not shutil.which("ruff"):
-        return _tool_missing("ruff")
+        return _tool_missing("ruff", PIP_INSTALL)
     result = subprocess.run(
         ["ruff", "check", *_ruff_config_args(target),
          "--output-format", "json", target],
@@ -103,7 +107,7 @@ def _mypy_config_args(target: str) -> list[str]:
 
 def run_mypy(target: str) -> dict[str, Any]:
     if not shutil.which("mypy"):
-        return _tool_missing("mypy")
+        return _tool_missing("mypy", PIP_INSTALL)
     result = subprocess.run(
         ["mypy", "--show-error-codes", "--no-error-summary",
          "--ignore-missing-imports", *_mypy_config_args(target), target],
@@ -168,7 +172,7 @@ def _pip_audit_issues(stdout: str, req_file: str | None) -> list[dict[str, Any]]
 def run_pip_audit(target: str) -> dict[str, Any]:
     cmd = shutil.which("pip-audit") or shutil.which("pip-audit.exe")
     if not cmd:
-        return _tool_missing("pip-audit (pip install pip-audit)")
+        return _tool_missing("pip-audit", PIP_INSTALL)
     req_file = _requirements_file(target)
     args = [cmd, "--format", "json", *(["-r", req_file] if req_file else [])]
     result = subprocess.run(args, capture_output=True, text=True, check=False)

@@ -130,6 +130,24 @@ sys.exit(int(os.environ.get("FAKE_NODE_RC", "0")))
 """
 
 
+def tree_with_packages(tmp: Path) -> Path:
+    """A copy of this checkout whose node_modules holds (empty) eslint and stylelint.
+
+    check.py reports a JS tool whose package is in no node_modules as not
+    installed before starting node. These cases are about a runner that WAS
+    started and failed, so the package must look present, on any box: CI's
+    Python job has no node_modules, and a worktree run with only the fake node
+    on PATH has no git to find the main checkout's.
+    """
+    tree = tmp / "_tree"
+    if not tree.exists():
+        shutil.copytree(CHECK.parent, tree, symlinks=True, ignore=shutil.ignore_patterns(
+            ".git", "vendor", "node_modules", "__pycache__"))
+        for package in ("eslint", "stylelint"):
+            (tree / "node_modules" / package).mkdir(parents=True)
+    return tree
+
+
 def run_with_fake_node(tmp: Path, target: str, tool: str, out: str, err: str,
                        rc: int) -> tuple[int, dict[str, Any]]:
     # A fake `node` alone on PATH, so the runner script is "found" and its
@@ -141,7 +159,8 @@ def run_with_fake_node(tmp: Path, target: str, tool: str, out: str, err: str,
     node.chmod(0o755)
     env = dict(os.environ, PATH=str(bindir), FAKE_NODE_OUT=out,
                FAKE_NODE_ERR=err, FAKE_NODE_RC=str(rc))
-    r = subprocess.run([sys.executable, str(CHECK), target, "--tools", tool],
+    r = subprocess.run([sys.executable, str(tree_with_packages(tmp) / "check.py"), target,
+                        "--tools", tool],
                        cwd=tmp, env=env, capture_output=True, text=True,
                        check=False, timeout=120)
     try:

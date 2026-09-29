@@ -39,7 +39,7 @@ def run_cppcheck(target: str) -> dict[str, Any]:
     without hundreds of megabytes of board support installed.
     """
     if not shutil.which("cppcheck"):
-        return _tool_missing("cppcheck (apt install cppcheck)")
+        return _tool_missing("cppcheck", "apt install cppcheck (requirements-system.txt)")
     suppress = list(_CPPCHECK_SUPPRESS)
     lang_args = []
     if Path(target).suffix.lower() == ".ino":
@@ -87,7 +87,7 @@ def run_shellcheck(target: str) -> dict[str, Any]:
     the arm finds across a set of repos.
     """
     if not shutil.which("shellcheck"):
-        return _tool_missing("shellcheck (apt install shellcheck)")
+        return _tool_missing("shellcheck", "apt install shellcheck (requirements-system.txt)")
     result = subprocess.run(["shellcheck", "--format=json1", target],
                             capture_output=True, text=True, check=False,
                             env=_plain_env())

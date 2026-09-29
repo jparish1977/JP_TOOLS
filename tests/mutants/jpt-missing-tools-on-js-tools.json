@@ -1,0 +1,15 @@
+{
+  "about": "A missing JS tool says how to install it. Run: mutate-on-target.py TREE jpcheck/js_tools.py tests/test_missing_tool_messages.py tests/mutants/jpt-missing-tools-on-js-tools.json",
+  "mutants": [
+    {
+      "name": "the runner starts without its package",
+      "edits": [["    if not any((modules / tool).is_dir() for modules in node_module_roots()):", "    if False:"]],
+      "target": "t.js: eslint is unavailable by its own name, naming npm install"
+    },
+    {
+      "name": "prettier missing says nothing about npm",
+      "edits": [["        return _tool_missing(\"prettier\", NPM_INSTALL)", "        return _tool_missing(\"prettier\")"]],
+      "target": "t.js: prettier is unavailable by its own name, naming npm install"
+    }
+  ]
+}

@@ -21,6 +21,9 @@ from jpcheck.common import (
 
 _ESLINT_DISABLE = re.compile(r"eslint-disable(?:-next-line|-line)?\s+([^\s*]+)")
 
+# What a missing JS tool tells the reader to run: package.json declares them.
+NPM_INSTALL = "run: npm install in JP_TOOLS"
+
 
 def _eslint_source_files(target: str) -> list[Path]:
     """The file itself, or every .js/.mjs/.html under a directory outside vendored code."""
@@ -77,9 +80,14 @@ def _run_node_runner(tool: str, script: str,
     runner = TOOLS_ROOT / script
     node = shutil.which("node") or shutil.which("node.exe")
     if not node:
-        return _tool_missing(f"node (required for {tool})")
+        return _tool_missing(tool, "needs node, which is not on PATH")
     if not runner.exists():
-        return _tool_missing(script)
+        return _tool_missing(tool, f"{script} is missing from this checkout")
+    # The runner imports the package of the same name. With it in no tool
+    # root's node_modules, node would fail with a raw module error; say what
+    # is missing and how to get it, as the PHP tools do.
+    if not any((modules / tool).is_dir() for modules in node_module_roots()):
+        return _tool_missing(tool, NPM_INSTALL)
     result = subprocess.run([node, *_resolve_args(), str(runner), target], capture_output=True,
                             text=True, check=False, cwd=str(TOOLS_ROOT), env=_runner_env())
     return _node_runner_failed(tool, result) or result
@@ -166,7 +174,7 @@ def run_stylelint(target: str) -> dict[str, Any]:
 def run_prettier(target: str) -> dict[str, Any]:
     cmd = _node_bin("prettier")
     if not cmd:
-        return _tool_missing("prettier")
+        return _tool_missing("prettier", NPM_INSTALL)
     result = subprocess.run([cmd, "--check", target], capture_output=True, text=True, check=False, env=_plain_env())
     issues = []
     for line in (strip_ansi(result.stdout + result.stderr)).splitlines():
