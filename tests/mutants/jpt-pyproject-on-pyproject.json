@@ -1,5 +1,5 @@
 {
-  "about": "pyproject.toml, each property tests/test_pyproject.py claims to hold. Run: mutate-on-target.py TREE pyproject.toml tests/test_pyproject.py tests/mutants/jpt-pyproject-on-pyproject.json",
+  "about": "pyproject.toml, each property tests/test_pyproject.py claims to hold. Run: mutate-on-target.py TREE pyproject.toml tests/test_pyproject.py tests/mutants/jpt-pyproject-on-pyproject.json. TREE must be a git clone, not an archive: the test lists the tracked files.",
   "mutants": [
     {
       "name": "the optional import is no longer declared",
