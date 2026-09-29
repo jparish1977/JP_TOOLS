@@ -35,7 +35,6 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `ast-before-after.py` | which functions a cleanup restructured between two refs, drawn before and after, with complexity and check.py findings by rule |
 | `prune-merged-branches.py` | which remote branches hold nothing the base does not already have, and which only LOOK unmerged because they landed rebased |
 | `gate-files.py` | what check.py says about each named or tracked file, one line each, judged against a base ref as CI does |
-| `run-mutant-specs.sh` | is every mutant in every `tests/mutants` spec still killed on target at HEAD, in a throwaway clone |
 | `coverage-like-ci.sh` | what CI's gated spool-audit coverage will be, measured as CI measures it, in a throwaway venv |
 | `import-every-file.py` | which tracked Python files fail at import time after code moved between files |
 | `by-path-consumers.py` | which other repos load one of this repo's scripts by path, and what they read off it |

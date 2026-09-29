@@ -16,7 +16,15 @@ restores it, so give it a scratch copy. A mutant counts only when the test
 fails on the check it names; one killed by some other check, or by a crash,
 has shown nothing.
 
-The runner, `mutate-on-target.py`, is not part of this repository.
+The runner, `mutate-on-target.py`, is not part of this repository, and
+neither is its batch driver, `mutate-spec.py`, which runs every spec at once,
+each in its own copy of the tree, taking each target and test from the spec's
+run line:
+
+    mutate-spec.py ROOT tests/mutants/*.json
+
+ROOT is left untouched. Point `$MUTATE_OUT_DIR` at a scratch directory; the
+runner's full output for each spec is written there.
 
 When code moves or changes, a spec's `edits` stop matching and the runner
 refuses to start. Re-anchor the mutant to the new code with the SAME mutation;
