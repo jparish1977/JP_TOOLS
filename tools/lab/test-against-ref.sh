@@ -26,6 +26,13 @@
 #   three check.py tests against the refs before their fixes; those tests
 #   passed on the fixed trees. That form also exited 1 at the FIXED commit
 #   for any test importing tests/_harness.py, which is why it changed.
+#   tests/test_spool_audit_render.py against origin/master -> exit 1 on the
+#   8 checks of the VERDICT-in-names fix, and the scratch copy it made was
+#   gone afterwards; with a SCRATCH_DIR given, that directory was kept.
+#
+# CLEANUP: a scratch directory this makes is removed on exit, interrupt or
+#   termination, so a run leaves no copy of the repo behind. One passed as
+#   SCRATCH_DIR is the caller's and is kept, for reading afterwards.
 #
 # NOT TESTED AGAINST: the old tree has no node_modules or vendor/, so a test
 #   needing real eslint or phpstan cannot run there. A test whose support
@@ -40,7 +47,14 @@ set -eu
 ref=$1
 test=$2
 root=$(git rev-parse --show-toplevel)
-out=${3:-$(mktemp -d)}
+if [ -n "${3:-}" ]; then
+  out=$3
+else
+  out=$(mktemp -d)
+  trap 'rm -rf "$out"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+fi
 mkdir -p "$out"
 git -C "$root" archive "$ref" | tar -x -C "$out"
 mkdir -p "$out/tests"
