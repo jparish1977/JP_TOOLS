@@ -1,0 +1,25 @@
+{
+  "about": "A directory named with --lang or --tools runs each single-file tool once per file. Run: mutate-on-target.py TREE jpcheck/runs.py tests/test_check_lang_on_directory.py tests/mutants/jpt-lang-on-directory-on-runs.json",
+  "mutants": [
+    {
+      "name": "the directory is handed to every tool whole again",
+      "edits": [["    if Path(target).is_dir():\n        groups, _ = _collect_files(target)", "    if False:\n        groups, _ = _collect_files(target)"]],
+      "target": "--tools directive-reason on a directory: each served file, none ignored"
+    },
+    {
+      "name": "--lang no longer narrows the files",
+      "edits": [["    langs = [lang] if lang != \"unknown\" else [", "    langs = list(groups) if lang != \"unknown\" else ["]],
+      "target": "--lang shell on a directory: its shell files only"
+    },
+    {
+      "name": "ignored files are read",
+      "edits": [["        _drop_ignored(groups, root, ignores)\n        checks = [c", "        checks = [c"]],
+      "target": "--tools directive-reason on a directory: each served file, none ignored"
+    },
+    {
+      "name": "a tool with no runner is dropped",
+      "edits": [["            checks.extend(_run_tools([name], target))", "            continue"]],
+      "target": "a tool with no runner is named, not dropped"
+    }
+  ]
+}

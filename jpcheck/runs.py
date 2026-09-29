@@ -40,15 +40,29 @@ def tool_names(lang: str, tools_arg: str | None, audit: bool) -> list[str]:
     return names
 
 
+def _served(name: str, lang: str, groups: dict[str, list[str]]) -> list[str]:
+    """The files in GROUPS the tool NAME runs on: LANG's, or with no language
+    named (--tools alone), those of every language the tool serves."""
+    langs = [lang] if lang != "unknown" else [
+        g for g in groups if name in DEFAULT_TOOLS.get(g, []) + AUDIT_TOOLS.get(g, [])]
+    return [f for g in langs for f in groups.get(g, [])]
+
+
 def check_target(target: str, lang: str, names: list[str], root: Path,
                  ignores: list[Ignore]) -> dict[str, Any]:
-    """Run NAMES on one target, handed to each tool whole."""
-    checks = _run_tools(names, target)
-    # A directory named with --tools or --lang is handed to each tool whole,
-    # so ignored files are found there too: drop their findings.
+    """Run NAMES on one target: a file, or a directory named with --lang or --tools.
+
+    A directory goes whole only to the tools that discover files themselves.
+    Every other tool reads one file, so it runs once per file it serves, as in
+    a plain directory run; handed the directory, it failed to read it.
+    """
     if Path(target).is_dir():
-        for c in checks:
-            _drop_ignored_issues(c, root, ignores)
+        groups, _ = _collect_files(target)
+        _drop_ignored(groups, root, ignores)
+        checks = [c for name in names for c in _language_checks(
+            target, _served(name, lang, groups), [name], root, ignores)]
+    else:
+        checks = _run_tools(names, target)
     _mark_lab_exempt(checks)
     return {"target": target, "language": lang, "checks": checks,
             "summary": _summarize(checks)}
@@ -112,8 +126,8 @@ def _language_checks(target: str, files: list[str], names: list[str], root: Path
     for name in names:
         runner = TOOL_RUNNERS.get(name)
         if not runner:
-            continue
-        if name in _DIR_CAPABLE:
+            checks.extend(_run_tools([name], target))
+        elif name in _DIR_CAPABLE:
             checks.append(_dir_capable_result(runner, target, files, root, ignores))
         else:
             checks.append(_per_file_result(name, runner, files))
