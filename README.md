@@ -260,18 +260,28 @@ python init-ci.py /path/to/repo
 ## Multi-Language Directory Scanning
 
 When pointed at a directory, `check.py` scans all files, groups them by language,
-and runs the appropriate tools for each:
+and runs that language's tools. Which tools each language gets is
+`DEFAULT_TOOLS` (and `AUDIT_TOOLS` for `--audit`) in `jpcheck/registry.py`,
+the one place it is kept.
 
-| Language | Extensions | Tools | Audit |
-|---|---|---|---|
-| Python | `.py` | ruff, mypy | pip-audit |
-| JavaScript | `.js`, `.jsx` | eslint, prettier | npm audit |
-| TypeScript | `.ts`, `.tsx` | eslint (typescript-eslint), prettier | npm audit |
-| CSS | `.css`, `.scss`, `.less` | stylelint, prettier | none |
-| HTML | `.html` | eslint, stylelint, prettier | none |
-| PHP | `.php` | phpstan, phpcs, rector | composer audit |
+| Language | Extensions |
+|---|---|
+| Python | `.py`, or a `#!` naming python |
+| JavaScript / TypeScript | `.js`, `.mjs`, `.cjs`, `.jsx`, `.ts`, `.tsx` |
+| CSS | `.css`, `.scss`, `.less` |
+| HTML | `.html`, `.htm` |
+| PHP | `.php` |
+| Shell | `.sh`, `.bash`, or a `#!` naming a shell |
+| C / C++ | `.c`, `.cc`, `.cpp`, `.h`, `.hpp`, `.ino` |
 
 Skipped directories: `node_modules`, `vendor`, `__pycache__`, `.git`, `.venv`, `dist`, `build`
+
+**Smells**, in every language with code to measure (METHODOLOGY 2.14): a file
+or a function too long or too complex, by the limits in `jpcheck/smells.py`.
+Code outside every function is the file's main, measured as one more function,
+`(top level)`. A smell the change introduces fails; one that was already there
+warns. Complexity is each language's standard tool's count, listed in
+`jpcheck/measure.py`.
 
 ## Output Format
 

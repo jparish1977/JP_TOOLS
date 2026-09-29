@@ -231,7 +231,7 @@ Nothing in the gate detects duplication yet.
 
 Crossing the line is not a violation, and it is not a reason to split on its own. Splitting a file to get under a number, along a seam that is not a responsibility, makes two files that must change together (§2.13). That is worse than one large file, and it hides the coupling the number was pointing at.
 
-Complexity is the better measure and belongs per function: ruff's `C90` (cyclomatic complexity) and the `PLR09xx` counts (branches, statements, arguments). Measure what they would find before selecting them; a rule that is red everywhere on day one is how a gate gets switched off (§9 item 1).
+Complexity is the better measure and belongs per function, counted by each language's standard tool (§2.15). **Code outside every function is the file's main**, and is measured as a function under the same limits. No linter measures it, so without that a script with all its logic at its top level reads clean, and a split that moves logic out of functions looks like an improvement. Measure what a rule would find before selecting it; a rule that is red everywhere on day one is how a gate gets switched off (§9 item 1).
 
 JP_TOOLS was past the smell itself and has been split on its responsibilities: `check.py` into `jpcheck/` (one module per runner family, the baseline, the smells, the suppression rules), `spool-audit.py` into `spoolaudit/`, and its test into one file per module. No tracked source file is over 1,000 lines (`tools/lab/file-sizes.py`).
 
