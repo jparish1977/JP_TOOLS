@@ -31,20 +31,20 @@ bash install-recovery.sh
 powershell install-recovery.ps1
 ```
 
-### Optional: find-dupes.php
+### Private libraries: find-dupes.php
 
-`find-dupes.php` is the one tool that needs `iteration8/utilities`, a private library.
-It is deliberately **not** in `composer.json` so that `composer install` works for everyone;
-skip this section and every other tool still runs.
-
-If you have access to the repo:
+`find-dupes.php` is the one tool that needs `iteration8/utilities` (and through
+it `iteration8/core`), private libraries. Both are dev requirements in
+`composer.json`, so `composer install` needs to know where they are. Say so once,
+in your global composer config, with a git URL you can read:
 
 ```bash
-composer config repositories.iteration8-utilities vcs https://github.com/jparish1977/iteration8-utilities.git
-composer require iteration8/utilities:dev-master
+composer config -g repositories.iteration8-core vcs https://github.com/jparish1977/iteration8-core.git
+composer config -g repositories.iteration8-utilities vcs https://github.com/jparish1977/iteration8-utilities.git
+composer install
 ```
 
-That edits your local `composer.json` -- don't commit those two entries back.
+Without access to them, `composer install` stops on the two packages.
 
 ## Tools
 
@@ -66,7 +66,7 @@ That edits your local `composer.json` -- don't commit those two entries back.
 | | Worker pool for parallel hashing, persistent hash DB for instant re-scans |
 
 `find-dupes.php` depends on `iteration8/utilities`, which lives in a private repo -- see
-[Optional: find-dupes.php](#optional-find-dupesphp). Nothing else in JP_TOOLS needs it.
+[Private libraries: find-dupes.php](#private-libraries-find-dupesphp) for installing it.
 
 ### Data Recovery (Python)
 
@@ -354,9 +354,9 @@ Creates `.github/workflows/check.yml` -- runs on push to main and on PRs.
 ## FileScanner Library
 
 **FileScanner does not live in this repo.** It ships in `iteration8/utilities`
-under `src/FileScanner/`, and `find-dupes.php` here is the composition root that
-wires it up. Install it with the optional step in
-[Optional: find-dupes.php](#optional-find-dupesphp).
+under `src/FileScanner/`, and `find-dupes.php` here (with `lib/FindDupes.php`)
+is the composition root that wires it up. Install it as
+[Private libraries: find-dupes.php](#private-libraries-find-dupesphp) says.
 
 It is a PHP library with hexagonal architecture: interfaces for everything, so
 adapters swap without touching business logic.

@@ -53,15 +53,13 @@ jobs:
             $SUDO apt-get install -y -q shellcheck || { $SUDO apt-get update -q && $SUDO apt-get install -y -q shellcheck; }
           fi
           shellcheck --version
+      # composer.json requires iteration8/core and iteration8/utilities
+      # (find-dupes.php's library), private repositories this forge mirrors
+      # under the owner in the variable ITERATION8_LIBRARIES_OWNER, read with
+      # the secret FLEET_READ_TOKEN. Where they are is global config, as on
+      # every box, so no forge address is in the repo. Without both the
+      # install cannot finish, and the step says why.
       - name: Install PHP tools
-        run: composer install --no-interaction --no-progress
-      # find-dupes.php drives iteration8/utilities, which needs iteration8/core:
-      # private repositories this forge mirrors under the owner in the
-      # variable ITERATION8_LIBRARIES_OWNER, read with the secret
-      # FLEET_READ_TOKEN. Required here and not in composer.json, where a
-      # private repository 404s every install without access, linters too.
-      # Without both, find-dupes.php cannot be checked, so the step fails.
-      - name: iteration8 libraries, for find-dupes.php
         shell: bash
         env:
           FLEET_READ_TOKEN: ${{ secrets.FLEET_READ_TOKEN }}
@@ -70,17 +68,16 @@ jobs:
         run: |
           if [ -z "$FLEET_READ_TOKEN" ] || [ -z "$OWNER" ]; then
             echo "Set the secret FLEET_READ_TOKEN and the variable ITERATION8_LIBRARIES_OWNER:" >&2
-            echo "without iteration8/utilities, find-dupes.php cannot be checked." >&2
+            echo "composer.json requires iteration8/utilities, which is read from them." >&2
             exit 1
           fi
           for lib in core utilities; do
-            composer config "repositories.iteration8-$lib" vcs "$SERVER/$OWNER/iteration8-$lib.git"
+            composer config -g "repositories.iteration8-$lib" vcs "$SERVER/$OWNER/iteration8-$lib.git"
           done
-          case "$SERVER" in http://*) composer config secure-http false ;; esac
+          case "$SERVER" in http://*) composer config -g secure-http false ;; esac
           auth=$(python -c 'import json, os, sys
           print(json.dumps({"http-basic": {sys.argv[1]: {"username": "ci", "password": os.environ["FLEET_READ_TOKEN"]}}}))' "${SERVER#*://}")
-          COMPOSER_AUTH=$auth composer require --dev --no-interaction --no-progress \
-            iteration8/core:dev-master iteration8/utilities:dev-master
+          COMPOSER_AUTH=$auth composer install --no-interaction --no-progress
       # Every file is checked on its own, by one worker per core, each taking
       # every Nth file in turn. Each file writes its own log, printed
       # afterwards in file order, so the output reads as a serial run's would.

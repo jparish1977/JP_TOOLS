@@ -247,7 +247,7 @@ When a job has a standard tool, use it: a workflow file is linted by actionlint,
 
 `FileScanner` is the reference implementation. It's in PHP, but the pattern translates directly to any language.
 
-**Where it lives.** FileScanner is *not* in this repo. It ships in the `iteration8/utilities` package under the `Iteration8\Utilities\FileScanner` namespace, and JP_TOOLS consumes it through composer as an optional dependency. `find-dupes.php` here is the composition root that wires it up. Keeping the library out of the toolbox is itself the methodology working: the toolbox depends on the contract, not on a vendored copy.
+**Where it lives.** FileScanner is *not* in this repo. It ships in the `iteration8/utilities` package under the `Iteration8\Utilities\FileScanner` namespace, and JP_TOOLS consumes it through composer as a declared dev dependency. `find-dupes.php` here is the composition root that wires it up. Keeping the library out of the toolbox is itself the methodology working: the toolbox depends on the contract, not on a vendored copy.
 
 ```
 Iteration8\Utilities\FileScanner\

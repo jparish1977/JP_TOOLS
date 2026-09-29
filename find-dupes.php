@@ -39,11 +39,10 @@ use JpTools\FindDupes;
 if (!class_exists(Scanner::class)) {
     fwrite(STDERR, <<<'TXT'
         find-dupes.php needs the iteration8/utilities library, which lives in a private repo.
-        Every other JP_TOOLS tool works without it.
-
-        If you have access, add it with:
-          composer config repositories.iteration8-utilities vcs https://github.com/jparish1977/iteration8-utilities.git
-          composer require iteration8/utilities:dev-master
+        composer.json requires it; tell composer where it is, then install:
+          composer config -g repositories.iteration8-core vcs https://github.com/jparish1977/iteration8-core.git
+          composer config -g repositories.iteration8-utilities vcs https://github.com/jparish1977/iteration8-utilities.git
+          composer install
 
         TXT);
     exit(1);
