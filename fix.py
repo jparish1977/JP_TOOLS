@@ -21,6 +21,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from jpcheck.python_tools import _ruff_config_args
 
 TOOLS_ROOT = Path(__file__).resolve().parent

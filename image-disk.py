@@ -29,6 +29,9 @@ import sys
 import time
 from pathlib import Path
 
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from platformtools.tools import find_tool
 from platformtools.windows import disk_number, drive_letter, is_admin, usb_drive_advice, wsl_path
 

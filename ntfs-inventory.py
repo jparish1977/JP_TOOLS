@@ -26,7 +26,11 @@ import contextlib
 import os
 import shlex
 import sys
+from pathlib import Path
 from typing import TextIO
+
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from inventory.resume import mark_done, resume_state
 from ntfstools.listing import Entry, listdir, walk

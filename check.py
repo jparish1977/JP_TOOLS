@@ -24,12 +24,22 @@ import sys
 from pathlib import Path
 from typing import Any, NoReturn
 
+# The packages beside this file import when another program loads it by path,
+# not only when it is run: a script's own directory is on sys.path only then.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from jpcheck.baseline import compare_baseline, record_baseline
 from jpcheck.common import _repo_root
+from jpcheck.coverage import is_project_file
 from jpcheck.files import _IGNORE_FILE, Ignore, _detect_lang, _IgnoreError, ignored_by, load_ignores
+from jpcheck.lab import lab_claim
 from jpcheck.registry import _exit_code
 from jpcheck.runs import NoSourceError, NoToolsError, check_directory, check_target, tool_names
-from jpcheck.smells import _SMELLS
+from jpcheck.smells import _SMELLS, _smell_measure
+
+# Other repositories load this file as a module and read these names off it.
+# tests/test_load_by_path.py pins them.
+__all__ = ["_smell_measure", "is_project_file", "lab_claim"]
 
 
 def _parser() -> argparse.ArgumentParser:

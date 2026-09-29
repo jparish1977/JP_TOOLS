@@ -124,6 +124,10 @@ from __future__ import annotations
 import argparse
 import io
 import sys
+from pathlib import Path
+
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from spoolaudit.classify import classify, purgeable
 from spoolaudit.config import retention_state

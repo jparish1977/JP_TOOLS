@@ -48,6 +48,9 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from chdtool import batch, commands
 from chdtool.chdman import COMPRESSION_PRESETS, CreateOptions
 from chdtool.importing import ImportOptions, import_image, tool_status

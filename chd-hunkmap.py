@@ -25,6 +25,9 @@ import tarfile
 from collections import Counter
 from pathlib import Path
 
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from chdmap.header import Header, read_header
 from chdmap.hunkmap import Hunk, Kind, read_map
 from chdmap.trace import Group, Member, self_ref_groups, shared_pairs, tar_members

@@ -28,6 +28,10 @@ Examples:
 import argparse
 import shutil
 import sys
+from pathlib import Path
+
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ntfstools.listing import Entry, join, listdir, walk
 

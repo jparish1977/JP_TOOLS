@@ -33,6 +33,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from jpcheck.coverage import coverage_exemptions, is_project_file
 
 

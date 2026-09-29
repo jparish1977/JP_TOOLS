@@ -39,6 +39,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import BinaryIO, NamedTuple
 
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from platformtools.tools import find_tool
 from platformtools.windows import wsl_path
 
