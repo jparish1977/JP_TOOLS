@@ -37,14 +37,15 @@ CHECK_PY = ROOT / "check.py"
 CASES = [
     ("shell", "# shellcheck disable=SC2086",
      ["# shellcheck disable=SC2086  # the words are split on purpose",
-      "# shellcheck disable=SC2317,SC2329 -- invoked by the trap"]),
+      "  # shellcheck disable=SC2317,SC2329  # invoked by the trap"]),
     ("cpp", "  // cppcheck-suppress arrayIndexOutOfBounds",
      ["  // cppcheck-suppress arrayIndexOutOfBounds ; written past on purpose",
       "  // cppcheck-suppress arrayIndexOutOfBounds -- written past on purpose",
       "  // cppcheck-suppress arrayIndexOutOfBounds // written past on purpose"]),
     ("php", "    // @phpstan-ignore-next-line",
-     ["    // @phpstan-ignore return.type (returns a string on purpose)",
-      "    // @phpstan-ignore-next-line -- returns a string on purpose"]),
+     ["    // @phpstan-ignore-next-line -- returns a string on purpose"]),
+    ("php", "    // @phpstan-ignore return.type",
+     ["    // @phpstan-ignore return.type (returns a string on purpose)"]),
     ("php", "    // phpcs:ignore Generic.Files.LineLength",
      ["    // phpcs:ignore Generic.Files.LineLength -- a URL that cannot wrap"]),
     ("js", "// eslint-disable-next-line no-eval",
@@ -70,13 +71,34 @@ def test_each_directive_needs_a_reason() -> None:
                   [d["reasoned"] for d in one(line, lang)], [True])
 
 
+# Forms a tool does NOT honour, measured: each is found and counts as NO
+# reason, because the tool either fails to parse it or drops the suppression.
+REJECTED = [
+    ("shell", "# shellcheck disable=SC2086 -- split on purpose"),        # shellcheck SC1073
+    ("shell", "# shellcheck disable=SC2086 reason: split on purpose"),   # shellcheck SC1073
+    ("cpp", "  // cppcheck-suppress arrayIndexOutOfBounds reason: on purpose"),
+    ("php", "    // @phpstan-ignore return.type -- returns a string on purpose"),  # dropped
+    ("php", "    // phpcs:ignore Generic.PHP.NoSilencedErrors reason: may fail"),  # dropped
+    ("js", "// eslint-disable-next-line no-eval reason: a user formula"),          # dropped
+    ("css", "/* stylelint-disable color-no-hex reason: the brand colour */"),     # dropped
+]
+
+
+def test_a_form_the_tool_does_not_honour_is_no_reason() -> None:
+    for lang, line in REJECTED:
+        check(f"{lang}: {line.strip()!r} is found, unreasoned",
+              [d["reasoned"] for d in one(line, lang)], [False])
+
+
 def test_a_string_is_not_a_directive() -> None:
     check("shell: the words inside a string are not a directive",
-          one('echo "see shellcheck disable=SC2086 in the docs"', "shell"), [])
+          one('echo "see # shellcheck disable=SC2086 in the docs"', "shell"), [])
+    check("shell: after a command it is not a directive (shellcheck: a parse error)",
+          one("echo $1  # shellcheck disable=SC2086", "shell"), [])
     check("js: the words inside a string are not a directive",
           one('const s = "eslint-disable-next-line no-eval";', "js"), [])
-    check("control: the same directive in a comment is found",
-          len(one("x=1  # shellcheck disable=SC2086", "shell")), 1)
+    check("control: a directive on a line of its own is found",
+          len(one("  # shellcheck disable=SC2086", "shell")), 1)
 
 
 def test_a_separator_with_no_prose_is_no_reason() -> None:

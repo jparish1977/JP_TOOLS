@@ -13,17 +13,31 @@ reason required:
 
 A C out-of-bounds write that fails the gate passes with the cppcheck line above
 it, and a PHP type error the same with the phpstan one. So each of these fails
-here unless the line also says why. A reason is prose after one of the
-separators the tools themselves accept without dropping the suppression:
+here unless the line also says why.
 
-    --  or  reason:          every language (eslint's and phpcs's own form)
-    # prose                  shellcheck: a second comment after the directive
-    ; prose  or  // prose    cppcheck, after the id
-    (prose)                  phpstan's own form: @phpstan-ignore id (why)
+A REASON IS ACCEPTED ONLY IN A FORM ITS OWN TOOL HONOURS. Each form below was
+run through the tool, with a control the directive must silence. A form a tool
+does not honour is worse than no reason: `-- why` after a shellcheck
+directive is a parse error, and `reason: why` after an eslint, stylelint or
+phpcs directive makes the tool drop the suppression while the line reads as
+explained. tests/test_directive_forms_real_tools.py re-runs every form.
 
-A reason does not have to be long; it has to be there, where a reader and this
-check can see it. Only directives inside a comment count, so a string that
-merely contains the words is not a finding.
+    # shellcheck disable=SC2086  # why                   a second comment
+    // cppcheck-suppress id ; why     (or // why, -- why)
+    // @phpstan-ignore-next-line -- why                  (and -line)
+    // @phpstan-ignore identifier (why)                  parentheses only
+    // phpcs:ignore Sniff.Name -- why                    (and disable)
+    // eslint-disable-next-line rule -- why              (every eslint-disable)
+    /* stylelint-disable rule -- why */                  (every stylelint-disable)
+
+A reason does not have to be long; it has to be there, in letters.
+
+WHAT IS MATCHED: a shellcheck directive only on a line of its own, which is
+the only place shellcheck honours one (after a command it is a parse error),
+so a string holding the words is not a match. The C-family directives need a
+comment opener before them on the line; text in a string that also holds
+`//` or `/*` before the words still matches, and fails closed, as does a
+heredoc line that starts with `# shellcheck`.
 """
 
 import re
@@ -32,67 +46,85 @@ from typing import Any
 
 from jpcheck.files import _detect_lang
 
-# A comment opener before the directive on the same line: `#` for shell,
-# `//`, `/*` or a docblock's leading `*` for the C-family languages.
-_SHELL_OPEN = r"(?:^|\s)#\s*"
+# A comment opener before a C-family directive on the same line: `//`, `/*`,
+# or a docblock's leading `*`.
 _C_OPEN = r"(?://|/\*+|^\s*\*)\s*"
 
-# Each language's directives: (name, pattern). A pattern's named group `rest`
-# is whatever follows the directive and its rule ids, where a reason must be.
-_DIRECTIVES: dict[str, list[tuple[str, re.Pattern[str]]]] = {
-    "shell": [
-        ("shellcheck disable", re.compile(_SHELL_OPEN + r"shellcheck\s+disable=\S+(?P<rest>.*)$")),
-    ],
-    "cpp": [
-        ("cppcheck-suppress", re.compile(
-            _C_OPEN + r"cppcheck-suppress(?:-file|-begin|-macro)?(?:\s*\[[^\]]*\]|\s+\S+)?(?P<rest>.*)$")),
-    ],
-    "php": [
-        ("@phpstan-ignore", re.compile(
-            _C_OPEN + r"@phpstan-ignore(?:-next-line|-line)?(?:\s+[\w.,\s-]*?)?(?P<rest>(?:--|reason:|\().*|\s*)$")),
-        ("phpcs", re.compile(
-            _C_OPEN + r"phpcs:(?:ignore|disable|ignoreFile)(?:\s+[\w.,]+)?(?P<rest>.*)$")),
-    ],
-    "js": [
-        ("eslint-disable", re.compile(
-            _C_OPEN + r"eslint-disable(?:-next-line|-line)?(?:\s+[\w@/,\s-]*?)?(?P<rest>(?:--|reason:).*|\s*(?:\*/)?\s*)$")),
-    ],
-    "css": [
-        ("stylelint-disable", re.compile(
-            _C_OPEN + r"stylelint-disable(?:-next-line|-line)?(?:\s+[\w@/,\s-]*?)?(?P<rest>(?:--|reason:).*|\s*(?:\*/)?\s*)$")),
-    ],
+# Prose after `--`, which eslint, stylelint, phpcs and phpstan's line forms
+# all honour; a closing `*/` is not part of it.
+_DASHES = r"--\s*(?P<why>.*?)\s*(?:\*/)?\s*$"
+
+
+class Directive:
+    """One kind of suppression directive: how to find it, and its tool's reason form."""
+
+    def __init__(self, name: str, pattern: str, reason: str) -> None:
+        self.name = name
+        self.pattern = re.compile(pattern)
+        self.reason = re.compile(reason)
+
+    def reasoned(self, rest: str) -> bool:
+        """Whether REST, the text after the directive, holds a reason in the honoured form."""
+        m = self.reason.search(rest)
+        return bool(m and re.search(r"[A-Za-z]", m.group("why")))
+
+
+_SHELLCHECK = Directive("shellcheck disable",
+                        r"^\s*#\s*shellcheck\s+disable=\S+(?P<rest>.*)$",
+                        r"^\s+#\s*(?P<why>.*)$")
+_CPPCHECK = Directive("cppcheck-suppress",
+                      _C_OPEN + r"cppcheck-suppress(?:-file|-begin|-macro)?"
+                                r"(?:\s*\[[^\]]*\]|\s+[\w:.-]+)?(?P<rest>.*)$",
+                      r"^\s*(?:;|//|--)\s*(?P<why>.*)$")
+_PHPSTAN_LINE = Directive("@phpstan-ignore-next-line",
+                          _C_OPEN + r"@phpstan-ignore-(?:next-line|line)\b(?P<rest>.*)$",
+                          _DASHES)
+_PHPSTAN_ID = Directive("@phpstan-ignore",
+                        _C_OPEN + r"@phpstan-ignore(?![\w-])(?P<rest>.*)$",
+                        r"\(\s*(?P<why>[^)]*)\)")
+_PHPCS = Directive("phpcs",
+                   _C_OPEN + r"phpcs:(?:ignore|disable|ignoreFile)\b(?P<rest>.*)$",
+                   _DASHES)
+_ESLINT = Directive("eslint-disable",
+                    _C_OPEN + r"eslint-disable(?:-next-line|-line)?\b(?P<rest>.*)$",
+                    _DASHES)
+_STYLELINT = Directive("stylelint-disable",
+                       _C_OPEN + r"stylelint-disable(?:-next-line|-line)?\b(?P<rest>.*)$",
+                       _DASHES)
+
+_DIRECTIVES: dict[str, list[Directive]] = {
+    "shell": [_SHELLCHECK],
+    "cpp":   [_CPPCHECK],
+    "php":   [_PHPSTAN_LINE, _PHPSTAN_ID, _PHPCS],
+    "js":    [_ESLINT],
+    "css":   [_STYLELINT],
+    # HTML carries both script and style.
+    "html":  [_ESLINT, _STYLELINT],
 }
-# HTML carries both script and style, so both sets of directives.
-_DIRECTIVES["html"] = _DIRECTIVES["js"] + _DIRECTIVES["css"]
-
-# The separators each language's tools accept before a reason.
-_SEPARATORS = {
-    "shell": r"(?:--|reason:|#)",
-    "cpp":   r"(?:--|reason:|;|//)",
-    "php":   r"(?:--|reason:|\()",
-    "js":    r"(?:--|reason:)",
-    "css":   r"(?:--|reason:)",
-    "html":  r"(?:--|reason:)",
-}
-
-
-def has_reason(rest: str, lang: str) -> bool:
-    """Whether REST, the text after a directive, opens with a separator and holds prose."""
-    m = re.match(r"\s*" + _SEPARATORS[lang] + r"\s*(?P<why>.*)$", rest)
-    return bool(m and re.search(r"[A-Za-z]", m.group("why").rstrip("*/) ")))
 
 
 def directives(text: str, lang: str) -> list[dict[str, Any]]:
     """Every honoured suppression directive in TEXT for LANG: name, line, reason or not."""
     found = []
     for n, line in enumerate(text.splitlines(), 1):
-        for name, rx in _DIRECTIVES.get(lang, []):
-            m = rx.search(line)
+        for d in _DIRECTIVES.get(lang, []):
+            m = d.pattern.search(line)
             if m:
-                found.append({"name": name, "line": n,
-                              "reasoned": has_reason(m.group("rest"), lang)})
+                found.append({"name": d.name, "line": n, "reasoned": d.reasoned(m.group("rest"))})
                 break
     return found
+
+
+# What each directive's reason looks like, for the message that asks for one.
+_FORM = {
+    "shellcheck disable": "a second comment: '# shellcheck disable=SC2086  # why'",
+    "cppcheck-suppress": "'// cppcheck-suppress id ; why'",
+    "@phpstan-ignore-next-line": "'// @phpstan-ignore-next-line -- why'",
+    "@phpstan-ignore": "'// @phpstan-ignore identifier (why)'",
+    "phpcs": "'// phpcs:ignore Sniff.Name -- why'",
+    "eslint-disable": "'// eslint-disable-next-line rule -- why'",
+    "stylelint-disable": "'/* stylelint-disable rule -- why */'",
+}
 
 
 def run_directive_reason(target: str) -> dict[str, Any]:
@@ -110,9 +142,8 @@ def run_directive_reason(target: str) -> dict[str, Any]:
     issues = [{
         "file": target, "line": d["line"], "col": 0, "severity": "error",
         "rule": "directive-no-reason",
-        "message": f"'{d['name']}' turns a finding off and states no reason. A suppression "
-                   "is a claim that the rule is wrong HERE: say why on the line "
-                   "(after --, reason:, or the tool's own form), or remove it",
+        "message": f"'{d['name']}' turns a finding off and states no reason in a form its "
+                   f"tool honours. Say why as {_FORM[d['name']]}, or remove it",
         "fixable": False, "fixable_unsafe": False,
     } for d in directives(text, lang) if not d["reasoned"]]
     return {"tool": "directive-reason", "status": "fail" if issues else "pass",

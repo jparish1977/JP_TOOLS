@@ -7,11 +7,15 @@ ANSWERS: before the directive-reason rule reaches a repo, which of its tracked
   line of each. Uses the rule's own parser, jpcheck/directives.py, so the
   count is what the gate will say, not an approximation of it.
 
-TESTED AGAINST: the 50 git repos under ~/projects on a laptop, 2026-09-29: 24
-  directives with no reason in 9 repos (8 shellcheck disable, 9 phpcs, 7
-  eslint-disable; none of the others), 0 files unread. Five read by eye, in
-  five repos and three kinds of directive, were each a real directive with no
-  reason on the line.
+TESTED AGAINST: the 50 git repos under ~/projects on a laptop, 2026-09-29, with
+  reasons accepted only in each tool's honoured form: 25 directives with no
+  reason in 9 repos (9 shellcheck disable, 9 phpcs, 7 eslint-disable; none
+  of the others), 0 files unread. Five read by eye, in five repos and three
+  kinds of directive, were each a real directive with no reason on the line.
+  The 25th, another repo run-suite.sh:131, reads `# shellcheck disable=SC2086 --
+  why`: shellcheck 0.9.0 cannot parse it (SC1073), so it suppresses nothing.
+  An earlier version of the rule, which also accepted `--` for shell, counted
+  24 and passed that line.
   Positive control: a planted `# shellcheck disable=SC2086` with no reason is
   what tests/test_check_directive_reason.py fails the gate on.
 
