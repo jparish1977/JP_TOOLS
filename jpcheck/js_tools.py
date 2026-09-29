@@ -15,6 +15,7 @@ from jpcheck.common import (
     _plain_env,
     _status,
     _tool_missing,
+    node_module_roots,
     strip_ansi,
 )
 
@@ -79,9 +80,25 @@ def _run_node_runner(tool: str, script: str,
         return _tool_missing(f"node (required for {tool})")
     if not runner.exists():
         return _tool_missing(script)
-    result = subprocess.run([node, str(runner), target], capture_output=True, text=True,
-                            check=False, cwd=str(TOOLS_ROOT))
+    result = subprocess.run([node, *_resolve_args(), str(runner), target], capture_output=True,
+                            text=True, check=False, cwd=str(TOOLS_ROOT), env=_runner_env())
     return _node_runner_failed(tool, result) or result
+
+
+def _resolve_args() -> list[str]:
+    """`--import jp_node_resolve.mjs` when this checkout has no node_modules of its own.
+
+    The runners' bare imports resolve from the runner's own directory, so in a
+    worktree they fail although the checkout it belongs to has the packages.
+    The hook retries them from each tool root's node_modules (jpcheck.common).
+    """
+    if (TOOLS_ROOT / "node_modules").is_dir() or not node_module_roots():
+        return []
+    return ["--import", (TOOLS_ROOT / "jp_node_resolve.mjs").as_uri()]
+
+
+def _runner_env() -> dict[str, str]:
+    return {**os.environ, "JP_TOOLS_NODE_ROOTS": os.pathsep.join(str(p) for p in node_module_roots())}
 
 
 def _eslint_issues(stdout: str) -> list[dict[str, Any]]:

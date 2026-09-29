@@ -1,6 +1,7 @@
 """Helpers every runner shares: environment, status, tool lookup, config discovery."""
 
 import configparser
+import functools
 import os
 import re
 import shutil
@@ -48,30 +49,59 @@ def strip_ansi(text: str) -> str:
     return _ANSI.sub("", text)
 
 
+@functools.cache
+def tool_roots() -> tuple[Path, ...]:
+    """Where JP_TOOLS' installed tools are: this checkout, then the one it belongs to.
+
+    vendor/ and node_modules/ are not tracked, so a git worktree of JP_TOOLS
+    has neither, while the checkout it was made from does. Looking only here,
+    a worktree reported phpstan, phpcs and rector as not installed and failed
+    to load eslint and stylelint, on a machine that had all of them. So when
+    this checkout is a linked worktree, the main checkout (the parent of git's
+    common directory) is searched after it.
+    """
+    roots = [TOOLS_ROOT]
+    try:
+        r = _git(["rev-parse", "--path-format=absolute", "--git-common-dir"], TOOLS_ROOT)
+    except _NoGitError:
+        return tuple(roots)       # reason: no git, so no worktree: only this checkout
+    main = Path(r.stdout.strip()).parent if r.returncode == 0 and r.stdout.strip() else None
+    if main is not None and main.resolve() != TOOLS_ROOT.resolve():
+        roots.append(main)
+    return tuple(roots)
+
+
 def _php_bin(name: str) -> str | None:
-    """Resolve a Composer bin, falling back to global PATH."""
-    for ext in ("", ".bat", ".cmd"):
-        local = TOOLS_ROOT / "vendor" / "bin" / f"{name}{ext}"
-        if local.exists():
-            return str(local)
+    """Resolve a Composer bin from each tool root's vendor/bin, falling back to PATH."""
+    for root in tool_roots():
+        for ext in ("", ".bat", ".cmd"):
+            local = root / "vendor" / "bin" / f"{name}{ext}"
+            if local.exists():
+                return str(local)
     return shutil.which(name) or shutil.which(f"{name}.bat")
 
 
 def _node_bin(name: str) -> str | None:
-    """Resolve an npm bin from JP_TOOLS' own node_modules, falling back to PATH.
+    """Resolve an npm bin from each tool root's node_modules, falling back to PATH.
 
     package.json declares prettier, and `npm install` puts it in
     node_modules/.bin, which is not on PATH. Resolving through PATH alone would
     leave the manifest satisfied while the gate called the tool unavailable
-    (METHODOLOGY, "Declare the instrument's own dependencies"). fix.py uses the
-    same lookup, in the same order.
+    (METHODOLOGY, "Declare the instrument's own dependencies"). fix.py uses
+    this lookup too.
     """
-    local_bin = TOOLS_ROOT / "node_modules" / ".bin"
-    for ext in (".cmd", ""):
-        local = local_bin / f"{name}{ext}"
-        if local.exists():
-            return str(local)
+    for root in tool_roots():
+        local_bin = root / "node_modules" / ".bin"
+        for ext in (".cmd", ""):
+            local = local_bin / f"{name}{ext}"
+            if local.exists():
+                return str(local)
     return shutil.which(name) or shutil.which(f"{name}.cmd")
+
+
+def node_module_roots() -> list[Path]:
+    """The node_modules directories of the tool roots, in lookup order."""
+    return [root / "node_modules" for root in tool_roots() if (root / "node_modules").is_dir()]
 
 
 def _node_runner_failed(tool: str,

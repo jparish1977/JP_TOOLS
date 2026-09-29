@@ -1,0 +1,30 @@
+{
+  "about": "A worktree finds the main checkout's installed tools. Run: mutate-on-target.py TREE jpcheck/common.py tests/test_worktree_tools.py tests/mutants/jpt-worktree-tools-on-common.json",
+  "mutants": [
+    {
+      "name": "the main checkout is never a tool root",
+      "edits": [["    if main is not None and main.resolve() != TOOLS_ROOT.resolve():\n        roots.append(main)", "    if main is not None and main.resolve() != TOOLS_ROOT.resolve():\n        pass"]],
+      "target": "tool roots: the worktree, then the main checkout"
+    },
+    {
+      "name": "the main checkout is a root even of itself",
+      "edits": [["    if main is not None and main.resolve() != TOOLS_ROOT.resolve():", "    if main is not None:"]],
+      "target": "control: the main checkout's roots are itself only"
+    },
+    {
+      "name": "PHP bins are looked for in this checkout only",
+      "edits": [["    for root in tool_roots():\n        for ext in (\"\", \".bat\", \".cmd\"):", "    for root in tool_roots()[:1]:\n        for ext in (\"\", \".bat\", \".cmd\"):"]],
+      "target": "a PHP bin only the main checkout has is found"
+    },
+    {
+      "name": "node bins are looked for in this checkout only",
+      "edits": [["    for root in tool_roots():\n        local_bin = root / \"node_modules\" / \".bin\"", "    for root in tool_roots()[:1]:\n        local_bin = root / \"node_modules\" / \".bin\""]],
+      "target": "a node bin only the main checkout has is found"
+    },
+    {
+      "name": "no node_modules root is ever offered to the hook",
+      "edits": [["    return [root / \"node_modules\" for root in tool_roots() if (root / \"node_modules\").is_dir()]", "    return []"]],
+      "target": "the node runner gets the resolve hook"
+    }
+  ]
+}

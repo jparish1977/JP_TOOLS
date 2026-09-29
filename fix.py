@@ -24,6 +24,7 @@ from typing import Any
 # The packages beside this file import when another program loads it by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from jpcheck.common import _node_bin, _php_bin, _php_cmd
 from jpcheck.python_tools import _ruff_config_args
 
 TOOLS_ROOT = Path(__file__).resolve().parent
@@ -91,12 +92,7 @@ def fix_ruff(target: str, dry_run: bool, unsafe: bool = False, **_: object) -> R
 
 
 def fix_prettier(target: str, dry_run: bool, **_: object) -> Result:
-    local_bin = TOOLS_ROOT / "node_modules" / ".bin"
-    cmd = (
-        str(local_bin / "prettier.cmd") if (local_bin / "prettier.cmd").exists() else
-        str(local_bin / "prettier")     if (local_bin / "prettier").exists() else
-        shutil.which("prettier") or shutil.which("prettier.cmd")
-    )
+    cmd = _node_bin("prettier")
     if not cmd:
         return {"tool": "prettier", "status": "unavailable", "fixed": 0, "remaining": []}
     if dry_run:
@@ -113,18 +109,6 @@ def fix_prettier(target: str, dry_run: bool, **_: object) -> Result:
         "status": "fixed" if result.returncode == 0 else "error",
         "output": result.stdout.strip(),
     }
-
-
-def _php_bin(name: str) -> str | None:
-    for ext in ("", ".bat", ".cmd"):
-        local = TOOLS_ROOT / "vendor" / "bin" / f"{name}{ext}"
-        if local.exists():
-            return str(local)
-    return shutil.which(name) or shutil.which(f"{name}.bat")
-
-
-def _php_cmd() -> str | None:
-    return shutil.which("php") or shutil.which("php.exe")
 
 
 def _unavailable(tool: str, php: str | None) -> Result:

@@ -13,8 +13,8 @@ WHY
     that the tool must report.
 
 A tool that is not installed prints SKIP for its cases; that is not a pass.
-Found on the tool's own PATH or in this checkout's vendor/bin and
-node_modules/.bin, as check.py finds them.
+Found as check.py finds them: vendor/bin and node_modules/.bin of this
+checkout and, in a git worktree, of the checkout it belongs to, then PATH.
 
     python3 tests/test_directive_forms_real_tools.py
 """
@@ -26,17 +26,16 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from _harness import ROOT, check, run
+from _harness import check, run
+from jpcheck.common import _node_bin, _php_bin
 from jpcheck.directives import directives
 
 SKIPPED: list[str] = []
 
 
 def tool(name: str) -> str | None:
-    for d in (ROOT / "vendor" / "bin", ROOT / "node_modules" / ".bin"):
-        if (d / name).exists():
-            return str(d / name)
-    return shutil.which(name)
+    """NAME where check.py finds it: each tool root's vendor/bin or node_modules/.bin, then PATH."""
+    return _php_bin(name) or _node_bin(name) or shutil.which(name)
 
 
 def reports(argv: list[str], d: Path) -> bool:

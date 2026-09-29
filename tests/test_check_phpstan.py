@@ -28,6 +28,7 @@ import tempfile
 from pathlib import Path
 
 from _harness import ROOT
+from jpcheck.common import tool_roots
 from jpcheck.php_tools import run_phpstan
 
 # Two findings at level 8, neither of them at level 5: an unspecified iterable
@@ -95,7 +96,9 @@ def main() -> int:
     if not shutil.which("php"):
         print("SKIP: php not found")
         return 0
-    if not (ROOT / "vendor" / "bin" / "phpstan").exists():
+    # Where check.py looks: this checkout's vendor/bin, then, in a worktree,
+    # the main checkout's (jpcheck.common.tool_roots).
+    if not any((r / "vendor" / "bin" / "phpstan").exists() for r in tool_roots()):
         print("SKIP: vendor/bin/phpstan not found, run composer install")
         return 0
     configured_level_cases()

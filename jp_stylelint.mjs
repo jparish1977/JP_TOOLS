@@ -6,8 +6,26 @@
  * Output: JSON array of stylelint result objects
  */
 import stylelint from "stylelint";
-import { resolve, extname } from "path";
+import { resolve, extname, dirname, join, delimiter } from "path";
 import { existsSync } from "fs";
+import { fileURLToPath } from "url";
+
+// stylelint resolves `extends` and `customSyntax` itself, from configBasedir,
+// not through node's import resolution. So name the checkout whose
+// node_modules holds the shared config: this one, or, in a git worktree that
+// has none, the checkout it belongs to (JP_TOOLS_NODE_ROOTS, set by check.py).
+const here = dirname(fileURLToPath(import.meta.url));
+const bases = [
+  here,
+  ...(process.env.JP_TOOLS_NODE_ROOTS || "")
+    .split(delimiter)
+    .filter(Boolean)
+    .map((modules) => dirname(modules)),
+];
+const configBasedir =
+  bases.find((base) =>
+    existsSync(join(base, "node_modules", "stylelint-config-standard")),
+  ) ?? here;
 
 const [target] = process.argv.slice(2);
 if (!target) {
@@ -44,6 +62,7 @@ try {
   const result = await stylelint.lint({
     files: absTarget,
     config,
+    configBasedir,
   });
   // Only the fields check.py reads. A whole result object can hold a parser
   // that refers back to itself, which JSON.stringify cannot print.

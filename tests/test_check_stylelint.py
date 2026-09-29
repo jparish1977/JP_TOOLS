@@ -22,7 +22,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from _harness import ROOT
+from jpcheck.common import node_module_roots
+
 BAD = "a {\n  color: #fff;\n  colr: red;\n}\n"
 GOOD = "a {\n  color: #fff;\n}\n"
 
@@ -55,7 +57,9 @@ def stylelint(target: Path) -> tuple[str, list[str], str]:
 
 
 def main() -> int:
-    if not shutil.which("node") or not (ROOT / "node_modules" / "stylelint").is_dir():
+    # Where check.py looks: this checkout's node_modules, then, in a worktree,
+    # the main checkout's (jpcheck.common.tool_roots).
+    if not shutil.which("node") or not any((m / "stylelint").is_dir() for m in node_module_roots()):
         print("SKIP: node or JP_TOOLS' own stylelint is not installed (run npm install in JP_TOOLS)")
         return 0
     print("stylelint on real CSS:")
