@@ -91,22 +91,31 @@ def _handler_is_silent(h: ast.ExceptHandler) -> bool:
     return True
 
 
-def silent_catches(path: Path) -> list[dict[str, Any]]:
-    """Every contextlib.suppress and every silent except handler in one file,
-    with whether a `reason:` is stated within its span. The inventory, not the
-    violations, the same split as coverage_exemptions()."""
+def _parsed(path: Path) -> tuple[ast.Module, dict[int, str]] | None:
+    """PATH's tree and its comments by line; None when it does not parse."""
     try:
         src = path.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(src)
     except (OSError, SyntaxError, ValueError):  # reason: ruff reports an unparseable file; twice is one problem looking like two
-        return []
+        return None
     comments: dict[int, str] = {}
     try:
         for tok in tokenize.generate_tokens(io.StringIO(src).readline):
             if tok.type == tokenize.COMMENT:
                 comments[tok.start[0]] = comments.get(tok.start[0], "") + tok.string
     except (tokenize.TokenError, IndentationError, SyntaxError):  # reason: as above, ruff's to report
+        return None
+    return tree, comments
+
+
+def silent_catches(path: Path) -> list[dict[str, Any]]:
+    """Every contextlib.suppress and every silent except handler in one file,
+    with whether a `reason:` is stated within its span. The inventory, not the
+    violations, the same split as coverage_exemptions()."""
+    parsed = _parsed(path)
+    if parsed is None:
         return []
+    tree, comments = parsed
 
     def reason_in(begin: int, end: int) -> str:
         for row in range(begin, end + 1):

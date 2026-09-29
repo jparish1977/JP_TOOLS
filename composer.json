@@ -11,6 +11,11 @@
     "suggest": {
         "iteration8/utilities": "Required by find-dupes.php only. Private repo: see README (Optional: find-dupes.php)."
     },
+    "autoload": {
+        "psr-4": {
+            "JpTools\\": "lib/"
+        }
+    },
     "config": {
         "optimize-autoloader": true,
         "sort-packages": true

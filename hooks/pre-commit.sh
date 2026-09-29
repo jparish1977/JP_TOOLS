@@ -34,45 +34,45 @@ broken() {
     exit 1
 }
 
-if [ "$JP_TOOLS_HOOK_API" != "$TEMPLATE_API" ]; then
-    broken "this repo's installed hook speaks interface '${JP_TOOLS_HOOK_API:-none}', and the JP_TOOLS template at $TOOLS_DIR serves $TEMPLATE_API." \
-        "reinstall the hook: python3 \"$TOOLS_DIR/install-hooks.py\" --remove . && python3 \"$TOOLS_DIR/install-hooks.py\" ."
-fi
+check_interface() {
+    if [ "$JP_TOOLS_HOOK_API" != "$TEMPLATE_API" ]; then
+        broken "this repo's installed hook speaks interface '${JP_TOOLS_HOOK_API:-none}', and the JP_TOOLS template at $TOOLS_DIR serves $TEMPLATE_API." \
+            "reinstall the hook: python3 \"$TOOLS_DIR/install-hooks.py\" --remove . && python3 \"$TOOLS_DIR/install-hooks.py\" ."
+    fi
+}
 
 # python3 everywhere it exists; several Linux boxes ship no bare `python`,
 # and Windows installs it under that name only.
-PY=python3
-command -v "$PY" >/dev/null 2>&1 || PY=python
+choose_python() {
+    PY=python3
+    command -v "$PY" >/dev/null 2>&1 || PY=python
+}
 
-# An inherited repo ratchets against a recorded baseline rather than against
-# zero. If one is committed at the repo root, use it. check.py REFUSES a
-# baseline recorded in a different mode, so a whole-repo baseline dropped here
-# fails loudly instead of reporting scope difference as regression.
-BASELINE_FILE="$(git rev-parse --show-toplevel)/quality-baseline.json"
-
-# A tree at master can still lack a flag this template passes, if the two are
-# ever out of step. Ask check.py, and refuse rather than let "unrecognized
-# arguments" read as a failing check.
-CHECK_PY="$TOOLS_DIR/check.py"
-HELP=$("$PY" "$CHECK_PY" --help 2>/dev/null)
-NEED="--skip-unsupported"
-[ -f "$BASELINE_FILE" ] && NEED="--skip-unsupported --baseline"
-MISSING=""
-for flag in $NEED; do
-    case "$HELP" in
-        *"$flag"*) ;;
-        *) MISSING="$MISSING $flag" ;;
-    esac
-done
 # JP_TOOLS' repository, read with the committing repo's git environment
 # cleared: in a linked worktree GIT_DIR is set, and it outranks `git -C`.
 tools_git() {
     (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR; git -C "$TOOLS_DIR" "$@")
 }
-if [ -n "$MISSING" ]; then
-    broken "the check.py at $TOOLS_DIR has no$MISSING (on $(tools_git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') $(tools_git rev-parse --short HEAD 2>/dev/null))." \
-        "git -C \"$TOOLS_DIR\" pull --ff-only"
-fi
+
+# A tree at master can still lack a flag this template passes, if the two are
+# ever out of step. Ask check.py, and refuse rather than let "unrecognized
+# arguments" read as a failing check.
+check_flags() {
+    HELP=$("$PY" "$CHECK_PY" --help 2>/dev/null)
+    NEED="--skip-unsupported"
+    [ -f "$BASELINE_FILE" ] && NEED="--skip-unsupported --baseline"
+    MISSING=""
+    for flag in $NEED; do
+        case "$HELP" in
+            *"$flag"*) ;;
+            *) MISSING="$MISSING $flag" ;;
+        esac
+    done
+    if [ -n "$MISSING" ]; then
+        broken "the check.py at $TOOLS_DIR has no$MISSING (on $(tools_git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') $(tools_git rev-parse --short HEAD 2>/dev/null))." \
+            "git -C \"$TOOLS_DIR\" pull --ff-only"
+    fi
+}
 
 # NO NEW EM-DASHES (the fleet's rule, in CLAUDE.md). Only the lines this commit
 # ADDS are checked, so text already there is never retrofitted, and the
@@ -85,9 +85,11 @@ fi
 # fix-dashes.py finds its own files.
 # FAILS CLOSED: --check exits 0 (none) or 1 (listed). Anything else means the
 # check did not run, which is BROKEN, never clean.
-if [ -n "$JP_TOOLS_ALLOW_EMDASH" ]; then
-    echo "JP_TOOLS hook: JP_TOOLS_ALLOW_EMDASH is set; em-dashes are allowed in this commit." >&2
-else
+check_emdashes() {
+    if [ -n "$JP_TOOLS_ALLOW_EMDASH" ]; then
+        echo "JP_TOOLS hook: JP_TOOLS_ALLOW_EMDASH is set; em-dashes are allowed in this commit." >&2
+        return
+    fi
     DASHED=$("$PY" "$TOOLS_DIR/fix-dashes.py" --check)
     dash_rc=$?
     if [ "$dash_rc" -eq 1 ] && [ -n "$DASHED" ]; then
@@ -103,47 +105,62 @@ else
         broken "the em-dash check (fix-dashes.py --check) exited $dash_rc, so it did not run." \
             "run it by hand to see why: $PY \"$TOOLS_DIR/fix-dashes.py\" --check"
     fi
-fi
+}
 
-STAGED=$(git diff --cached --name-only --diff-filter=ACM)
-if [ -z "$STAGED" ]; then
-    exit 0
-fi
-
+# Each staged file through check.py; sets rc (1 on any failure) and checked.
+#
 # Split on newlines only, so paths with spaces survive.
 #
 # WARNING to whoever adds the next flag to this loop: newline IFS also DISABLES
 # word-splitting on spaces, so a variable holding "--flag value" arrives as ONE
 # argument, and argparse reports it as unrecognized. Pass flags as separate
 # literal arguments, never through a variable.
-OLDIFS=$IFS
-IFS='
+check_staged() {
+    OLDIFS=$IFS
+    IFS='
 '
-rc=0
-checked=0
-for f in $STAGED; do
-    [ -f "$f" ] || continue     # staged then removed from the tree
-    # --skip-unsupported: a staged README or JSON file exits 0 rather than 2.
-    if [ -f "$BASELINE_FILE" ]; then
-        "$PY" "$CHECK_PY" "$f" --baseline "$BASELINE_FILE" --pretty --skip-unsupported || rc=1
-    else
-        "$PY" "$CHECK_PY" "$f" --pretty --skip-unsupported || rc=1
+    rc=0
+    checked=0
+    for f in $STAGED; do
+        [ -f "$f" ] || continue     # staged then removed from the tree
+        # --skip-unsupported: a staged README or JSON file exits 0 rather than 2.
+        if [ -f "$BASELINE_FILE" ]; then
+            "$PY" "$CHECK_PY" "$f" --baseline "$BASELINE_FILE" --pretty --skip-unsupported || rc=1
+        else
+            "$PY" "$CHECK_PY" "$f" --pretty --skip-unsupported || rc=1
+        fi
+        checked=$((checked + 1))
+    done
+    IFS=$OLDIFS
+}
+
+# The verdict. Say so on success too: a gate that only speaks when it fails
+# is indistinguishable from a gate that never ran.
+verdict() {
+    if [ "$rc" -ne 0 ]; then
+        echo ""
+        echo "====================================="
+        echo " Pre-commit check FAILED"
+        echo " Fix the issues above, then re-commit"
+        echo " To skip: git commit --no-verify"
+        echo "====================================="
+        exit 1
     fi
-    checked=$((checked + 1))
-done
-IFS=$OLDIFS
+    echo "JP_TOOLS: $checked staged file(s) checked, clean."
+    exit 0
+}
 
-if [ $rc -ne 0 ]; then
-    echo ""
-    echo "====================================="
-    echo " Pre-commit check FAILED"
-    echo " Fix the issues above, then re-commit"
-    echo " To skip: git commit --no-verify"
-    echo "====================================="
-    exit 1
-fi
-
-# Say so on success too. A gate that only speaks when it fails is
-# indistinguishable from a gate that never ran.
-echo "JP_TOOLS: $checked staged file(s) checked, clean."
-exit 0
+check_interface
+choose_python
+# An inherited repo ratchets against a recorded baseline rather than against
+# zero. If one is committed at the repo root, use it. check.py REFUSES a
+# baseline recorded in a different mode, so a whole-repo baseline dropped here
+# fails loudly instead of reporting scope difference as regression.
+BASELINE_FILE="$(git rev-parse --show-toplevel)/quality-baseline.json"
+CHECK_PY="$TOOLS_DIR/check.py"
+check_flags
+check_emdashes
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$STAGED" ] && exit 0
+check_staged
+verdict

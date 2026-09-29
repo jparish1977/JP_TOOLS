@@ -28,18 +28,34 @@ if [ ! -f "$T" ]; then
   echo "FAIL  cannot find spool-audit.py at $T"
   exit 2
 fi
-W=$(mktemp -d); trap 'chmod -R u+rwX "$W" 2>/dev/null; rm -rf "$W"' EXIT
-pass=0; fail=0; skip=0
-ok () { echo "  PASS  $1"; pass=$((pass+1)); }
-no () { echo "  FAIL  $1"; fail=$((fail+1)); }
-sk () { echo "  SKIP  $1"; skip=$((skip+1)); }
-ck () { if [ "$2" = "$3" ]; then ok "$1"; else no "$1 (got '$2', want '$3')"; fi; }
+W=$(mktemp -d)
+trap 'chmod -R u+rwX "$W" 2>/dev/null; rm -rf "$W"' EXIT
+pass=0
+fail=0
+skip=0
+ok() {
+  echo "  PASS  $1"
+  pass=$((pass + 1))
+}
+no() {
+  echo "  FAIL  $1"
+  fail=$((fail + 1))
+}
+sk() {
+  echo "  SKIP  $1"
+  skip=$((skip + 1))
+}
+ck() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1 (got '$2', want '$3')"; fi; }
 # An exit code on its own is not evidence of the reason for it. argparse exits 2
 # for a malformed argument, exactly like a genuinely unreadable spool does, so a
 # typo such as `--spool"$W/x"` would pass every exit-2 case while testing
 # nothing. Assert the explanation too, so the code and the reason must agree.
-has () { case "$3" in *"$2"*) ok "$1";; *) no "$1 (output lacked '$2')";; esac; }
-holds () { local label="$1"; shift; if "$@"; then ok "$label"; else no "$label"; fi; }   # holds <label> <test...>
+has() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1 (output lacked '$2')" ;; esac }
+holds() {
+  local label="$1"
+  shift
+  if "$@"; then ok "$label"; else no "$label"; fi
+} # holds <label> <test...>
 # EVERY invocation goes through this. Two things it pins that nothing else can:
 #
 #   1. The expected exit code, per call. Without it a check can only assert on
@@ -51,251 +67,311 @@ holds () { local label="$1"; shift; if "$@"; then ok "$label"; else no "$label";
 #      name here rather than by whatever assertion happens to follow.
 #
 # Sets OUT and RC for the caller.
-run_tool () {   # run_tool <expected-rc> <label> [tool args...]
-  local want="$1" label="$2"; shift 2
-  OUT=$("$PY" "$T" "$@" 2>&1); RC=$?
+run_tool() { # run_tool <expected-rc> <label> [tool args...]
+  local want="$1" label="$2"
+  shift 2
+  OUT=$("$PY" "$T" "$@" 2>&1)
+  RC=$?
   case "$OUT" in
-    *"unrecognized arguments"*|*"invalid choice"*|*"expected one argument"*)
+    *"unrecognized arguments"* | *"invalid choice"* | *"expected one argument"*)
       no "$label (THE TOOL NEVER RAN: $(printf '%s' "$OUT" | tail -1))"
-      return 0;;
+      return 0
+      ;;
   esac
   ck "$label" "$RC" "$want"
 }
 
-echo "FLAW 1: a check that did not run must never read as a pass"
-# Root bypasses permission bits, so chmod 000 does not make a directory
-# unreadable to it and these two cannot be tested as root -- and the tool is
-# normally run under sudo, so that is not a hypothetical. Skipped loudly and
-# counted separately rather than silently passing, which would make this suite
-# commit the very flaw it is named after.
-if [ "$(id -u)" = 0 ]; then
-  # Covered uid-independently by test_unreadable_tempdir_is_never_clean in
-  # tests/test_spool_audit_read.py, which injects the PermissionError instead
-  # of relying on permission bits root does not obey.
-  sk "unreadable TempDir exits 2 (running as root; chmod 000 does not apply)"
-  sk "unreadable is reported as denied (running as root)"
-  sk "unreadable never says clean (running as root)"
-else
-  mkdir -p "$W/denied/tmp"; printf '%%!PS\n' > "$W/denied/tmp/doc.ps"; chmod 000 "$W/denied/tmp"
-  out=$("$PY" "$T" --spool "$W/denied" --conf /dev/null 2>&1); rc=$?
-  ck "unreadable TempDir exits 2" "$rc" "2"
-  has "unreadable is reported as denied" "permission denied" "$out"
-  case "$out" in *"spool is clean"*) no "unreadable never says clean";; *) ok "unreadable never says clean";; esac
-  chmod 755 "$W/denied/tmp"
-fi
-out=$("$PY" "$T" --spool "$W/nonexistent" --conf /dev/null 2>&1); rc=$?
-ck "missing path exits 2" "$rc" "2"
-has "missing path says so" "THAT PATH DOES NOT EXIST" "$out"
-touch "$W/afile"; out=$("$PY" "$T" --spool "$W/afile" --conf /dev/null 2>&1); rc=$?
-ck "not-a-directory exits 2" "$rc" "2"
-has "not-a-directory says so" "THAT PATH IS NOT A DIRECTORY" "$out"
+flaw_not_run() {
+  echo "FLAW 1: a check that did not run must never read as a pass"
+  # Root bypasses permission bits, so chmod 000 does not make a directory
+  # unreadable to it and these two cannot be tested as root -- and the tool is
+  # normally run under sudo, so that is not a hypothetical. Skipped loudly and
+  # counted separately rather than silently passing, which would make this suite
+  # commit the very flaw it is named after.
+  if [ "$(id -u)" = 0 ]; then
+    # Covered uid-independently by test_unreadable_tempdir_is_never_clean in
+    # tests/test_spool_audit_read.py, which injects the PermissionError instead
+    # of relying on permission bits root does not obey.
+    sk "unreadable TempDir exits 2 (running as root; chmod 000 does not apply)"
+    sk "unreadable is reported as denied (running as root)"
+    sk "unreadable never says clean (running as root)"
+  else
+    mkdir -p "$W/denied/tmp"
+    printf '%%!PS\n' >"$W/denied/tmp/doc.ps"
+    chmod 000 "$W/denied/tmp"
+    out=$("$PY" "$T" --spool "$W/denied" --conf /dev/null 2>&1)
+    rc=$?
+    ck "unreadable TempDir exits 2" "$rc" "2"
+    has "unreadable is reported as denied" "permission denied" "$out"
+    case "$out" in *"spool is clean"*) no "unreadable never says clean" ;; *) ok "unreadable never says clean" ;; esac
+    chmod 755 "$W/denied/tmp"
+  fi
+  out=$("$PY" "$T" --spool "$W/nonexistent" --conf /dev/null 2>&1)
+  rc=$?
+  ck "missing path exits 2" "$rc" "2"
+  has "missing path says so" "THAT PATH DOES NOT EXIST" "$out"
+  touch "$W/afile"
+  out=$("$PY" "$T" --spool "$W/afile" --conf /dev/null 2>&1)
+  rc=$?
+  ck "not-a-directory exits 2" "$rc" "2"
+  has "not-a-directory says so" "THAT PATH IS NOT A DIRECTORY" "$out"
 
-echo "FLAW 2: nothing may be invisible (the ls baseline)"
-mkdir -p "$W/acct/tmp/.cache"
-touch "$W/acct/d00085-001" "$W/acct/c00085"
-echo x > "$W/acct/d00085-001.bak"; echo y > "$W/acct/stray"; mkdir "$W/acct/subdir"
-: > "$W/acct/empty-stray"   # zero length: nothing to read, still must be listed
-printf '*PPD-Adobe: "4.3"\n' > "$W/acct/tmp/ppd"; printf '%%!PS\n' > "$W/acct/tmp/real.ps"
-echo z > "$W/acct/tmp/.cache/fc"
-# Exit 2, not 1: this fixture contains subdir/, which is neither a document
-# nor the TempDir, so the tool reports it as an area it did not examine and
-# the whole run is INCOMPLETE. "There is content AND something I could not
-# look inside" is a worse result than "there is content", and the exit code
-# says so.
-run_tool 2 "the accounting run is INCOMPLETE, because subdir/ was not examined" \
-  --spool "$W/acct" --include-control --conf /dev/null
-printf '%s\n' "$OUT" > "$W/o.txt"
-missing=0
-while read -r f; do
-  # Whole-entry match on the relative path, not a substring of any basename.
-  # `grep -qF d00085-001` is satisfied by the report line for d00085-001.bak,
-  # so it would pass a report that dropped the real document and kept its
-  # backup, and "nothing is invisible" is the one promise here that is
-  # strictly stronger than `ls`. The report prints each entry as an
-  # indented relative path, optionally followed by an annotation (" -> target",
-  # " (subdirectory, not examined)"); a parent directory appears only as the
-  # prefix of its children, hence the "/" case.
-  awk -v p="$f" '
+}
+
+flaw_invisible() {
+  echo "FLAW 2: nothing may be invisible (the ls baseline)"
+  mkdir -p "$W/acct/tmp/.cache"
+  touch "$W/acct/d00085-001" "$W/acct/c00085"
+  echo x >"$W/acct/d00085-001.bak"
+  echo y >"$W/acct/stray"
+  mkdir "$W/acct/subdir"
+  : >"$W/acct/empty-stray" # zero length: nothing to read, still must be listed
+  printf '*PPD-Adobe: "4.3"\n' >"$W/acct/tmp/ppd"
+  printf '%%!PS\n' >"$W/acct/tmp/real.ps"
+  echo z >"$W/acct/tmp/.cache/fc"
+  # Exit 2, not 1: this fixture contains subdir/, which is neither a document
+  # nor the TempDir, so the tool reports it as an area it did not examine and
+  # the whole run is INCOMPLETE. "There is content AND something I could not
+  # look inside" is a worse result than "there is content", and the exit code
+  # says so.
+  run_tool 2 "the accounting run is INCOMPLETE, because subdir/ was not examined" \
+    --spool "$W/acct" --include-control --conf /dev/null
+  printf '%s\n' "$OUT" >"$W/o.txt"
+  missing=0
+  while read -r f; do
+    # Whole-entry match on the relative path, not a substring of any basename.
+    # `grep -qF d00085-001` is satisfied by the report line for d00085-001.bak,
+    # so it would pass a report that dropped the real document and kept its
+    # backup, and "nothing is invisible" is the one promise here that is
+    # strictly stronger than `ls`. The report prints each entry as an
+    # indented relative path, optionally followed by an annotation (" -> target",
+    # " (subdirectory, not examined)"); a parent directory appears only as the
+    # prefix of its children, hence the "/" case.
+    awk -v p="$f" '
     { line = $0; sub(/^[[:space:]]+/, "", line)
       if (index(line, p) == 1) {
         c = substr(line, length(p) + 1, 1)
         if (c == "" || c == " " || c == "/") { found = 1 }
       } }
-    END { exit !found }' "$W/o.txt" \
-    || { missing=$((missing+1)); echo "        invisible: $f"; }
-done < <(find "$W/acct" -mindepth 1 | sed "s|^$W/acct/||")
-ck "every path under the spool is reported" "$missing" "0"
+    END { exit !found }' "$W/o.txt" ||
+      {
+        missing=$((missing + 1))
+        echo "        invisible: $f"
+      }
+  done < <(find "$W/acct" -mindepth 1 | sed "s|^$W/acct/||")
+  ck "every path under the spool is reported" "$missing" "0"
 
-echo "FLAW 3: never claim to have examined what was never opened"
-# "The target of a purged symlink survived" is satisfied by a tool that never
-# runs, so the purge-path version lives in FLAW 6 below and in the invariant
-# suite, both pinned by run_tool's status. What THIS fixture pins is the
-# report half: a symlink is an area the tool did NOT read, and reporting it as
-# anything else is a false clean.
-mkdir -p "$W/sym/tmp" "$W/vault"; printf '%%!PS\nSECRET\n' > "$W/vault/keep.ps"
-ln -s "$W/vault/keep.ps" "$W/sym/tmp/link.ps"
-# A decoy the tool MUST report, in the same fixture as the symlink it must
-# refuse. "The target was untouched" is a negative, and a negative is
-# satisfied by the tool never running at all -- it reads the same whether the
-# symlink was correctly refused or nothing happened. Pairing it with something
-# that must be FOUND is what makes the pair evidence that the tool ran and
-# discriminated, rather than evidence that it was absent.
-printf '%%!PS\nDECOY\n' > "$W/sym/tmp/decoy.ps"
-before=$(cat "$W/vault/keep.ps")
-run_tool 2 "a symlink makes the result INCOMPLETE, not clean" --spool "$W/sym" --conf /dev/null
-has "and says it was not followed" "NOT followed" "$OUT"
-has "while the decoy in the same directory IS reported" "decoy.ps" "$OUT"
-case "$OUT" in *"spool is clean"*) no "never says clean over a symlink";; *) ok "never says clean over a symlink";; esac
-holds "the target is untouched" [ "$(cat "$W/vault/keep.ps")" = "$before" ]
-mkdir -p "$W/root/tmp2"; printf '%%!PS\nOUT\n' > "$W/root/tmp2/out.ps"
-mkdir -p "$W/esc"; ln -s "$W/root/tmp2" "$W/esc/tmp"
-run_tool 2 "a symlinked TempDir root is not followed" --spool "$W/esc" --conf /dev/null
-has "and names the TempDir as the unexamined area" "TempDir is a symlink" "$OUT"
-holds "the file outside the spool is untouched" [ -f "$W/root/tmp2/out.ps" ]
+}
 
-echo "FLAW 4: a fix must apply to every path, not one of them"
-mkdir -p "$W/nl"; printf '%%!PS\n' > "$W/nl/$(printf 'evil\nd00099-001')"
-run_tool 1 "a newline in a filename does not derail the run" --spool "$W/nl" --conf /dev/null
-has "newline filename survives the listing" "d00099-001" "$OUT"
+flaw_unopened() {
+  echo "FLAW 3: never claim to have examined what was never opened"
+  # "The target of a purged symlink survived" is satisfied by a tool that never
+  # runs, so the purge-path version lives in FLAW 6 below and in the invariant
+  # suite, both pinned by run_tool's status. What THIS fixture pins is the
+  # report half: a symlink is an area the tool did NOT read, and reporting it as
+  # anything else is a false clean.
+  mkdir -p "$W/sym/tmp" "$W/vault"
+  printf '%%!PS\nSECRET\n' >"$W/vault/keep.ps"
+  ln -s "$W/vault/keep.ps" "$W/sym/tmp/link.ps"
+  # A decoy the tool MUST report, in the same fixture as the symlink it must
+  # refuse. "The target was untouched" is a negative, and a negative is
+  # satisfied by the tool never running at all -- it reads the same whether the
+  # symlink was correctly refused or nothing happened. Pairing it with something
+  # that must be FOUND is what makes the pair evidence that the tool ran and
+  # discriminated, rather than evidence that it was absent.
+  printf '%%!PS\nDECOY\n' >"$W/sym/tmp/decoy.ps"
+  before=$(cat "$W/vault/keep.ps")
+  run_tool 2 "a symlink makes the result INCOMPLETE, not clean" --spool "$W/sym" --conf /dev/null
+  has "and says it was not followed" "NOT followed" "$OUT"
+  has "while the decoy in the same directory IS reported" "decoy.ps" "$OUT"
+  case "$OUT" in *"spool is clean"*) no "never says clean over a symlink" ;; *) ok "never says clean over a symlink" ;; esac
+  holds "the target is untouched" [ "$(cat "$W/vault/keep.ps")" = "$before" ]
+  mkdir -p "$W/root/tmp2"
+  printf '%%!PS\nOUT\n' >"$W/root/tmp2/out.ps"
+  mkdir -p "$W/esc"
+  ln -s "$W/root/tmp2" "$W/esc/tmp"
+  run_tool 2 "a symlinked TempDir root is not followed" --spool "$W/esc" --conf /dev/null
+  has "and names the TempDir as the unexamined area" "TempDir is a symlink" "$OUT"
+  holds "the file outside the spool is untouched" [ -f "$W/root/tmp2/out.ps" ]
 
-echo "FLAW 5: known-harmless things must not be reported as secrets"
-mkdir -p "$W/noise/tmp/.cache/fontconfig"
-printf '*PPD-Adobe: "4.3"\n' > "$W/noise/tmp/ppd"
-: > "$W/noise/tmp/cups-dbus-notifier-lockfile"
-for i in 1 2 3 4 5; do echo bin > "$W/noise/tmp/.cache/fontconfig/c$i.cache-9"; done
-run_tool 0 "a spool of only caches is clean" --spool "$W/noise" --conf /dev/null
-case "$OUT" in *"spool is clean"*) ok "and says so";; *) no "and says so";; esac
+}
 
-echo "FLAW 6: --purge removes only what its evidence proves, only where it was pointed"
-# Every survivor check below is a negative, which a tool that never ran
-# satisfies for free -- so each fixture pairs them with a removal that must
-# be FOUND, and run_tool pins the status. The canary's vandal stub is what
-# keeps the survivor checks honest.
-mkdir -p "$W/purge/tmp"
-printf '%%!PS-Adobe-3.0\n' > "$W/purge/tmp/leak.ps"
-printf '*PPD-Adobe: "4.3"\n' > "$W/purge/tmp/ppd"
-echo notes > "$W/purge/README"
-printf '%%PDF-1.7\n' > "$W/purge/d00085-001"
-# Before anything is destroyed: the report must say WHICH entries the purge
-# set is. A count above an unmarked mixed listing cannot be resolved into
-# names short of running the purge and reading what it destroyed.
-run_tool 1 "the report names the delete set before anything is destroyed" \
-  --spool "$W/purge" --conf /dev/null
-has "the purgeable entry is marked in the listing" "tmp/leak.ps  <- --purge removes this" "$OUT"
-# The forbidden-string check needs the REQUIRED string in the same output, or
-# an empty report satisfies it: "nothing else is marked" is trivially true of a
-# tool that marked nothing, and tests/test_acceptance_canary.py flags such a
-# check as passing against every stub.
-case "$OUT" in
-  *"tmp/leak.ps  <- --purge removes this"*)
-    case "$OUT" in
-      *"README  <- --purge"*|*"d00085-001  <- --purge"*)
-        no "only the delete set carries the mark";;
-      *) ok "only the delete set carries the mark";;
-    esac;;
-  *) no "only the delete set carries the mark (output lacked the delete-set mark entirely, so nothing else carrying it proves nothing)";;
-esac
-run_tool 1 "purge leaves the job file for cancel, so the spool is not clean" \
-  --spool "$W/purge" --conf /dev/null --purge
-has "the residue removal is reported" "removed: tmp/leak.ps" "$OUT"
-holds "the identified leak is gone" [ ! -e "$W/purge/tmp/leak.ps" ]
-holds "the driver cache survives" [ -f "$W/purge/tmp/ppd" ]
-holds "the unidentified file survives" [ -f "$W/purge/README" ]
-holds "the job file survives" [ -f "$W/purge/d00085-001" ]
-has "and cancel is named for it" "cancel -a -x" "$OUT"
+flaw_one_path() {
+  echo "FLAW 4: a fix must apply to every path, not one of them"
+  mkdir -p "$W/nl"
+  printf '%%!PS\n' >"$W/nl/$(printf 'evil\nd00099-001')"
+  run_tool 1 "a newline in a filename does not derail the run" --spool "$W/nl" --conf /dev/null
+  has "newline filename survives the listing" "d00099-001" "$OUT"
 
-mkdir -p "$W/purge2/tmp"
-printf '%%!PS\n' > "$W/purge2/tmp/leak.ps"
-run_tool 0 "a residue-only spool is clean after purge" --spool "$W/purge2" --conf /dev/null --purge
-has "and says so" "spool is clean" "$OUT"
+}
 
-run_tool 1 "purging where nothing is removable says what it will not do" \
-  --spool "$W/purge" --conf /dev/null --purge
-has "names the refusal to decide" "unidentified files are yours to judge" "$OUT"
+flaw_harmless() {
+  echo "FLAW 5: known-harmless things must not be reported as secrets"
+  mkdir -p "$W/noise/tmp/.cache/fontconfig"
+  printf '*PPD-Adobe: "4.3"\n' >"$W/noise/tmp/ppd"
+  : >"$W/noise/tmp/cups-dbus-notifier-lockfile"
+  for i in 1 2 3 4 5; do echo bin >"$W/noise/tmp/.cache/fontconfig/c$i.cache-9"; done
+  run_tool 0 "a spool of only caches is clean" --spool "$W/noise" --conf /dev/null
+  case "$OUT" in *"spool is clean"*) ok "and says so" ;; *) no "and says so" ;; esac
 
-run_tool 2 "purge scoped by job id is refused" --spool "$W/purge" --conf /dev/null 85 --purge
-has "and names the CUPS tool that IS scoped" "cancel -x 85" "$OUT"
-holds "the refusal deleted nothing" [ -f "$W/purge/d00085-001" ]
+}
 
-# A TempDir that is a symlink pointing out of the spool: the listing refuses
-# to look through it, so nothing inside can become a victim, whatever the
-# deleter would do.
-mkdir -p "$W/proot/real"; printf '%%!PS\nOUT\n' > "$W/proot/real/out.ps"
-mkdir -p "$W/pesc"; ln -s "$W/proot/real" "$W/pesc/tmp"
-run_tool 2 "a symlinked TempDir makes a purge INCOMPLETE, not a delete set" \
-  --spool "$W/pesc" --conf /dev/null --purge
-has "and is named as unexamined" "TempDir is a symlink" "$OUT"
-holds "the file outside the spool survives the purge" [ -f "$W/proot/real/out.ps" ]
-
-echo "FLAW 7: removing one name of a document is not destroying the document"
-# A hard-linked victim: CUPS cannot create hard links, but an operator's `ln`
-# can, and "removed" plus "spool is clean" plus exit 0 would be false while
-# identical readable content survives at the other link. Refusing would be
-# worse (two copies instead of one), so the entry is still unlinked; the claim
-# and the exit code are what change.
-mkdir -p "$W/hard/tmp" "$W/hardvault"
-printf '%%!PS\nSECRET\n' > "$W/hard/tmp/leak.ps"
-ln "$W/hard/tmp/leak.ps" "$W/hardvault/other-link.ps"
-run_tool 1 "a hard-linked victim raises the exit code" \
-  --spool "$W/hard" --conf /dev/null --purge
-has "and is reported as removed but NOT destroyed" \
-  "removed but NOT destroyed: tmp/leak.ps" "$OUT"
-holds "the spool's entry is still unlinked" [ ! -e "$W/hard/tmp/leak.ps" ]
-# Survival at the other link is only evidence if the spool entry was actually
-# removed -- otherwise it is the state BEFORE the tool ran, and a tool that does
-# nothing passes. Both halves in one check so a do-nothing stub fails it.
-if [ ! -e "$W/hard/tmp/leak.ps" ] \
-   && grep -q SECRET "$W/hardvault/other-link.ps" 2>/dev/null; then
-  ok "the content survives at the other link, as the report says"
-else
-  no "the content survives at the other link, as the report says"
-fi
-
-echo "FLAW 8: the report must not promise what the purge just failed to do"
-# With the containing directory at mode 500 the unlink fails EACCES, and the
-# report must then neither promise "--purge removes exactly these files" nor
-# advise --purge for the entry it just failed on. Root bypasses the mode bit,
-# so this is skipped loudly there like FLAW 1's chmod cases; the same
-# suppression is covered uid-independently in tests/test_spool_audit_render.py.
-if [ "$(id -u)" = 0 ]; then
-  sk "a failed purge withdraws its promises (running as root; chmod 500 does not apply)"
-else
-  mkdir -p "$W/stuck/tmp"
-  printf '%%!PS\n' > "$W/stuck/tmp/leak.ps"
-  chmod 500 "$W/stuck/tmp"
-  run_tool 1 "a failed unlink exits 1" --spool "$W/stuck" --conf /dev/null --purge
-  has "the failure is reported" "delete FAILED" "$OUT"
-  # Same pairing: "no capability claim" is trivially true of an empty report,
-  # so require the failure to have been reported in the same output first.
+flaw_purge_scope() {
+  echo "FLAW 6: --purge removes only what its evidence proves, only where it was pointed"
+  # Every survivor check below is a negative, which a tool that never ran
+  # satisfies for free -- so each fixture pairs them with a removal that must
+  # be FOUND, and run_tool pins the status. The canary's vandal stub is what
+  # keeps the survivor checks honest.
+  mkdir -p "$W/purge/tmp"
+  printf '%%!PS-Adobe-3.0\n' >"$W/purge/tmp/leak.ps"
+  printf '*PPD-Adobe: "4.3"\n' >"$W/purge/tmp/ppd"
+  echo notes >"$W/purge/README"
+  printf '%%PDF-1.7\n' >"$W/purge/d00085-001"
+  # Before anything is destroyed: the report must say WHICH entries the purge
+  # set is. A count above an unmarked mixed listing cannot be resolved into
+  # names short of running the purge and reading what it destroyed.
+  run_tool 1 "the report names the delete set before anything is destroyed" \
+    --spool "$W/purge" --conf /dev/null
+  has "the purgeable entry is marked in the listing" "tmp/leak.ps  <- --purge removes this" "$OUT"
+  # The forbidden-string check needs the REQUIRED string in the same output, or
+  # an empty report satisfies it: "nothing else is marked" is trivially true of a
+  # tool that marked nothing, and tests/test_acceptance_canary.py flags such a
+  # check as passing against every stub.
   case "$OUT" in
-    *"delete FAILED"*)
+    *"tmp/leak.ps  <- --purge removes this"*)
       case "$OUT" in
-        *"--purge removes exactly these files"*)
-          no "no capability claim over a failure";;
-        *) ok "no capability claim over a failure";;
-      esac;;
-    *) no "no capability claim over a failure (output lacked 'delete FAILED', so making no claim over it proves nothing)";;
+        *"README  <- --purge"* | *"d00085-001  <- --purge"*)
+          no "only the delete set carries the mark"
+          ;;
+        *) ok "only the delete set carries the mark" ;;
+      esac
+      ;;
+    *) no "only the delete set carries the mark (output lacked the delete-set mark entirely, so nothing else carrying it proves nothing)" ;;
   esac
-  v=$(printf '%s\n' "$OUT" | grep '^VERDICT:')
-  # An absent verdict line would satisfy the case below by falling through to
-  # ok. A tool that prints no verdict cannot be said to have withdrawn its
-  # advice, so require the line to exist first.
-  if [ -z "$v" ]; then
-    no "the verdict does not advise what just failed (output lacked a VERDICT: line entirely)"
-  else
-    case "$v" in
-      *"Clear them with:"*) no "the verdict does not advise what just failed";;
-      *) ok "the verdict does not advise what just failed";;
-    esac
-  fi
-  has "and it points at the failure instead" "just FAILED" "$v"
-  chmod 755 "$W/stuck/tmp"
-fi
+  run_tool 1 "purge leaves the job file for cancel, so the spool is not clean" \
+    --spool "$W/purge" --conf /dev/null --purge
+  has "the residue removal is reported" "removed: tmp/leak.ps" "$OUT"
+  holds "the identified leak is gone" [ ! -e "$W/purge/tmp/leak.ps" ]
+  holds "the driver cache survives" [ -f "$W/purge/tmp/ppd" ]
+  holds "the unidentified file survives" [ -f "$W/purge/README" ]
+  holds "the job file survives" [ -f "$W/purge/d00085-001" ]
+  has "and cancel is named for it" "cancel -a -x" "$OUT"
 
-echo
-if [ "$skip" -gt 0 ]; then
-  echo "  $pass passed, $fail failed, $skip SKIPPED (not run -- not the same as passed)"
-else
-  echo "  $pass passed, $fail failed"
-fi
+  mkdir -p "$W/purge2/tmp"
+  printf '%%!PS\n' >"$W/purge2/tmp/leak.ps"
+  run_tool 0 "a residue-only spool is clean after purge" --spool "$W/purge2" --conf /dev/null --purge
+  has "and says so" "spool is clean" "$OUT"
+
+  run_tool 1 "purging where nothing is removable says what it will not do" \
+    --spool "$W/purge" --conf /dev/null --purge
+  has "names the refusal to decide" "unidentified files are yours to judge" "$OUT"
+
+  run_tool 2 "purge scoped by job id is refused" --spool "$W/purge" --conf /dev/null 85 --purge
+  has "and names the CUPS tool that IS scoped" "cancel -x 85" "$OUT"
+  holds "the refusal deleted nothing" [ -f "$W/purge/d00085-001" ]
+
+  # A TempDir that is a symlink pointing out of the spool: the listing refuses
+  # to look through it, so nothing inside can become a victim, whatever the
+  # deleter would do.
+  mkdir -p "$W/proot/real"
+  printf '%%!PS\nOUT\n' >"$W/proot/real/out.ps"
+  mkdir -p "$W/pesc"
+  ln -s "$W/proot/real" "$W/pesc/tmp"
+  run_tool 2 "a symlinked TempDir makes a purge INCOMPLETE, not a delete set" \
+    --spool "$W/pesc" --conf /dev/null --purge
+  has "and is named as unexamined" "TempDir is a symlink" "$OUT"
+  holds "the file outside the spool survives the purge" [ -f "$W/proot/real/out.ps" ]
+
+}
+
+flaw_hard_link() {
+  echo "FLAW 7: removing one name of a document is not destroying the document"
+  # A hard-linked victim: CUPS cannot create hard links, but an operator's `ln`
+  # can, and "removed" plus "spool is clean" plus exit 0 would be false while
+  # identical readable content survives at the other link. Refusing would be
+  # worse (two copies instead of one), so the entry is still unlinked; the claim
+  # and the exit code are what change.
+  mkdir -p "$W/hard/tmp" "$W/hardvault"
+  printf '%%!PS\nSECRET\n' >"$W/hard/tmp/leak.ps"
+  ln "$W/hard/tmp/leak.ps" "$W/hardvault/other-link.ps"
+  run_tool 1 "a hard-linked victim raises the exit code" \
+    --spool "$W/hard" --conf /dev/null --purge
+  has "and is reported as removed but NOT destroyed" \
+    "removed but NOT destroyed: tmp/leak.ps" "$OUT"
+  holds "the spool's entry is still unlinked" [ ! -e "$W/hard/tmp/leak.ps" ]
+  # Survival at the other link is only evidence if the spool entry was actually
+  # removed -- otherwise it is the state BEFORE the tool ran, and a tool that does
+  # nothing passes. Both halves in one check so a do-nothing stub fails it.
+  if [ ! -e "$W/hard/tmp/leak.ps" ] &&
+    grep -q SECRET "$W/hardvault/other-link.ps" 2>/dev/null; then
+    ok "the content survives at the other link, as the report says"
+  else
+    no "the content survives at the other link, as the report says"
+  fi
+
+}
+
+flaw_failed_purge() {
+  echo "FLAW 8: the report must not promise what the purge just failed to do"
+  # With the containing directory at mode 500 the unlink fails EACCES, and the
+  # report must then neither promise "--purge removes exactly these files" nor
+  # advise --purge for the entry it just failed on. Root bypasses the mode bit,
+  # so this is skipped loudly there like FLAW 1's chmod cases; the same
+  # suppression is covered uid-independently in tests/test_spool_audit_render.py.
+  if [ "$(id -u)" = 0 ]; then
+    sk "a failed purge withdraws its promises (running as root; chmod 500 does not apply)"
+  else
+    mkdir -p "$W/stuck/tmp"
+    printf '%%!PS\n' >"$W/stuck/tmp/leak.ps"
+    chmod 500 "$W/stuck/tmp"
+    run_tool 1 "a failed unlink exits 1" --spool "$W/stuck" --conf /dev/null --purge
+    has "the failure is reported" "delete FAILED" "$OUT"
+    # Same pairing: "no capability claim" is trivially true of an empty report,
+    # so require the failure to have been reported in the same output first.
+    case "$OUT" in
+      *"delete FAILED"*)
+        case "$OUT" in
+          *"--purge removes exactly these files"*)
+            no "no capability claim over a failure"
+            ;;
+          *) ok "no capability claim over a failure" ;;
+        esac
+        ;;
+      *) no "no capability claim over a failure (output lacked 'delete FAILED', so making no claim over it proves nothing)" ;;
+    esac
+    v=$(printf '%s\n' "$OUT" | grep '^VERDICT:')
+    # An absent verdict line would satisfy the case below by falling through to
+    # ok. A tool that prints no verdict cannot be said to have withdrawn its
+    # advice, so require the line to exist first.
+    if [ -z "$v" ]; then
+      no "the verdict does not advise what just failed (output lacked a VERDICT: line entirely)"
+    else
+      case "$v" in
+        *"Clear them with:"*) no "the verdict does not advise what just failed" ;;
+        *) ok "the verdict does not advise what just failed" ;;
+      esac
+    fi
+    has "and it points at the failure instead" "just FAILED" "$v"
+    chmod 755 "$W/stuck/tmp"
+  fi
+}
+
+summary() {
+  echo
+  if [ "$skip" -gt 0 ]; then
+    echo "  $pass passed, $fail failed, $skip SKIPPED (not run -- not the same as passed)"
+  else
+    echo "  $pass passed, $fail failed"
+  fi
+}
+
+flaw_not_run
+flaw_invisible
+flaw_unopened
+flaw_one_path
+flaw_harmless
+flaw_purge_scope
+flaw_hard_link
+flaw_failed_purge
+summary
 exit $((fail > 0))
