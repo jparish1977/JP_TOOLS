@@ -188,7 +188,11 @@ jobs:
         with:
           node-version: '22'
       - run: npm install
+      # As the Python job's gate step: one worker per core, each taking every
+      # Nth file, each file's log printed afterwards in file order, and each
+      # worker with `set +e` so a finding is recorded rather than fatal.
       - name: Check every JS file
+        shell: bash
         env:
           SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
@@ -198,9 +202,21 @@ jobs:
             echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
             base=HEAD
           fi
+          out=$(mktemp -d)
+          mapfile -t files < <(git ls-files '*.js' '*.mjs' '*.cjs')
+          workers=$(nproc)
+          for ((w = 0; w < workers; w++)); do
+            ( set +e
+              for ((i = w; i < ${#files[@]}; i += workers)); do
+                python check.py "${files[$i]}" --pretty --smells-base "$base" > "$out/$i.log" 2>&1
+                echo $? > "$out/$i.rc"
+              done ) &
+          done
+          wait
           rc=0
-          for f in $(git ls-files '*.js' '*.mjs' '*.cjs'); do
-            echo "--- $f ---"
-            python check.py "$f" --pretty --smells-base "$base" || rc=1
+          for i in "${!files[@]}"; do
+            echo "--- ${files[$i]} ---"
+            cat "$out/$i.log"
+            [ "$(cat "$out/$i.rc")" = 0 ] || rc=1
           done
           exit $rc
