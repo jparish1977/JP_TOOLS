@@ -57,7 +57,9 @@ jobs:
         run: composer install --no-interaction --no-progress
       # Every file is checked on its own, every core at once. Each writes its
       # own log, printed afterwards in file order, so the output reads as a
-      # serial run's would.
+      # serial run's would. Each job runs with `set +e`: this shell has -e,
+      # and a job that inherited it would die on a finding before recording
+      # its exit code, then kill the whole step, unprinted, through wait -n.
       - name: Check every Python and shell file
         shell: bash
         env:
@@ -72,8 +74,9 @@ jobs:
           out=$(mktemp -d)
           mapfile -t files < <(git ls-files '*.py' '*.sh' '*.bash')
           for i in "${!files[@]}"; do
-            { python check.py "${files[$i]}" --pretty --smells-base "$base" > "$out/$i.log" 2>&1
-              echo $? > "$out/$i.rc"; } &
+            ( set +e
+              python check.py "${files[$i]}" --pretty --smells-base "$base" > "$out/$i.log" 2>&1
+              echo $? > "$out/$i.rc" ) &
             while [ "$(jobs -rp | wc -l)" -ge "$(nproc)" ]; do wait -n; done
           done
           wait
@@ -98,17 +101,21 @@ jobs:
           rm -f .coverage .coverage.*
           # Every core at once. .coveragerc's parallel = True gives each
           # process its own data file, combined below. Each suite writes its
-          # own log, printed afterwards in suite order.
+          # own log, printed afterwards in suite order. Each job runs with
+          # `set +e`, as in the step above, so a failing suite is recorded
+          # and printed rather than killing the step.
           # The shell suites too: the acceptance suite drives the real CLI.
           # PYTHON=python so it runs the interpreter the .pth is installed in.
           out=$(mktemp -d)
           suites=(tests/test_*.py tests/test_*.sh)
           for i in "${!suites[@]}"; do
             t=${suites[$i]}
-            case "$t" in
-              *.py) { python -m coverage run "$t" > "$out/$i.log" 2>&1; echo $? > "$out/$i.rc"; } & ;;
-              *.sh) { PYTHON=python bash "$t" > "$out/$i.log" 2>&1; echo $? > "$out/$i.rc"; } & ;;
-            esac
+            ( set +e
+              case "$t" in
+                *.py) python -m coverage run "$t" > "$out/$i.log" 2>&1 ;;
+                *.sh) PYTHON=python bash "$t" > "$out/$i.log" 2>&1 ;;
+              esac
+              echo $? > "$out/$i.rc" ) &
             while [ "$(jobs -rp | wc -l)" -ge "$(nproc)" ]; do wait -n; done
           done
           wait
