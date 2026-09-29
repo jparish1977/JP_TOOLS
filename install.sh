@@ -42,24 +42,32 @@ report_system_tools() {
     done < "$here/requirements-system.txt"
 }
 
-echo ""
-echo "==> PHP tools (requires php + composer)"
-if command -v composer &>/dev/null && command -v php &>/dev/null; then
-    # composer.json requires find-dupes.php's private libraries: without
-    # their repositories in the global composer config, this stops on them.
+# composer.json requires find-dupes.php's private libraries, which need PHP
+# extensions and their repositories in the global composer config; without
+# either, this stops. The system-tools report runs first, so a missing
+# extension is already on the screen, with its package, when it does.
+install_php_tools() {
+    if ! command -v composer &>/dev/null || ! command -v php &>/dev/null; then
+        echo "    php or composer not found: skipping PHPStan/phpcs/Rector"
+        echo "    Install PHP and Composer then re-run: composer install"
+        return
+    fi
     composer --working-dir="$here" install --no-interaction || {
-        echo "    composer install failed. If it stopped on the build server/*, see the"
-        echo "    README, 'Private libraries: find-dupes.php', for the two repositories."
+        echo "    composer install failed. A php:EXT reported MISSING above is"
+        echo "    installed with the package named there. If it stopped on"
+        echo "    iteration8/* instead, see the README, 'Private libraries:"
+        echo "    find-dupes.php', for the two repositories."
         exit 1
     }
-else
-    echo "    php or composer not found: skipping PHPStan/phpcs/Rector"
-    echo "    Install PHP and Composer then re-run: composer install"
-fi
+}
 
 echo ""
 echo "==> System tools (requirements-system.txt: apt, not pip/npm/composer)"
 report_system_tools
+
+echo ""
+echo "==> PHP tools (requires php + composer)"
+install_php_tools
 
 echo ""
 echo "Done. Usage:"
