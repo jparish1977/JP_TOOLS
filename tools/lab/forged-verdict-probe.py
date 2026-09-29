@@ -28,9 +28,15 @@ NOT TESTED AGAINST: names carrying other control characters (a carriage
   return, an ANSI escape); a spool the tool can only read as root. Not a
   fuzzer: four fixed shapes.
 
+CLEANUP: a spool this makes is removed when it ends, on an interrupt or a
+  termination too. One given as EMPTY_OUTDIR is the caller's and is kept, for
+  inspecting the shapes afterwards.
+
 usage: forged-verdict-probe.py /path/to/spool-audit.py [EMPTY_OUTDIR]
 """
 import os
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -58,18 +64,30 @@ def _spool_dir(given: str | None) -> str:
     return given
 
 
-def main() -> int:
-    if len(sys.argv) < 2:
-        sys.exit(__doc__)
-    d = _spool_dir(sys.argv[2] if len(sys.argv) > 2 else None)
+def probe(tool: str, d: str) -> None:
+    """Build the shapes in D, run TOOL over them, print the report and both idioms."""
     build(d)
-    r = subprocess.run([sys.executable, sys.argv[1], "--spool", d, "--conf", "/dev/null"],
+    r = subprocess.run([sys.executable, tool, "--spool", d, "--conf", "/dev/null"],
                        capture_output=True, text=True, check=False)
     print(r.stdout)
     print("--- grep VERDICT | head -1 ---")
     print(next((line for line in r.stdout.splitlines() if "VERDICT" in line), "(none)"))
     print(f"--- exit={r.returncode} (2 = incomplete, 0 = clean) ---")
-    print(f"spool left at {d}")
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        sys.exit(__doc__)
+    given = sys.argv[2] if len(sys.argv) > 2 else None
+    d = _spool_dir(given)
+    # A termination becomes an exit, so the finally below still runs.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    try:
+        probe(sys.argv[1], d)
+    finally:
+        if given is None:
+            shutil.rmtree(d)
+    print(f"spool kept at {d}" if given else "spool removed")
     return 0
 
 
