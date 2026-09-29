@@ -76,11 +76,22 @@ def _run_findings(all_steps: list[dict[str, Any]]) -> list[str]:
     return wrong
 
 
+def _guard_findings(all_steps: list[dict[str, Any]]) -> list[str]:
+    """actions/checkout fetches from the forge it runs on, so off GitHub the default
+    names a repo on the wrong forge: a step must stop the job when it would be used."""
+    for s in all_steps:
+        cond, body = str(s.get("if", "")), str(s.get("run", ""))
+        if ("!vars.JP_TOOLS_REPOSITORY" in cond and "github.server_url != 'https://github.com'"
+                in cond and "exit 1" in body):
+            return []
+    return ["no step stops the job when JP_TOOLS_REPOSITORY is unset off GitHub"]
+
+
 def findings(text: str) -> list[str]:
     """What is wrong with a template's text; empty when nothing is."""
     all_steps = steps(text)
     uses = [str(s["uses"]) for s in all_steps if "uses" in s]
-    return (_checkout_findings(all_steps) + _run_findings(all_steps)
+    return (_checkout_findings(all_steps) + _guard_findings(all_steps) + _run_findings(all_steps)
             + [f"{u}: not an actions/* action" for u in uses if not u.startswith("actions/")]
             + [f"names {name!r}" for name in INTERNAL if name in text])
 
@@ -106,6 +117,8 @@ def test_control_master_before_the_change_fails() -> None:
                "a fixed JP_TOOLS clone URL" in wrong)
     check_true("control: the old template's setup-php is caught",
                any(w.startswith("shivammathur/setup-php") for w in wrong))
+    check_true("control: the old template has no off-GitHub guard",
+               "no step stops the job when JP_TOOLS_REPOSITORY is unset off GitHub" in wrong)
     with tempfile.TemporaryDirectory() as td:
         old = Path(td) / "ci-check.yml"
         old.write_text(r.stdout, encoding="utf-8")

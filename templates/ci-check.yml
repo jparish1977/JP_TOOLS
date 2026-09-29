@@ -5,10 +5,12 @@
 # Install: python JP_TOOLS/init-ci.py  (copies this into your repo)
 #
 # --- Where JP_TOOLS comes from ---
-# The public copy on GitHub, unless the repository variable JP_TOOLS_REPOSITORY
-# names another (owner/name on the forge running the workflow). Set it, and the
-# secret JP_TOOLS_TOKEN to a token that can read that copy, when your forge
-# hosts JP_TOOLS itself.
+# On GitHub, the public copy, unless the repository variable
+# JP_TOOLS_REPOSITORY names another. Anywhere else the variable is REQUIRED:
+# actions/checkout fetches from the forge the workflow runs on, so the default
+# name would be looked up there, not on GitHub. Set it to JP_TOOLS' owner/name
+# on your forge, and the secret JP_TOOLS_TOKEN to a token that can read it; the
+# workflow stops with this message if it is missing.
 #
 # --- Private Composer dependencies ---
 # If your project requires private GitHub repos via VCS repositories in
@@ -104,11 +106,22 @@ jobs:
           composer --version
 
       # WHICH JP_TOOLS: the repository variable JP_TOOLS_REPOSITORY (owner/name
-      # on the forge running this workflow), or the public copy on GitHub when
-      # it is unset. A forge that hosts JP_TOOLS itself sets the variable to
-      # that copy, and the secret JP_TOOLS_TOKEN to a token that can read it,
-      # so its CI gates against the current JP_TOOLS rather than a mirror that
-      # may lag behind it.
+      # on the forge running this workflow), or on GitHub the public copy when
+      # it is unset. actions/checkout fetches from the forge it runs on, so off
+      # GitHub the default would be looked up on the wrong forge: the variable
+      # is required there, and its absence stops the job with a message rather
+      # than a checkout failure that does not say why. The secret
+      # JP_TOOLS_TOKEN reads a copy that is not public.
+      - name: JP_TOOLS_REPOSITORY is set, off GitHub
+        if: >-
+          steps.present.outputs.found == 'yes' && !vars.JP_TOOLS_REPOSITORY
+          && github.server_url != 'https://github.com'
+        run: |
+          echo "Set the repository variable JP_TOOLS_REPOSITORY to JP_TOOLS' owner/name on this forge" >&2
+          echo "(and the secret JP_TOOLS_TOKEN if it is not public): the default names the copy" >&2
+          echo "on GitHub, and actions/checkout fetches from ${{ github.server_url }}." >&2
+          exit 1
+
       - name: Check out JP_TOOLS
         if: steps.present.outputs.found == 'yes'
         uses: actions/checkout@v6
