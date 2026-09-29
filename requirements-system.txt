@@ -9,6 +9,14 @@
 #
 # MIN_VERSION is what the arm was tested on, not a pin: apt ships one version
 # per release. Without cppcheck, a C/C++ file exits 2 until it is installed.
+#
+# A TOOL of php:EXT is a PHP extension, not a command: composer.json's
+# iteration8/utilities (find-dupes.php's library) requires these, and
+# `composer install` stops without them. MIN_VERSION is the PHP they were
+# tested on; on Windows they ship with PHP, enabled in php.ini.
 
-shellcheck  0.9.0   shellcheck  koalaman.shellcheck
-cppcheck    2.13.0  cppcheck    Cppcheck.Cppcheck
+shellcheck        0.9.0   shellcheck    koalaman.shellcheck
+cppcheck          2.13.0  cppcheck      Cppcheck.Cppcheck
+php:gd            8.3     php-gd        -
+php:sqlite3       8.3     php-sqlite3   -
+php:pdo_sqlite    8.3     php-sqlite3   -
