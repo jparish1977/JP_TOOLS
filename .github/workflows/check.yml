@@ -55,11 +55,13 @@ jobs:
           shellcheck --version
       - name: Install PHP tools
         run: composer install --no-interaction --no-progress
-      # Every file is checked on its own, every core at once. Each writes its
-      # own log, printed afterwards in file order, so the output reads as a
-      # serial run's would. Each job runs with `set +e`: this shell has -e,
-      # and a job that inherited it would die on a finding before recording
-      # its exit code, then kill the whole step, unprinted, through wait -n.
+      # Every file is checked on its own, by one worker per core, each taking
+      # every Nth file in turn. Each file writes its own log, printed
+      # afterwards in file order, so the output reads as a serial run's would.
+      # Each worker has its own mypy cache: mypy processes sharing one cache
+      # crashed here (INTERNAL ERROR on 6 of 149 files). Each runs with
+      # `set +e`: this shell has -e, and a worker that inherited it would stop
+      # at the first finding without recording its exit code.
       - name: Check every Python and shell file
         shell: bash
         env:
@@ -73,11 +75,14 @@ jobs:
           fi
           out=$(mktemp -d)
           mapfile -t files < <(git ls-files '*.py' '*.sh' '*.bash')
-          for i in "${!files[@]}"; do
+          workers=$(nproc)
+          for ((w = 0; w < workers; w++)); do
             ( set +e
-              python check.py "${files[$i]}" --pretty --smells-base "$base" > "$out/$i.log" 2>&1
-              echo $? > "$out/$i.rc" ) &
-            while [ "$(jobs -rp | wc -l)" -ge "$(nproc)" ]; do wait -n; done
+              for ((i = w; i < ${#files[@]}; i += workers)); do
+                MYPY_CACHE_DIR="$out/mypy-cache.$w" python check.py "${files[$i]}" --pretty \
+                  --smells-base "$base" > "$out/$i.log" 2>&1
+                echo $? > "$out/$i.rc"
+              done ) &
           done
           wait
           rc=0

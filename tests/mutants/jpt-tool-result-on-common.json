@@ -12,6 +12,11 @@
       "target": "a crash with output on both streams: the note is stderr's"
     },
     {
+      "name": "the note is the last line, even a hint",
+      "edits": [["        why = next((ln for ln in reversed(said) if \"error\" in ln.lower()), said[-1] if said else \"\")", "        why = said[-1] if said else \"\""]],
+      "target": "a crash ending on a hint: the note is the error line"
+    },
+    {
       "name": "a check that ran gets a note too",
       "edits": [["    if result[\"status\"] == \"error\":\n        said", "    if True:\n        said"]],
       "target": "control: a check that ran carries no note"

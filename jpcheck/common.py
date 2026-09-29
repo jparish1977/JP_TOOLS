@@ -202,15 +202,18 @@ def _tool_result(tool: str, issues: list[dict[str, Any]],
     """TOOL's result from its ISSUES and its finished process.
 
     An exit code other than 0 or 1 means the tool stopped short of a verdict,
-    and the note then carries the code and the last line it wrote, stderr
-    first: that is where each tool says why. Without it the report reads
-    "did not run" and nothing else.
+    and the note then carries the code and the line that says why: from
+    stderr first, the last line naming an error, else the last line. A crash
+    often ends on a hint ("use --show-traceback ..."), which says nothing.
+    Without a note the report reads "did not run" and nothing else.
     """
     result: dict[str, Any] = {"tool": tool, "status": _status(issues, proc.returncode),
                               "issues": issues}
     if result["status"] == "error":
-        said = strip_ansi(proc.stderr or proc.stdout or "").strip().splitlines()
-        result["note"] = (f"exit {proc.returncode}: {said[-1].strip()[:300]}" if said
+        said = [ln.strip() for ln in strip_ansi(proc.stderr or proc.stdout or "").splitlines()
+                if ln.strip()]
+        why = next((ln for ln in reversed(said) if "error" in ln.lower()), said[-1] if said else "")
+        result["note"] = (f"exit {proc.returncode}: {why[:300]}" if why
                           else f"exit {proc.returncode}, no output")
     return result
 

@@ -109,7 +109,9 @@ def run_mypy(target: str) -> dict[str, Any]:
     if not shutil.which("mypy"):
         return _tool_missing("mypy", PIP_INSTALL)
     result = subprocess.run(
-        ["mypy", "--show-error-codes", "--no-error-summary",
+        # --show-traceback: a crash then ends on its exception, which the
+        # note carries, rather than on a hint to rerun with this flag.
+        ["mypy", "--show-error-codes", "--no-error-summary", "--show-traceback",
          "--ignore-missing-imports", *_mypy_config_args(target), target],
         capture_output=True, text=True, check=False, env=_plain_env(),
     )

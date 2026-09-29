@@ -156,6 +156,16 @@ def test_the_note_reads_stderr_first(tmp: Path) -> None:
     doc = json.loads(r.stdout) if r.stdout.strip() else {}
     expect("a crash with output on both streams: the note is stderr's",
            notes(doc).get("ruff"), "exit 2: the real reason")
+    # A crash that ends on a hint: the note is the line naming the error.
+    (fake / "ruff").write_text(f"#!{sys.executable}\nimport sys\n"
+                               "print('RuntimeError: the cache was half written', file=sys.stderr)\n"
+                               "print('note: rerun with a flag for more', file=sys.stderr)\n"
+                               "sys.exit(2)\n")
+    r = subprocess.run([sys.executable, str(CHECK), "sample.py", "--tools", "ruff"], cwd=tmp,
+                       env=env, capture_output=True, text=True, check=False, timeout=300)
+    doc = json.loads(r.stdout) if r.stdout.strip() else {}
+    expect("a crash ending on a hint: the note is the error line",
+           notes(doc).get("ruff"), "exit 2: RuntimeError: the cache was half written")
 
 
 def test_directory_per_file_merge(tmp: Path) -> None:
