@@ -6,7 +6,9 @@ check.py leaves out what a repo's .jp-tools-ignore names, and says so.
 A scratch git repository holds a vendor copy under oob/ and a file of its own
 under src/, each with a real unused import (ruff F401), and a .jp-tools-ignore
 naming oob/. The file the pre-commit hook would pass is checked on its own, the
-directory is checked with and without --tools, and a baseline is recorded.
+directory is checked with and without --tools, and a baseline is recorded. A
+tool that reads one file (directive-reason) is named on the directory too, since
+it is filtered by a different path from ruff, which reads the directory itself.
 
 Skips, saying so, where ruff is not installed: nothing can run then, and a
 skip is not a pass.
@@ -111,6 +113,19 @@ def only_vendor(td: str) -> None:
           rc == 0 and ruff.get("status") == "pass" and not ruff.get("issues"), out[-600:])
 
 
+def per_file_tool(td: str) -> None:
+    """A tool that reads one file, run over a directory named with --tools or --lang."""
+    print("a per-file tool on a directory:")
+    r = repo(td, f"oob/*  # {REASON}\n")
+    for rel in ("oob/vendored.sh", "src/own.sh"):
+        (r / rel).write_text("#!/bin/sh\n# shellcheck disable=SC2086\necho $1\n", encoding="utf-8")
+    for args in (("--tools", "directive-reason"), ("--lang", "shell", "--tools", "directive-reason")):
+        rc, doc, out = run(str(r), *args, cwd=r)
+        found = files_with_issues(doc)
+        check(f"{' '.join(args)}: an ignored file is not read, the owned one is",
+              rc == 1 and found == {"own.sh"}, f"{found}\n{out[-400:]}")
+
+
 def refusals(td: str) -> None:
     print("the file itself:")
     r = repo(td, f"# vendor content\n\noob/*  # {REASON}\nsrc/*\n")
@@ -147,7 +162,7 @@ def main() -> int:
         single_file(r)
         directory(r)
         baseline(r, td)
-    for fn in (only_vendor, refusals, none):
+    for fn in (only_vendor, per_file_tool, refusals, none):
         with tempfile.TemporaryDirectory() as td:
             fn(td)
     print(f"\n{checks - fails}/{checks} passed")

@@ -1,8 +1,8 @@
 {
- "about": ".jp-tools-ignore, the parts in jpcheck/runs.py: the dir-mode report of what was ignored, the filter on a whole-directory run, and the same filter for a directory named with --tools. Run: mutate-on-target.py TREE jpcheck/runs.py tests/test_ignore.py tests/mutants/jpt-ignore-on-runs.json",
+ "about": ".jp-tools-ignore, the parts in jpcheck/runs.py: the dir-mode report of what was ignored, the filter on a whole-directory run, and the same filter for a directory named with --tools or --lang. Run: mutate-on-target.py TREE jpcheck/runs.py tests/test_ignore.py tests/mutants/jpt-ignore-on-runs.json",
  "mutants": [
   {"name": "dir mode does not report what it ignored", "edits": [["        \"ignored\":    ignored,", "        \"ignored\":    [],"]], "target": "dir mode lists each ignored file with its entry"},
   {"name": "dir mode does not filter the whole-directory run", "edits": [["    result = runner(target)\n    _drop_ignored_issues(result, root, ignores)\n", "    result = runner(target)\n"]], "target": "dir mode drops the dir-capable tools' findings in ignored files"},
-  {"name": "a directory named with --tools is not filtered", "edits": [["    if Path(target).is_dir():\n        for c in checks:\n            _drop_ignored_issues(c, root, ignores)\n", ""]], "target": "a directory named with --tools drops them too"}
+  {"name": "a directory named with --tools or --lang reads ignored files", "edits": [["        groups, _ = _collect_files(target)\n        _drop_ignored(groups, root, ignores)\n", "        groups, _ = _collect_files(target)\n"]], "target": "--tools directive-reason: an ignored file is not read, the owned one is"}
  ]
 }
