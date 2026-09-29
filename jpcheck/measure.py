@@ -61,7 +61,7 @@ def file_complexity(funcs: dict[str, tuple[int, int, int]], lang: str = "python"
 def _ruff_complexity(src: str) -> dict[int, int]:
     """{first line of each function: its mccabe complexity}, from ruff's C901."""
     if not shutil.which("ruff"):
-        raise ToolMissingError("ruff")
+        raise ToolMissingError("ruff (pip install -r requirements-dev.txt)")
     r = subprocess.run(["ruff", "check", "--isolated", "--select", "C901",
                         "--config", "lint.mccabe.max-complexity=0",
                         "--output-format", "json", "--stdin-filename", "measured.py", "-"],
@@ -242,7 +242,7 @@ def measure_js(src: str) -> Measure:
     from jpcheck.js_tools import _resolve_args, _runner_env
     node = shutil.which("node") or shutil.which("node.exe")
     if not node:
-        raise ToolMissingError("node")
+        raise ToolMissingError("node (on PATH, to run jp_measure.mjs)")
     r = subprocess.run([node, *_resolve_args(), str(TOOLS_ROOT / "jp_measure.mjs")], input=src,
                        capture_output=True, text=True, check=False, cwd=str(TOOLS_ROOT),
                        env=_runner_env())

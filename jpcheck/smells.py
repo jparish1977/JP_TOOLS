@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from jpcheck.common import _git, _NoGitError, _tool_missing
+from jpcheck.common import _git, _NoGitError
 from jpcheck.coverage import is_project_file
 from jpcheck.files import _detect_lang
 from jpcheck.measure import (
@@ -190,6 +190,12 @@ def _function_smells(f: Path, funcs: dict[str, tuple[int, int, int]],
     return out
 
 
+def _unavailable(needs: str) -> dict[str, Any]:
+    """Smells could not run. Reported under its own name, never the missing
+    tool's: a second check named `ruff` would hide ruff's own report."""
+    return {"tool": "smells", "status": "unavailable", "issues": [], "note": f"needs {needs}"}
+
+
 def run_smells(target: str) -> dict[str, Any]:
     p = Path(target)
     files = ([f for f in sorted(p.rglob("*")) if f.is_file()
@@ -206,8 +212,8 @@ def run_smells(target: str) -> dict[str, Any]:
     except _NoGitError:
         # Without git there is no history, so new cannot be told from
         # existing: a check that did not run, never a pass.
-        return _tool_missing("git (the smells arm reads history to tell new from existing)")
+        return _unavailable("git, to read history and tell a new smell from an existing one")
     except ToolMissingError as e:
-        return _tool_missing(str(e), "the smells arm measures complexity with it")
+        return _unavailable(f"{e}, to measure")
     status = "fail" if any(i["severity"] == "error" for i in issues) else "pass"
     return {"tool": "smells", "status": status, "issues": issues}

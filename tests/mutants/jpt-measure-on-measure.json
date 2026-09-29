@@ -1,0 +1,30 @@
+{
+  "about": "Each language's functions and top level, by its standard tool. Run: mutate-on-target.py TREE jpcheck/measure.py tests/test_measure.py tests/mutants/jpt-measure-on-measure.json",
+  "mutants": [
+    {
+      "name": "Python's top level is not measured",
+      "edits": [["    return [s for s in body if not isinstance(s, skip)]", "    return []"]],
+      "target": "python: each function and the top level"
+    },
+    {
+      "name": "the file total counts a nested function twice where its tool counts it into the parent",
+      "edits": [["_NESTED_IN_PARENT = {\"python\": True,", "_NESTED_IN_PARENT = {\"python\": False,"]],
+      "target": "python: the file total counts each function once"
+    },
+    {
+      "name": "a shell elif is not a branch",
+      "edits": [["            n += 1 if branch.get(\"Cond\") else 0", "            n += 0"]],
+      "target": "shell: each function and the top level"
+    },
+    {
+      "name": "a shell case branch is not a branch",
+      "edits": [["        n += len(node.get(\"Items\") or [])", "        n += 0"]],
+      "target": "shell: each function and the top level"
+    },
+    {
+      "name": "PHP's declare counts as top-level code",
+      "edits": [["_PHP_DECLARING = {\"Stmt_Declare\", ", "_PHP_DECLARING = {"]],
+      "target": "php: each function and the top level"
+    }
+  ]
+}

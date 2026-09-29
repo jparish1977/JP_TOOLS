@@ -88,6 +88,11 @@ def test_missing_tools_say_how_to_install() -> None:
         for tool in ("ruff", "mypy"):
             check_true(f"t.py: {tool} is unavailable by its own name, naming requirements-dev.txt",
                        missing(checks, err, tool, PIP))
+        # Smells needs ruff too, and says so under its own name: reported as
+        # `ruff`, it would replace ruff's own report in a lookup by name.
+        status, note = checks.get("smells", ("absent", ""))
+        check("t.py: smells is unavailable under its own name, naming ruff and how to install it",
+              (status, "ruff" in note and PIP in note), ("unavailable", True))
         check_true("control: the clone borrowed nothing (no vendor/, no node_modules/)",
                    not (clone / "vendor").exists() and not (clone / "node_modules").exists())
 
