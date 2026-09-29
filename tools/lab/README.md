@@ -39,5 +39,6 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `coverage-like-ci.sh` | what CI's gated spool-audit coverage will be, measured as CI measures it, in a throwaway venv |
 | `import-every-file.py` | which tracked Python files fail at import time after code moved between files |
 | `by-path-consumers.py` | which other repos load one of this repo's scripts by path, and what they read off it |
+| `directive-sweep.py` | which linter suppression directives across a set of repos give no reason, by the gate's own parser |
 
 Every header carries all three fields.

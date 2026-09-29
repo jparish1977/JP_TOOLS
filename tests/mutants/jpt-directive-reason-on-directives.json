@@ -1,0 +1,40 @@
+{
+  "about": "directive-reason: each honoured suppression directive needs a reason. Run: mutate-on-target.py TREE jpcheck/directives.py tests/test_check_directive_reason.py tests/mutants/jpt-directive-reason-on-directives.json",
+  "mutants": [
+    {
+      "name": "every directive counts as reasoned",
+      "edits": [["    return bool(m and re.search(r\"[A-Za-z]\", m.group(\"why\").rstrip(\"*/) \")))", "    return True"]],
+      "target": "shell: '# shellcheck disable=SC2086' is found, unreasoned"
+    },
+    {
+      "name": "a separator with no prose counts as a reason",
+      "edits": [["    return bool(m and re.search(r\"[A-Za-z]\", m.group(\"why\").rstrip(\"*/) \")))", "    return bool(m)"]],
+      "target": "js: '--' and nothing after it is not a reason"
+    },
+    {
+      "name": "cppcheck's ; separator is not accepted",
+      "edits": [["    \"cpp\":   r\"(?:--|reason:|;|//)\",", "    \"cpp\":   r\"(?:--|reason:|//)\","]],
+      "target": "cpp: '// cppcheck-suppress arrayIndexOutOfBounds ; written past on purpose' is found, reasoned"
+    },
+    {
+      "name": "phpstan's (reason) form is not accepted",
+      "edits": [["    \"php\":   r\"(?:--|reason:|\\()\",", "    \"php\":   r\"(?:--|reason:)\","]],
+      "target": "php: '// @phpstan-ignore return.type (returns a string on purpose)' is found, reasoned"
+    },
+    {
+      "name": "a shell directive need not be in a comment",
+      "edits": [["_SHELL_OPEN = r\"(?:^|\\s)#\\s*\"", "_SHELL_OPEN = r\"(?:^|\\s)#?\\s*\""]],
+      "target": "shell: the words inside a string are not a directive"
+    },
+    {
+      "name": "the check never fails",
+      "edits": [["    return {\"tool\": \"directive-reason\", \"status\": \"fail\" if issues else \"pass\",", "    return {\"tool\": \"directive-reason\", \"status\": \"pass\","]],
+      "target": "a reasonless shellcheck directive fails the gate"
+    },
+    {
+      "name": "cppcheck-suppress is not a directive",
+      "edits": [["            _C_OPEN + r\"cppcheck-suppress(?:-file|-begin|-macro)?", "            _C_OPEN + r\"cppcheck-supress(?:-file|-begin|-macro)?"]],
+      "target": "a reasonless cppcheck-suppress fails the gate"
+    }
+  ]
+}

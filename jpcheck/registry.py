@@ -5,6 +5,7 @@ from typing import Any
 
 from jpcheck.common import _RAN
 from jpcheck.coverage import run_no_cover
+from jpcheck.directives import run_directive_reason
 from jpcheck.js_tools import run_eslint, run_npm_audit, run_prettier, run_stylelint
 from jpcheck.native_tools import run_cppcheck, run_shellcheck
 from jpcheck.php_tools import run_composer_audit, run_phpcs, run_phpstan, run_rector
@@ -45,6 +46,7 @@ TOOL_RUNNERS = {
     "no-cover":       run_no_cover,
     "suppress-reason": run_suppress_reason,
     "noqa":           run_noqa,
+    "directive-reason": run_directive_reason,
     "smells":         run_smells,
     "ruff":           run_ruff,
     "mypy":           run_mypy,
@@ -61,12 +63,14 @@ TOOL_RUNNERS = {
 
 DEFAULT_TOOLS = {
     "python": ["ruff", "mypy", "no-cover", "suppress-reason", "noqa", "smells"],
-    "js":     ["eslint", "prettier"],
-    "css":    ["stylelint", "prettier"],
-    "html":   ["eslint", "stylelint", "prettier"],
-    "php":    ["phpstan", "phpcs", "rector"],
-    "cpp":    ["cppcheck"],
-    "shell":  ["shellcheck"],
+    # directive-reason: each linter's own suppression directives need a reason,
+    # as noqa does for Python (jpcheck/directives.py).
+    "js":     ["eslint", "prettier", "directive-reason"],
+    "css":    ["stylelint", "prettier", "directive-reason"],
+    "html":   ["eslint", "stylelint", "prettier", "directive-reason"],
+    "php":    ["phpstan", "phpcs", "rector", "directive-reason"],
+    "cpp":    ["cppcheck", "directive-reason"],
+    "shell":  ["shellcheck", "directive-reason"],
 }
 
 AUDIT_TOOLS = {
