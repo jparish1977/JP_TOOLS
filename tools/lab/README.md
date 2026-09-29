@@ -39,5 +39,6 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `import-every-file.py` | which tracked Python files fail at import time after code moved between files |
 | `by-path-consumers.py` | which other repos load one of this repo's scripts by path, and what they read off it |
 | `directive-sweep.py` | which linter suppression directives across a set of repos give no reason, by the gate's own parser |
+| `complexity-sweep.py` | what each language's standard complexity and size rules would find across a tree of repos, per rule and repo, before they are selected |
 
 Every header carries all three fields.
