@@ -1,0 +1,29 @@
+# JP_TOOLS declares itself here: its name, the Python it needs, and what its
+# scripts import beyond the standard library (METHODOLOGY §7 item 10).
+# tests/test_pyproject.py fails when an import is not declared here.
+#
+# No [tool.ruff] or [tool.mypy], on purpose. check.py treats either table as
+# the project's own config and stops applying configs/ruff.toml and
+# configs/mypy.ini. The gate's own tools are declared elsewhere:
+# requirements-dev.txt (Python), requirements-system.txt (apt), package.json
+# (JS) and composer.json (PHP).
+#
+# No [build-system]: JP_TOOLS is a directory of scripts run in place, not a
+# package anything installs.
+
+[project]
+name = "jp-tools"
+# No releases exist; nothing reads this. PEP 621 requires the field.
+version = "0.1.0"
+description = "Developer toolbox for code quality, data recovery, file analysis, and archive management."
+# The code itself needs 3.11 (tomllib). 3.12 because configs/ruff.toml, which
+# gates this repo, targets py312, so fix.py may write 3.12 syntax; CI runs 3.12.
+requires-python = ">=3.12"
+# Standard library only.
+dependencies = []
+
+[project.optional-dependencies]
+# autoit-extract.py only. It imports this inside a try and exits naming the
+# install when absent. It uses the package's internal modules, and 1.2.0 is
+# the release its docstring describes.
+autoit = ["autoit-ripper==1.2.0"]

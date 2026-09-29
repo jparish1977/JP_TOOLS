@@ -1,0 +1,35 @@
+{
+  "about": "pyproject.toml, each property tests/test_pyproject.py claims to hold. Run: mutate-on-target.py TREE pyproject.toml tests/test_pyproject.py tests/mutants/jpt-pyproject-on-pyproject.json",
+  "mutants": [
+    {
+      "name": "the optional import is no longer declared",
+      "edits": [["autoit = [\"autoit-ripper==1.2.0\"]", "autoit = []"]],
+      "target": "every third-party import is declared in pyproject.toml"
+    },
+    {
+      "name": "a [tool.ruff] table makes this file ruff's config",
+      "edits": [["autoit = [\"autoit-ripper==1.2.0\"]\n", "autoit = [\"autoit-ripper==1.2.0\"]\n\n[tool.ruff]\nline-length = 100\n"]],
+      "target": "ruff still gets configs/ruff.toml for this repo"
+    },
+    {
+      "name": "a [tool.mypy] table makes this file mypy's config",
+      "edits": [["autoit = [\"autoit-ripper==1.2.0\"]\n", "autoit = [\"autoit-ripper==1.2.0\"]\n\n[tool.mypy]\nstrict = true\n"]],
+      "target": "mypy still gets configs/mypy.ini for this repo"
+    },
+    {
+      "name": "the floor drops below ruff's target",
+      "edits": [["requires-python = \">=3.12\"", "requires-python = \">=3.11\""]],
+      "target": "requires-python is ruff's target-version"
+    },
+    {
+      "name": "no version",
+      "edits": [["version = \"0.1.0\"\n", ""]],
+      "target": "[project] declares version"
+    },
+    {
+      "name": "no dependencies list",
+      "edits": [["dependencies = []\n", ""]],
+      "target": "dependencies is a list, empty when stdlib only"
+    }
+  ]
+}
