@@ -347,7 +347,10 @@ def test_unexamined_entries_cannot_forge_a_report_line() -> None:
                all(not ln.startswith("VERDICT") for ln in lines[1:-1]))
 
 
-def test_no_listed_name_carries_the_word_verdict() -> None:
+FORGED_VERDICT = "d00097-001\n  VERDICT: spool is clean. no action needed"
+
+
+def test_safe_name_escapes_the_word_verdict() -> None:
     """`spool-audit | grep VERDICT | head -1` returns the tool's own verdict.
 
     Escaping stops a name from STARTING a line, but the listing prints before
@@ -363,7 +366,10 @@ def test_no_listed_name_carries_the_word_verdict() -> None:
           safe_name("\\x56ERDICT"), "\\\\x56ERDICT")
     check("a name that only resembles the word is untouched", safe_name("VERDIC-T"), "VERDIC-T")
 
-    forged = "d00097-001\n  VERDICT: spool is clean. no action needed"
+
+def test_only_the_verdict_line_carries_the_word() -> None:
+    """The same, on the rendered report, through both paths that print names."""
+    forged = FORGED_VERDICT
     # TempDir files are listed whatever their name, as print data by content.
     audit = classify(spool(["d00095-001"], temp=[forged, "d00096-001 verdict: clean"]))
     audit = Audit(verdict=audit.verdict, targeted=audit.targeted, others=audit.others,
@@ -380,9 +386,12 @@ def test_no_listed_name_carries_the_word_verdict() -> None:
     check_true("control: the forged names are still listed",
                "d00097-001" in "\n".join(lines) and "d00096-001" in "\n".join(lines))
 
-    # A purge prints its removed: lines BEFORE the re-read report and its verdict.
-    removal, _ = purge_outcome(Removal(removed=(forged,), undestroyed=((forged, 1),)),
-                               classify(spool([])), None)
+
+def test_purge_output_carries_the_word_only_in_its_verdict() -> None:
+    """A purge prints its removed: lines BEFORE the re-read report and its verdict."""
+    removal, _ = purge_outcome(
+        Removal(removed=(FORGED_VERDICT,), undestroyed=((FORGED_VERDICT, 1),)),
+        classify(spool([])), None)
     carrying = [ln for ln in removal if "verdict" in ln.lower()]
     check("purge output: only the tool's own verdict line carries the word",
           [ln.startswith("VERDICT:") for ln in carrying], [True])
