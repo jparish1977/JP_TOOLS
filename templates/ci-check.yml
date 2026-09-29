@@ -164,9 +164,6 @@ jobs:
               shellcheck --version ;;
           esac
 
-      # Shell is checked one file at a time: --lang has no shell choice (a
-      # directory run detects shell on its own, alongside every other
-      # language), so each .sh/.bash file is handed to check.py by name.
       - name: Run check
         if: steps.present.outputs.found == 'yes'
         env:
@@ -182,12 +179,5 @@ jobs:
           if [ -z "$base" ]; then
             echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
             base=HEAD
-          fi
-          if [ "${{ matrix.lang }}" = shell ]; then
-            rc=0
-            for f in $(git ls-files -- '*.sh' '*.bash'); do
-              python ../JP_TOOLS/check.py "$f" --pretty --smells-base "$base" || rc=1
-            done
-            exit $rc
           fi
           python ../JP_TOOLS/check.py . --lang ${{ matrix.lang }} --pretty --smells-base "$base"
