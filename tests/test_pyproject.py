@@ -10,8 +10,11 @@ true as the code changes.
     - requires-python's floor is configs/ruff.toml's target-version, so a fix
       ruff writes cannot need a newer Python than the one declared.
     - Every import that is neither standard library nor this checkout's own is
-      declared in dependencies or optional-dependencies. An import name is
-      matched to a distribution name case-insensitively with "_" read as "-".
+      declared: in dependencies or optional-dependencies, or, when only tests
+      import it, in requirements-dev.txt, where the test and gate tools are
+      pinned. An import name is mapped to its distribution by
+      importlib.metadata (yaml is PyYAML), else read as the name, and compared
+      case-insensitively with "_" read as "-".
 
 The import scan is checked against a planted tree first, so it cannot pass by
 finding nothing.
@@ -25,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+from importlib.metadata import packages_distributions
 from pathlib import Path
 
 from _harness import ROOT, check, check_true, run
@@ -59,6 +63,18 @@ def declared(project: dict[str, object]) -> set[str]:
     return {normalise(re.split(r"[<>=!~\[; ]", s, maxsplit=1)[0]) for s in specs}
 
 
+def declared_dev() -> set[str]:
+    """Distribution names pinned in requirements-dev.txt."""
+    lines = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8").splitlines()
+    return {normalise(re.split(r"[<>=!~\[; ]", ln.strip(), maxsplit=1)[0])
+            for ln in lines if ln.strip() and not ln.lstrip().startswith("#")}
+
+
+def distribution(import_name: str) -> str:
+    """The distribution that provides IMPORT_NAME, normalised; the name itself if unknown."""
+    return normalise(packages_distributions().get(import_name, [import_name])[0])
+
+
 def top_level_imports(source: str, filename: str) -> set[str]:
     """The first dotted part of every absolute import in SOURCE."""
     names: list[str] = []
@@ -78,7 +94,7 @@ def imported(root: Path, files: list[str]) -> dict[str, set[str]]:
     for f in files:
         for top in top_level_imports((root / f).read_text(encoding="utf-8"), f):
             if top not in sys.stdlib_module_names and top not in first_party:
-                found.setdefault(normalise(top), set()).add(f)
+                found.setdefault(distribution(top), set()).add(f)
     return found
 
 
@@ -134,9 +150,25 @@ def test_every_import_is_declared() -> None:
     found = imported(ROOT, tracked_python())
     check_true("control: the scan finds autoit-extract.py's optional import",
                "autoit-ripper" in found)
+    runtime, dev = declared(project_table()), declared_dev()
     missing = {name: sorted(where) for name, where in found.items()
-               if name not in declared(project_table())}
+               if name not in runtime
+               and not (name in dev and all(f.startswith("tests/") for f in where))}
     check("every third-party import is declared in pyproject.toml", missing, {})
+    check("the tests' yaml resolves to PyYAML, declared in requirements-dev.txt",
+          ("pyyaml" in found, "pyyaml" in dev, "pyyaml" in runtime), (True, True, False))
+
+
+def test_a_dev_dependency_does_not_cover_product_code() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "tests").mkdir()
+        (root / "tests" / "t.py").write_text("import yaml\n", encoding="utf-8")
+        (root / "tool.py").write_text("import yaml\n", encoding="utf-8")
+        found = imported(root, ["tests/t.py", "tool.py"])
+    where = found.get("pyyaml", set())
+    check_true("control: product code importing a dev-only package is not covered",
+               "pyyaml" in declared_dev() and not all(f.startswith("tests/") for f in where))
 
 
 if __name__ == "__main__":

@@ -233,7 +233,13 @@ Crossing the line is not a violation, and it is not a reason to split on its own
 
 Complexity is the better measure and belongs per function: ruff's `C90` (cyclomatic complexity) and the `PLR09xx` counts (branches, statements, arguments). Measure what they would find before selecting them; a rule that is red everywhere on day one is how a gate gets switched off (§9 item 1).
 
-JP_TOOLS is past the smell itself: `check.py`, `spool-audit.py` and `tests/test_spool_audit.py` are each over 1,000 lines, and `check.py` has at least three responsibilities (running and parsing a dozen external tools, the baseline recorder and comparer, and the coverage-exemption inventory). Named here as §9 item 10 asks, so it reads as a decision rather than a surprise.
+JP_TOOLS was past the smell itself and has been split on its responsibilities: `check.py` into `jpcheck/` (one module per runner family, the baseline, the smells, the suppression rules), `spool-audit.py` into `spoolaudit/`, and its test into one file per module. No tracked source file is over 1,000 lines (`tools/lab/file-sizes.py`).
+
+### 2.15 A standard job gets the standard tool
+
+When a job has a standard tool, use it: a workflow file is linted by actionlint, YAML is read by a YAML parser, a CI workflow is proven by running it on the forge it targets, text is searched by the search tool. Install it and declare it (`requirements-dev.txt`, `requirements-system.txt`, `package.json`, `composer.json`, §7 item 9) instead of approximating it.
+
+**An approximation is a weaker check that reads as a finished one.** A regex over YAML answers "does this text contain that string", not "is this workflow valid", and it cannot find what nobody thought to write a pattern for; the standard linter can. "The repo has no library for that" describes a manifest line nobody has written yet, not a constraint. The one case for doing without is a runtime dependency of the product itself, which is a design decision with its own cost; a tool the gate or the tests use is not that case.
 
 ---
 

@@ -4,6 +4,12 @@
 #
 # Install: python JP_TOOLS/init-ci.py  (copies this into your repo)
 #
+# --- Where JP_TOOLS comes from ---
+# The public copy on GitHub, unless the repository variable JP_TOOLS_REPOSITORY
+# names another (owner/name on the forge running the workflow). Set it, and the
+# secret JP_TOOLS_TOKEN to a token that can read that copy, when your forge
+# hosts JP_TOOLS itself.
+#
 # --- Private Composer dependencies ---
 # If your project requires private GitHub repos via VCS repositories in
 # composer.json, the default GITHUB_TOKEN only has access to the current repo.
@@ -51,17 +57,19 @@ jobs:
 
       - name: Does this repo have ${{ matrix.lang }} files?
         id: present
+        shell: bash
         run: |
-          set -f   # the patterns are for git, not for this shell to expand
+          # Quoted patterns in an array: they are for git to match, not for
+          # this shell to expand or split.
           case "${{ matrix.lang }}" in
-            python) pats='*.py' ;;
-            js)     pats='*.js *.mjs *.cjs *.jsx *.ts *.tsx' ;;
-            php)    pats='*.php' ;;
+            python) pats=('*.py') ;;
+            js)     pats=('*.js' '*.mjs' '*.cjs' '*.jsx' '*.ts' '*.tsx') ;;
+            php)    pats=('*.php') ;;
             # By suffix only: an extensionless shell script is found by its #!
             # when check.py is handed it, but a glob cannot see a shebang.
-            shell)  pats='*.sh *.bash' ;;
+            shell)  pats=('*.sh' '*.bash') ;;
           esac
-          if [ -n "$(git ls-files -- $pats | head -n 1)" ]; then
+          if [ -n "$(git ls-files -- "${pats[@]}" | head -n 1)" ]; then
             echo "found=yes" >> "$GITHUB_OUTPUT"
           else
             echo "found=no" >> "$GITHUB_OUTPUT"
@@ -80,18 +88,42 @@ jobs:
         with:
           node-version: '22'
 
+      # From apt when the runner has no composer, not from an action: a Forgejo
+      # runner resolves every `uses:` through its own action mirror, which does
+      # not carry shivammathur/setup-php, so the PHP job could not start there.
+      # 8.3 is what Ubuntu 24.04 ships. GitHub's ubuntu-latest already has both.
       - name: Set up PHP
         if: steps.present.outputs.found == 'yes' && matrix.lang == 'php'
-        uses: shivammathur/setup-php@v2
+        run: |
+          if ! command -v composer >/dev/null 2>&1; then
+            SUDO=$(command -v sudo || true)
+            $SUDO apt-get update -q
+            $SUDO apt-get install -y -q php-cli php-xml php-mbstring php-curl unzip composer
+          fi
+          php --version
+          composer --version
+
+      # WHICH JP_TOOLS: the repository variable JP_TOOLS_REPOSITORY (owner/name
+      # on the forge running this workflow), or the public copy on GitHub when
+      # it is unset. A forge that hosts JP_TOOLS itself sets the variable to
+      # that copy, and the secret JP_TOOLS_TOKEN to a token that can read it,
+      # so its CI gates against the current JP_TOOLS rather than a mirror that
+      # may lag behind it.
+      - name: Check out JP_TOOLS
+        if: steps.present.outputs.found == 'yes'
+        uses: actions/checkout@v6
         with:
-          php-version: '8.3'
+          repository: ${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}
+          token: ${{ secrets.JP_TOOLS_TOKEN || github.token }}
+          path: _jp_tools
 
       # BESIDE the checkout, not in /tmp. A project ruff.toml that extends
       # ../JP_TOOLS/configs/ruff.toml loads only from here; cloned to /tmp,
-      # the config failed to load and ruff read "pass".
-      - name: Clone JP_TOOLS
+      # the config failed to load and ruff read "pass". actions/checkout
+      # writes only inside the workspace, so the copy is moved out after.
+      - name: Put JP_TOOLS beside the checkout
         if: steps.present.outputs.found == 'yes'
-        run: git clone --depth 1 https://github.com/jparish1977/JP_TOOLS.git ../JP_TOOLS
+        run: mv _jp_tools ../JP_TOOLS
 
       # From JP_TOOLS' own manifests, because that is where check.py looks:
       #   requirements-dev.txt  pinned ruff, mypy, pip-audit and coverage

@@ -12,3 +12,10 @@ mypy==2.3.0
 pip-audit==2.10.1
 # The suites run under it in CI; docs/coverage.md says what is gated.
 coverage==7.15.4
+# The standard linter for GitHub and Forgejo workflow files (a Go binary; this
+# package ships the release binary, so it pins beside the rest).
+# tests/test_ci_template.py runs it on both workflows.
+actionlint-py==1.7.12.25
+# The standard YAML parser, which tests/test_ci_template.py reads the template
+# with. 6.0.1 is the version Ubuntu 24.04's python3-yaml gives the dev boxes.
+pyyaml==6.0.1

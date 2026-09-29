@@ -1,0 +1,10 @@
+{
+  "about": "A test-only import is declared in requirements-dev.txt. Run: mutate-on-target.py TREE requirements-dev.txt tests/test_pyproject.py tests/mutants/jpt-pyproject-on-requirements-dev.json",
+  "mutants": [
+    {
+      "name": "the tests' PyYAML is not pinned",
+      "edits": [["pyyaml==6.0.1\n", ""]],
+      "target": "every third-party import is declared in pyproject.toml"
+    }
+  ]
+}

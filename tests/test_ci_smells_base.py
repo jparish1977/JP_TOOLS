@@ -10,8 +10,10 @@ committed, so HEAD is the commit under test, every new smell reads as
 existing, and it only ever warns. And actions/checkout is shallow by default,
 so a PR's base commit is not in the clone to compare against.
 
-So every checkout in these workflows fetches full history, every check.py
-call passes --smells-base, and the base comes from the pull request. This
+So every checkout of the repository under test fetches full history, every
+check.py call passes --smells-base, and the base comes from the pull request.
+A checkout of ANOTHER repository (`repository:`, such as JP_TOOLS itself in
+the template) is the tool, not the code judged, and needs no history. This
 reads the workflow files; it does not run CI. A planted workflow without them
 must fail, or the checks below could never fail.
 
@@ -57,8 +59,10 @@ def problems(text: str) -> list[str]:
     for n, line in enumerate(lines, 1):
         if CALL.match(line) and "--smells-base" not in line:
             found.append(f"line {n}: check.py without --smells-base")
-        if "uses: actions/checkout" in line and not any(
-                "fetch-depth: 0" in later for later in lines[n:n + 3]):
+        step = lines[n:n + 4]
+        if ("uses: actions/checkout" in line
+                and not any("repository:" in later for later in step)
+                and not any("fetch-depth: 0" in later for later in step)):
             found.append(f"line {n}: a shallow checkout")
     if PR_BASE not in text:
         found.append(f"no {PR_BASE}: nothing names the PR's base")
@@ -70,6 +74,14 @@ def main() -> int:
     bad = problems(BAD)
     check("a shallow checkout, a bare check.py and no PR base are all reported",
           len(bad) == 3, "\n".join(bad))
+    other = BAD.replace("      - uses: actions/checkout@v6\n",
+                        "      - uses: actions/checkout@v6\n"
+                        "        with:\n          fetch-depth: 0\n"
+                        "      - uses: actions/checkout@v6\n"
+                        "        with:\n          repository: owner/tool\n")
+    found = problems(other)
+    check("a shallow checkout of ANOTHER repository is not reported; the rest still are",
+          not any("shallow" in f for f in found) and len(found) == 2, "\n".join(found))
     print("\nThe real workflows:")
     for wf in WORKFLOWS:
         text = wf.read_text(encoding="utf-8")
