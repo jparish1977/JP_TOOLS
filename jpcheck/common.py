@@ -197,6 +197,24 @@ def _status(issues: list[dict[str, Any]], returncode: int | None = None) -> str:
     return "fail" if issues else "pass"
 
 
+def _tool_result(tool: str, issues: list[dict[str, Any]],
+                 proc: "subprocess.CompletedProcess[str]") -> dict[str, Any]:
+    """TOOL's result from its ISSUES and its finished process.
+
+    An exit code other than 0 or 1 means the tool stopped short of a verdict,
+    and the note then carries the code and the last line it wrote, stderr
+    first: that is where each tool says why. Without it the report reads
+    "did not run" and nothing else.
+    """
+    result: dict[str, Any] = {"tool": tool, "status": _status(issues, proc.returncode),
+                              "issues": issues}
+    if result["status"] == "error":
+        said = strip_ansi(proc.stderr or proc.stdout or "").strip().splitlines()
+        result["note"] = (f"exit {proc.returncode}: {said[-1].strip()[:300]}" if said
+                          else f"exit {proc.returncode}, no output")
+    return result
+
+
 def _tool_missing(name: str, install: str = "") -> dict[str, Any]:
     """The report for a check whose tool is not installed.
 

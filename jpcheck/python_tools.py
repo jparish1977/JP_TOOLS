@@ -13,6 +13,7 @@ from jpcheck.common import (
     _plain_env,
     _status,
     _tool_missing,
+    _tool_result,
     strip_ansi,
 )
 
@@ -70,8 +71,7 @@ def run_ruff(target: str) -> dict[str, Any]:
     # findings, and 2 when it could not run -- a config that fails to load
     # writes to stderr and leaves stdout empty, so without the code this would
     # publish "pass" with 0 issues.
-    return {"tool": "ruff", "status": _status(issues, result.returncode),
-            "issues": issues}
+    return _tool_result("ruff", issues, result)
 
 
 # mypy prints "file:line: severity: message [code]", optionally with a column,
@@ -137,7 +137,7 @@ def run_mypy(target: str) -> dict[str, Any]:
             "fixable":  False,
             "fixable_unsafe": False,
         })
-    return {"tool": "mypy", "status": _status(issues, result.returncode), "issues": issues}
+    return _tool_result("mypy", issues, result)
 
 
 # ── security audit runners ────────────────────────────────────────────────────

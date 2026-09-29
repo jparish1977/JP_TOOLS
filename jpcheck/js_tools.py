@@ -15,6 +15,7 @@ from jpcheck.common import (
     _plain_env,
     _status,
     _tool_missing,
+    _tool_result,
     node_module_roots,
     strip_ansi,
 )
@@ -196,7 +197,7 @@ def run_prettier(target: str) -> dict[str, Any]:
                 "message":  "File is not formatted correctly",
                 "fixable":  True,
             })
-    return {"tool": "prettier", "status": _status(issues, result.returncode), "issues": issues}
+    return _tool_result("prettier", issues, result)
 
 
 def run_npm_audit(target: str) -> dict[str, Any]:

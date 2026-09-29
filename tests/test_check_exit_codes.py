@@ -73,6 +73,10 @@ def statuses(doc: dict[str, Any]) -> dict[str, str]:
     return {c["tool"]: c["status"] for c in doc.get("checks", [])}
 
 
+def notes(doc: dict[str, Any]) -> dict[str, str]:
+    return {c["tool"]: c["note"] for c in doc.get("checks", []) if "note" in c}
+
+
 def test_tools_present(tmp: Path) -> None:
     (tmp / "clean.py").write_text(CLEAN)
     (tmp / "dirty.py").write_text(DIRTY)
@@ -103,6 +107,8 @@ def test_ruff_config_fails_to_load(tmp: Path) -> None:
     rc, doc, _ = run(["sample.py", "--tools", "ruff"], broken)
     expect("broken ruff.toml: ruff status (was pass)", statuses(doc).get("ruff"), "error")
     expect("broken ruff.toml: exit (was 0)", rc, 2)
+    expect("broken ruff.toml: the note gives ruff's exit and its reason",
+           notes(doc).get("ruff", "").startswith("exit 2: ") and len(notes(doc)["ruff"]) > 8, True)
     # Control: the same file under JP_TOOLS' own config is dirty, so the "error"
     # above is the config failing, not a clean file.
     control = tmp / "control"
@@ -111,6 +117,45 @@ def test_ruff_config_fails_to_load(tmp: Path) -> None:
     rc, doc, _ = run(["sample.py", "--tools", "ruff"], control)
     expect("control, same file, loadable config: ruff", statuses(doc).get("ruff"), "fail")
     expect("control, same file, loadable config: exit", rc, 1)
+
+
+def test_mypy_that_cannot_run_says_why(tmp: Path) -> None:
+    broken = tmp / "mypy-broken"
+    broken.mkdir()
+    (broken / ".git").mkdir()
+    (broken / "mypy.ini").write_text("[mypy]\nplugins = no_such_plugin_anywhere\n")
+    (broken / "sample.py").write_text(CLEAN)
+    rc, doc, err = run(["sample.py", "--tools", "mypy"], broken)
+    expect("mypy with a plugin that does not exist: status", statuses(doc).get("mypy"), "error")
+    expect("mypy that cannot run: exit", rc, 2)
+    note = notes(doc).get("mypy", "")
+    expect("mypy that cannot run: the note names the plugin mypy could not load",
+           note.startswith("exit ") and "no_such_plugin_anywhere" in note, True)
+    expect("mypy that cannot run: stderr carries the note", "no_such_plugin_anywhere" in err, True)
+    # Control: the same file without the broken config passes, with no note.
+    (broken / "mypy.ini").unlink()
+    rc, doc, _ = run(["sample.py", "--tools", "mypy"], broken)
+    expect("control, same file, no broken config: mypy", statuses(doc).get("mypy"), "pass")
+    expect("control: a check that ran carries no note", "mypy" in notes(doc), False)
+
+
+def test_the_note_reads_stderr_first(tmp: Path) -> None:
+    # A tool that crashes can leave partial output on stdout and its reason
+    # on stderr; the reason is the note.
+    fake = tmp / "fakebin"
+    fake.mkdir()
+    (fake / "ruff").write_text(f"#!{sys.executable}\nimport sys\n"
+                               "print('partial output')\n"
+                               "print('the real reason', file=sys.stderr)\n"
+                               "sys.exit(2)\n")
+    (fake / "ruff").chmod(0o755)
+    (tmp / "sample.py").write_text(CLEAN)
+    env = dict(os.environ, PATH=f"{fake}{os.pathsep}{os.environ['PATH']}")
+    r = subprocess.run([sys.executable, str(CHECK), "sample.py", "--tools", "ruff"], cwd=tmp,
+                       env=env, capture_output=True, text=True, check=False, timeout=300)
+    doc = json.loads(r.stdout) if r.stdout.strip() else {}
+    expect("a crash with output on both streams: the note is stderr's",
+           notes(doc).get("ruff"), "exit 2: the real reason")
 
 
 def test_directory_per_file_merge(tmp: Path) -> None:
@@ -209,7 +254,9 @@ def main() -> int:
     if FAILURES:
         print(f"FAILED ({len(FAILURES)})")
         for f in FAILURES:
-            print(f"  {f}")
+            # "FAIL <label>: ...", as tests/_harness.py prints: a mutation
+            # runner counts a mutant caught only on such a line.
+            print(f"FAIL {f}")
         return 1
     print(f"all check.py exit-code tests passed ({len(tests)} groups)")
     return 0

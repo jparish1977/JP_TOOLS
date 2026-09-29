@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from jpcheck.common import _plain_env, _status, _tool_missing, strip_ansi
+from jpcheck.common import _plain_env, _status, _tool_missing, _tool_result, strip_ansi
 
 # Arduino sketches use ArduinoJson's `variant | fallback` operator, which reads
 # as a bitwise-or on an integer unless the analyser can see the overload. It
@@ -108,5 +108,4 @@ def run_shellcheck(target: str) -> dict[str, Any]:
             "fixable":  False,
             "fixable_unsafe": False,
         })
-    return {"tool": "shellcheck", "status": _status(issues, result.returncode),
-            "issues": issues}
+    return _tool_result("shellcheck", issues, result)
