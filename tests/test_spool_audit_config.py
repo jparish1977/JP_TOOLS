@@ -32,26 +32,20 @@ def test_retention_honours_the_last_directive() -> None:
     reported as safety. This calls retention_state itself; a test that
     reimplements the thing it is testing tests the reimplementation.
     """
-    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
-        fh.write("PreserveJobFiles No\nSomethingElse 1\nPreserveJobFiles Yes\n")
-        last_wins = fh.name
-    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
-        fh.write("PreserveJobFiles Yes\nPreserveJobFiles No\n")
-        last_off = fh.name
-    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as fh:
-        fh.write("# nothing relevant here\n")
-        unset = fh.name
-    try:
-        check("No then Yes -> retaining", retention_state(last_wins), True)
-        check("Yes then No -> not retaining", retention_state(last_off), False)
+    with tempfile.TemporaryDirectory() as raw:
+        d = Path(raw)
+        (d / "last_wins.conf").write_text(
+            "PreserveJobFiles No\nSomethingElse 1\nPreserveJobFiles Yes\n", encoding="utf-8")
+        (d / "last_off.conf").write_text(
+            "PreserveJobFiles Yes\nPreserveJobFiles No\n", encoding="utf-8")
+        (d / "unset.conf").write_text("# nothing relevant here\n", encoding="utf-8")
+        check("No then Yes -> retaining", retention_state(str(d / "last_wins.conf")), True)
+        check("Yes then No -> not retaining", retention_state(str(d / "last_off.conf")), False)
         # An absent directive means the compiled default, which on the hosts
         # measured here keeps documents. Guessing "off" would be a guess in the
         # dangerous direction.
-        check("unset -> assume retaining", retention_state(unset), True)
+        check("unset -> assume retaining", retention_state(str(d / "unset.conf")), True)
         check("unreadable -> unknown", retention_state("/nonexistent/x.conf"), None)
-    finally:
-        for f in (last_wins, last_off, unset):
-            os.unlink(f)
 
 
 def test_reading_the_config_never_blocks_on_a_fifo() -> None:

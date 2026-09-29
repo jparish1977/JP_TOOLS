@@ -34,6 +34,11 @@ USAGE
     python3 spool-audit-containment-fixtures.py /tmp/probe
     python3 spool-audit.py --spool /tmp/probe/spool --purge
     python3 spool-audit-containment-fixtures.py /tmp/probe --verify
+    rm -rf /tmp/probe
+
+The steps are separate processes, so the directory has to outlive each one
+and nothing here can remove it for you. It holds print-data fixtures, so the
+last step is not optional (METHODOLOGY 2.11).
 
 `--verify` prints, for each case, whether the content still exists. Every line
 except the control should say SURVIVED. A DESTROYED line on any of the outside
