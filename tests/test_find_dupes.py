@@ -40,10 +40,9 @@ SCRIPT = ROOT / "find-dupes.php"
 def library_installed() -> bool:
     if not shutil.which("php") or not (ROOT / "vendor" / "autoload.php").is_file():
         return False
-    probe = subprocess.run(
-        ["php", "-r", 'require "vendor/autoload.php"; '
-         'exit(class_exists("Iteration8\\\\Utilities\\\\FileScanner\\\\Scanner") ? 0 : 1);'],
-        cwd=ROOT, capture_output=True, check=False)
+    code = ('require "vendor/autoload.php"; '
+            'exit(class_exists("Iteration8\\\\Utilities\\\\FileScanner\\\\Scanner") ? 0 : 1);')
+    probe = subprocess.run(["php", "-r", code], cwd=ROOT, capture_output=True, check=False)
     return probe.returncode == 0
 
 
