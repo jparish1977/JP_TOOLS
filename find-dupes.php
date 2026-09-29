@@ -1,5 +1,6 @@
 #!/usr/bin/env php
 <?php
+
 /**
  * JP_TOOLS/find-dupes.php
  * Find duplicate files or compare directories using pluggable hash/cache/output backends.
@@ -33,6 +34,7 @@ use Iteration8\Utilities\FileScanner\Cache\FilesystemCache;
 use Iteration8\Utilities\FileScanner\Cache\MemoryCache;
 use Iteration8\Utilities\FileScanner\Cache\SqliteCache;
 use Iteration8\Utilities\FileScanner\DuplicateFinder;
+use Iteration8\Utilities\FileScanner\DuplicateGroup;
 use Iteration8\Utilities\FileScanner\Filesystem\LocalFilesystem;
 use Iteration8\Utilities\FileScanner\Hasher\NativeHasher;
 use Iteration8\Utilities\FileScanner\Output\ConsoleOutput;
@@ -51,6 +53,22 @@ if (!class_exists(Scanner::class)) {
         TXT);
     exit(1);
 }
+
+/**
+ * The argument after FLAG, or a usage error when FLAG was the last argument.
+ * A closure, not a function: a script that declares a symbol and also runs
+ * breaks PSR-1's side-effects rule.
+ *
+ * @param list<string> $args
+ */
+$optionValue = static function (array &$args, string $flag): string {
+    $value = array_shift($args);
+    if ($value === null) {
+        fwrite(STDERR, "Error: {$flag} needs a value. Use --help for usage.\n");
+        exit(1);
+    }
+    return $value;
+};
 
 // --- Parse arguments ---
 $args = $argv;
@@ -77,28 +95,27 @@ while ($args) {
             break;
         case '--json-file':
             $options['json'] = true;
-            $options['json-file'] = array_shift($args);
+            $options['json-file'] = $optionValue($args, $arg);
             break;
         case '--verbose':
         case '-v':
             $options['verbose'] = true;
             break;
         case '--algo':
-            $options['algo'] = array_shift($args);
+            $options['algo'] = $optionValue($args, $arg);
             break;
         case '--cache':
-            $options['cache'] = array_shift($args);
+            $options['cache'] = $optionValue($args, $arg);
             break;
         case '--ignore':
-            $ignoreStr = array_shift($args);
-            $options['ignore'] = array_merge($options['ignore'], explode(',', $ignoreStr));
+            $options['ignore'] = array_merge($options['ignore'], explode(',', $optionValue($args, $arg)));
             break;
         case '--workers':
         case '-w':
-            $options['workers'] = (int) array_shift($args);
+            $options['workers'] = (int) $optionValue($args, $arg);
             break;
         case '--db':
-            $options['db'] = array_shift($args);
+            $options['db'] = $optionValue($args, $arg);
             break;
         case '--stream':
             $options['stream'] = true;
@@ -129,7 +146,7 @@ while ($args) {
     }
 }
 
-if (empty($positional)) {
+if ($positional === []) {
     fwrite(STDERR, "Error: at least one directory is required. Use --help for usage.\n");
     exit(1);
 }
@@ -153,10 +170,8 @@ if ($options['db']) {
 
 $scanner = new Scanner($filesystem, $hasher, $output, $cache);
 
-if (!empty($options['ignore'])) {
-    foreach ($options['ignore'] as $pattern) {
-        $scanner->ignore(trim($pattern));
-    }
+foreach ($options['ignore'] as $pattern) {
+    $scanner->ignore(trim($pattern));
 }
 
 $finder = new DuplicateFinder($scanner, $output);
@@ -167,7 +182,8 @@ $start = microtime(true);
 
 if ($options['stream']) {
     // Streaming mode: scan to DB, query DB for dupes. No memory accumulation.
-    if (!($cache instanceof SqliteCache)) {
+    $dbPath = $options['db'];
+    if ($dbPath === null || !($cache instanceof SqliteCache)) {
         fwrite(STDERR, "Error: --stream requires --db <path>\n");
         exit(1);
     }
@@ -178,7 +194,6 @@ if ($options['stream']) {
         $processes = [];
         $php = PHP_BINARY;
         $script = __FILE__;
-        $dbPath = $options['db'];
 
         foreach ($positional as $dir) {
             $cmd = [$php, $script, $dir, '--db', $dbPath, '--stream', '--algo', $options['algo']];
@@ -257,7 +272,7 @@ if ($options['stream']) {
             ];
         }
     }
-    usort($groups, fn($a, $b) => $b['wasted_bytes'] <=> $a['wasted_bytes']);
+    usort($groups, fn(array $a, array $b): int => $b['wasted_bytes'] <=> $a['wasted_bytes']);
 
     $dbStats = $cache->stats();
     $output->info("DB stats: {$dbStats['total']} files, {$dbStats['unique_hashes']} unique hashes, {$dbStats['duplicate_hashes']} duplicate hashes");
@@ -292,9 +307,9 @@ if ($options['stream']) {
         'files_hashed' => $stats['files_hashed'],
         'cache_hits' => $stats['cache_hits'],
         'duplicate_groups' => count($groups),
-        'total_wasted_bytes' => array_sum(array_map(fn($g) => $g->wastedBytes(), $groups)),
+        'total_wasted_bytes' => array_sum(array_map(fn(DuplicateGroup $g): int => $g->wastedBytes(), $groups)),
         'elapsed_seconds' => $elapsed,
-        'groups' => array_map(fn($g) => $g->toArray(), $groups),
+        'groups' => array_map(fn(DuplicateGroup $g): array => $g->toArray(), $groups),
         'timestamp' => date('c'),
     ];
 } else {

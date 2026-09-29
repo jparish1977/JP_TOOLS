@@ -1,16 +1,17 @@
 <?php
 
+/**
+ * JP_TOOLS shared Rector config.
+ * Safe automated refactoring rules: no breaking changes.
+ * Copy/extend into a project's rector.php as needed.
+ */
+
 declare(strict_types=1);
 
 use Rector\Config\RectorConfig;
 use Rector\Set\ValueObject\LevelSetList;
 use Rector\Set\ValueObject\SetList;
 
-/**
- * JP_TOOLS shared Rector config.
- * Safe automated refactoring rules: no breaking changes.
- * Copy/extend into a project's rector.php as needed.
- */
 return RectorConfig::configure()
     ->withSets([
         // Upgrade syntax to PHP 8.1 idioms

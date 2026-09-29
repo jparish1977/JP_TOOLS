@@ -34,13 +34,13 @@ jobs:
       # has neither, and without the PHP tools the phpstan suites would skip,
       # which reads as a pass. apt, not setup-php, because the Forgejo runner
       # cannot resolve that action. 8.3 is what phpunit ^12.5 needs and what
-      # Ubuntu 24.04 ships.
+      # Ubuntu 24.04 ships. gd and sqlite3 are iteration8/utilities' (below).
       - name: PHP and composer
         run: |
           if ! command -v composer >/dev/null 2>&1; then
             SUDO=$(command -v sudo || true)
             $SUDO apt-get update -q
-            $SUDO apt-get install -y -q php-cli php-xml php-mbstring php-curl unzip composer
+            $SUDO apt-get install -y -q php-cli php-xml php-mbstring php-curl php-gd php-sqlite3 unzip composer
           fi
           php --version
           composer --version
@@ -55,6 +55,32 @@ jobs:
           shellcheck --version
       - name: Install PHP tools
         run: composer install --no-interaction --no-progress
+      # find-dupes.php drives iteration8/utilities, which needs iteration8/core:
+      # private repositories this forge mirrors under the owner in the
+      # variable ITERATION8_LIBRARIES_OWNER, read with the secret
+      # FLEET_READ_TOKEN. Required here and not in composer.json, where a
+      # private repository 404s every install without access, linters too.
+      # Without both, find-dupes.php cannot be checked, so the step fails.
+      - name: iteration8 libraries, for find-dupes.php
+        shell: bash
+        env:
+          FLEET_READ_TOKEN: ${{ secrets.FLEET_READ_TOKEN }}
+          OWNER: ${{ vars.ITERATION8_LIBRARIES_OWNER }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          if [ -z "$FLEET_READ_TOKEN" ] || [ -z "$OWNER" ]; then
+            echo "Set the secret FLEET_READ_TOKEN and the variable ITERATION8_LIBRARIES_OWNER:" >&2
+            echo "without iteration8/utilities, find-dupes.php cannot be checked." >&2
+            exit 1
+          fi
+          for lib in core utilities; do
+            composer config "repositories.iteration8-$lib" vcs "$SERVER/$OWNER/iteration8-$lib.git"
+          done
+          case "$SERVER" in http://*) composer config secure-http false ;; esac
+          auth=$(python -c 'import json, os, sys
+          print(json.dumps({"http-basic": {sys.argv[1]: {"username": "ci", "password": os.environ["FLEET_READ_TOKEN"]}}}))' "${SERVER#*://}")
+          COMPOSER_AUTH=$auth composer require --dev --no-interaction --no-progress \
+            iteration8/core:dev-master iteration8/utilities:dev-master
       # Every file is checked on its own, by one worker per core, each taking
       # every Nth file in turn. Each file writes its own log, printed
       # afterwards in file order, so the output reads as a serial run's would.
@@ -62,7 +88,7 @@ jobs:
       # crashed here (INTERNAL ERROR on 6 of 149 files). Each runs with
       # `set +e`: this shell has -e, and a worker that inherited it would stop
       # at the first finding without recording its exit code.
-      - name: Check every Python and shell file
+      - name: Check every Python, shell and PHP file
         shell: bash
         env:
           SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -74,7 +100,7 @@ jobs:
             base=HEAD
           fi
           out=$(mktemp -d)
-          mapfile -t files < <(git ls-files '*.py' '*.sh' '*.bash')
+          mapfile -t files < <(git ls-files '*.py' '*.sh' '*.bash' '*.php')
           workers=$(nproc)
           for ((w = 0; w < workers; w++)); do
             ( set +e
