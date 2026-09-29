@@ -55,7 +55,11 @@ jobs:
           shellcheck --version
       - name: Install PHP tools
         run: composer install --no-interaction --no-progress
+      # Every file is checked on its own, every core at once. Each writes its
+      # own log, printed afterwards in file order, so the output reads as a
+      # serial run's would.
       - name: Check every Python and shell file
+        shell: bash
         env:
           SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
@@ -65,14 +69,24 @@ jobs:
             echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
             base=HEAD
           fi
+          out=$(mktemp -d)
+          mapfile -t files < <(git ls-files '*.py' '*.sh' '*.bash')
+          for i in "${!files[@]}"; do
+            { python check.py "${files[$i]}" --pretty --smells-base "$base" > "$out/$i.log" 2>&1
+              echo $? > "$out/$i.rc"; } &
+            while [ "$(jobs -rp | wc -l)" -ge "$(nproc)" ]; do wait -n; done
+          done
+          wait
           rc=0
-          for f in $(git ls-files '*.py' '*.sh' '*.bash'); do
-            echo "--- $f ---"
-            python check.py "$f" --pretty --smells-base "$base" || rc=1
+          for i in "${!files[@]}"; do
+            echo "--- ${files[$i]} ---"
+            cat "$out/$i.log"
+            [ "$(cat "$out/$i.rc")" = 0 ] || rc=1
           done
           exit $rc
       - name: Run test suites
         if: always()
+        shell: bash
         run: |
           # Under coverage, so the suites are measured on the one pass.
           # Subprocess tracing needs this .pth AND COVERAGE_PROCESS_START:
@@ -82,16 +96,27 @@ jobs:
           echo "import coverage; coverage.process_startup()" > "$site/zz-subprocess-coverage.pth"
           export COVERAGE_PROCESS_START="$PWD/.coveragerc"
           rm -f .coverage .coverage.*
-          rc=0
-          for t in tests/test_*.py; do
-            echo "--- $t ---"
-            python -m coverage run "$t" || rc=1
-          done
+          # Every core at once. .coveragerc's parallel = True gives each
+          # process its own data file, combined below. Each suite writes its
+          # own log, printed afterwards in suite order.
           # The shell suites too: the acceptance suite drives the real CLI.
           # PYTHON=python so it runs the interpreter the .pth is installed in.
-          for t in tests/test_*.sh; do
-            echo "--- $t ---"
-            PYTHON=python bash "$t" || rc=1
+          out=$(mktemp -d)
+          suites=(tests/test_*.py tests/test_*.sh)
+          for i in "${!suites[@]}"; do
+            t=${suites[$i]}
+            case "$t" in
+              *.py) { python -m coverage run "$t" > "$out/$i.log" 2>&1; echo $? > "$out/$i.rc"; } & ;;
+              *.sh) { PYTHON=python bash "$t" > "$out/$i.log" 2>&1; echo $? > "$out/$i.rc"; } & ;;
+            esac
+            while [ "$(jobs -rp | wc -l)" -ge "$(nproc)" ]; do wait -n; done
+          done
+          wait
+          rc=0
+          for i in "${!suites[@]}"; do
+            echo "--- ${suites[$i]} ---"
+            cat "$out/$i.log"
+            [ "$(cat "$out/$i.rc")" = 0 ] || rc=1
           done
           python -m coverage combine || true
           exit $rc
