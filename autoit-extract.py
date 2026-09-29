@@ -26,7 +26,8 @@ Prints PE facts, where the payload was found, the decoded script, and an
 indicator scan (network, persistence, external execution, dropped files).
 Nothing is executed: the input is read as bytes and never run.
 
-Needs `autoit-ripper` (pip install autoit-ripper) for the decoder.
+Needs `autoit-ripper` 1.2.0 for the decoder (pip install autoit-ripper==1.2.0).
+It uses that package's internal modules, so pyproject.toml pins the release.
 """
 import argparse
 import contextlib
@@ -129,7 +130,7 @@ def decode(payload: bytes, tag: str) -> list[tuple[str, bytes]]:
         from autoit_ripper.autoit_unpack import parse_all
         from autoit_ripper.utils import ByteStream
     except ImportError:
-        sys.exit("needs autoit-ripper:  pip install autoit-ripper")
+        sys.exit("needs autoit-ripper:  pip install autoit-ripper==1.2.0")
     version = AutoItVersion.EA05 if "EA05" in tag else AutoItVersion.EA06
     return parse_all(ByteStream(payload), version) or []
 

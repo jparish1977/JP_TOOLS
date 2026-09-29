@@ -172,7 +172,7 @@ last section and `autoit-ripper` stops with "Couldn't find any appropiate PE
 resource directory" -- a layout miss reported as a failure.
 
 ```bash
-pip install autoit-ripper
+pip install autoit-ripper==1.2.0    # the version pyproject.toml declares
 python3 autoit-extract.py SUSPECT.exe -o ./out
 ```
 
