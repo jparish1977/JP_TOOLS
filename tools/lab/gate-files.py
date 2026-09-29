@@ -2,7 +2,8 @@
 """What does check.py say about each file, one line per file?
 
 ANSWERS: which of the named files (or, with --tracked, every tracked
-  .py/.sh/.bash/.js/.mjs/.cjs file) check.py fails or flags, with the rule and
+  .py/.sh/.bash/.php/.js/.mjs/.cjs file, the files CI's gate steps check)
+  check.py fails or flags, with the rule and
   line of the first few findings, so a whole-tree gate reads in one screen.
   --base REF judges smells against REF, as CI does with the PR's base; without
   it check.py's default base is HEAD, where a new smell only warns.
@@ -12,7 +13,11 @@ TESTED AGAINST: this repo's by-path-load branch, --tracked --base
   Python and shell file exit 0, the five JS files exit 2 with eslint:error
   (the missing node_modules, see below). Its 20 new or changed files gated by
   name: all exit 0. Positive control: a file holding only `import os`
-  printed `F401 os imported but unused` and exit 1.
+  printed `F401 os imported but unused` and exit 1. It listed no .php then,
+  though CI gates them. With .php: the php-gate branch at 6261977, --tracked
+  --base origin/master, in a worktree whose own vendor/ has the iteration8
+  libraries: 169 files in 91s, worst exit 0, the 4 PHP files among them
+  (sample.php with its deliberate PSR-1 warning).
 
 NOT TESTED AGAINST: a tree without node_modules/ or vendor/. There eslint and
   phpstan cannot load and check.py exits 2 for those files: read an
@@ -25,7 +30,8 @@ import json
 import subprocess
 import sys
 
-SOURCE = ("*.py", "*.sh", "*.bash", "*.js", "*.mjs", "*.cjs")
+# What CI's gate steps list (.github/workflows/check.yml).
+SOURCE = ("*.py", "*.sh", "*.bash", "*.php", "*.js", "*.mjs", "*.cjs")
 
 
 def _name_process(name: bytes) -> None:
