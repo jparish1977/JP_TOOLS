@@ -238,7 +238,8 @@ def measure_php(src: str) -> Measure:
 # ── JS: ESLint's parser and its `complexity` rule, in jp_measure.mjs ──
 
 def measure_js(src: str) -> Measure:
-    from jpcheck.js_tools import TOOLS_ROOT, _resolve_args, _runner_env
+    from jpcheck.common import TOOLS_ROOT
+    from jpcheck.js_tools import _resolve_args, _runner_env
     node = shutil.which("node") or shutil.which("node.exe")
     if not node:
         raise ToolMissingError("node")

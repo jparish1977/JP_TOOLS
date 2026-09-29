@@ -148,9 +148,12 @@ def js_counts(repo: Path, files: list[str]) -> Counter[str] | str:
 MEASURE = {"python": python_counts, "php": php_counts, "js": js_counts}
 
 
-def sweep(repo: Path) -> list[tuple[str, str, int, Counter[str] | str | None]]:
+Row = tuple[str, str, int, Counter[str] | str | None]
+
+
+def sweep(repo: Path) -> list[Row]:
     """(repo, language, files, counts or the reason it could not run, or None)."""
-    rows = []
+    rows: list[Row] = []
     for lang, files in sorted(tracked(repo).items()):
         if lang in MEASURE:
             try:
