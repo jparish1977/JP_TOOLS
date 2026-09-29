@@ -37,6 +37,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from _harness import CHECKOUT_COPY_IGNORE
+
 CHECK = Path(__file__).resolve().parent.parent / "check.py"
 
 CLEAN = "def f(x: int) -> int:\n    return x\n"
@@ -141,8 +143,7 @@ def tree_with_packages(tmp: Path) -> Path:
     """
     tree = tmp / "_tree"
     if not tree.exists():
-        shutil.copytree(CHECK.parent, tree, symlinks=True, ignore=shutil.ignore_patterns(
-            ".git", "vendor", "node_modules", "__pycache__"))
+        shutil.copytree(CHECK.parent, tree, symlinks=True, ignore=CHECKOUT_COPY_IGNORE)
         for package in ("eslint", "stylelint"):
             (tree / "node_modules" / package).mkdir(parents=True)
     return tree

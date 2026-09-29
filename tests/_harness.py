@@ -14,12 +14,21 @@ cached copy of the original.
 """
 
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# What a copy of the whole checkout leaves out: git data, installed packages,
+# and what tools write into the checkout while other suites run beside the
+# copy. Suites run in parallel under coverage, and a data file another suite
+# writes and then combines away vanishes mid-copy, failing copytree.
+CHECKOUT_COPY_IGNORE = shutil.ignore_patterns(
+    ".git", "vendor", "node_modules", "__pycache__",
+    ".coverage", ".coverage.*", ".mypy_cache", ".ruff_cache")
 
 sys.dont_write_bytecode = True
 if str(ROOT) not in sys.path:

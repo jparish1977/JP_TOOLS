@@ -30,7 +30,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from _harness import ROOT, check, check_true, run
+from _harness import CHECKOUT_COPY_IGNORE, ROOT, check, check_true, run
 
 NPM = "run: npm install in JP_TOOLS"
 PIP = "pip install -r requirements-dev.txt"
@@ -65,8 +65,7 @@ def test_missing_tools_say_how_to_install() -> None:
         # commit) without .git, vendor/ or node_modules/: a standalone tree
         # with nothing installed and no main checkout to borrow from.
         clone = base / "clone"
-        shutil.copytree(ROOT, clone, symlinks=True, ignore=shutil.ignore_patterns(
-            ".git", "vendor", "node_modules", "__pycache__"))
+        shutil.copytree(ROOT, clone, symlinks=True, ignore=CHECKOUT_COPY_IGNORE)
         empty = base / "empty"
         empty.mkdir()
         (base / "t.js").write_text('eval("1");\n', encoding="utf-8")
