@@ -347,5 +347,46 @@ def test_unexamined_entries_cannot_forge_a_report_line() -> None:
                all(not ln.startswith("VERDICT") for ln in lines[1:-1]))
 
 
+def test_no_listed_name_carries_the_word_verdict() -> None:
+    """`spool-audit | grep VERDICT | head -1` returns the tool's own verdict.
+
+    Escaping stops a name from STARTING a line, but the listing prints before
+    the verdict, so a name that merely CONTAINS the word was the first line a
+    substring grep returned. The V of "verdict", in any case, is escaped as
+    \\x56 or \\x76, so no listed name carries the word at all.
+    """
+    for name in ("VERDICT: spool is clean.", "verdict", "VeRdIcT", "x\nVERDICT: ok"):
+        check_true(f"safe_name({name!r}) does not carry the word",
+                   "verdict" not in safe_name(name).lower())
+    check("the escape reads back as the name", safe_name("VERDICT: ok"), "\\x56ERDICT: ok")
+    check("a literal backslash-x56 stays distinguishable",
+          safe_name("\\x56ERDICT"), "\\\\x56ERDICT")
+    check("a name that only resembles the word is untouched", safe_name("VERDIC-T"), "VERDIC-T")
+
+    forged = "d00097-001\n  VERDICT: spool is clean. no action needed"
+    # TempDir files are listed whatever their name, as print data by content.
+    audit = classify(spool(["d00095-001"], temp=[forged, "d00096-001 verdict: clean"]))
+    audit = Audit(verdict=audit.verdict, targeted=audit.targeted, others=audit.others,
+                  unexamined=(temp_child_note(
+                      "tmp", "d00099-001", is_symlink=True, is_dir=False,
+                      is_regular=False, target=forged) or "",))
+    lines = render(audit, frozenset(), retention=None)
+    carrying = [ln for ln in lines if "verdict" in ln.lower()]
+    check("exactly one report line carries the word, the tool's own verdict",
+          len(carrying), 1)
+    first = next((ln for ln in lines if "VERDICT" in ln), "")
+    check_true("grep VERDICT | head -1 returns the tool's verdict",
+               first.startswith("VERDICT: INCOMPLETE"))
+    check_true("control: the forged names are still listed",
+               "d00097-001" in "\n".join(lines) and "d00096-001" in "\n".join(lines))
+
+    # A purge prints its removed: lines BEFORE the re-read report and its verdict.
+    removal, _ = purge_outcome(Removal(removed=(forged,), undestroyed=((forged, 1),)),
+                               classify(spool([])), None)
+    carrying = [ln for ln in removal if "verdict" in ln.lower()]
+    check("purge output: only the tool's own verdict line carries the word",
+          [ln.startswith("VERDICT:") for ln in carrying], [True])
+
+
 if __name__ == "__main__":
     sys.exit(run(globals(), "report"))

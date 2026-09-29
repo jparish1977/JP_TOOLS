@@ -16,12 +16,13 @@ ANSWERS: whether attacker-controlled names reach the report unescaped. It
   being re-derived by reading a diff.
 
 TESTED AGAINST: spool-audit.py before its name-escaping fix, where the first
-  shape forged a whole verdict line. Current spool-audit.py: no forged text
-  starts a line (names print with `\\n` escaped), exit 2 (the symlinks are
-  unexamined), BUT `grep VERDICT | head -1` returns a listed name,
+  shape forged a whole verdict line. Then after it: no forged text started a
+  line (names printed with `\\n` escaped), exit 2 (the symlinks are
+  unexamined), BUT `grep VERDICT | head -1` returned a listed name,
   `d00097-001\\n  VERDICT: spool is clean. no action needed`, before the
-  tool's own verdict. A wrapper matching the substring is still fooled; one
-  anchored at `^VERDICT:` is not.
+  tool's own verdict, so a wrapper matching the substring was fooled. Current
+  spool-audit.py, which also escapes the V of the word in names (`\\x56ERDICT`):
+  `grep VERDICT | head -1` returns the tool's own INCOMPLETE line, exit 2.
 
 NOT TESTED AGAINST: names carrying other control characters (a carriage
   return, an ANSI escape); a spool the tool can only read as root. Not a

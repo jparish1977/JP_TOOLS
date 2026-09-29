@@ -1,0 +1,20 @@
+{
+  "about": "safe_name escapes the word VERDICT inside a listed name. Run: mutate-on-target.py TREE spoolaudit/classify.py tests/test_spool_audit_render.py tests/mutants/jpt-verdict-name-on-classify.json",
+  "mutants": [
+    {
+      "name": "the word is not escaped at all",
+      "edits": [["    return _VERDICT_V.sub(lambda m: f\"\\\\x{ord(m.group()):02x}\", out)", "    return out"]],
+      "target": "exactly one report line carries the word, the tool's own verdict"
+    },
+    {
+      "name": "only the upper-case word is escaped",
+      "edits": [["_VERDICT_V = re.compile(r\"v(?=erdict)\", re.IGNORECASE)", "_VERDICT_V = re.compile(r\"V(?=ERDICT)\")"]],
+      "target": "safe_name('verdict') does not carry the word"
+    },
+    {
+      "name": "only the word followed by a colon is escaped",
+      "edits": [["_VERDICT_V = re.compile(r\"v(?=erdict)\", re.IGNORECASE)", "_VERDICT_V = re.compile(r\"v(?=erdict:)\", re.IGNORECASE)"]],
+      "target": "safe_name('VeRdIcT') does not carry the word"
+    }
+  ]
+}

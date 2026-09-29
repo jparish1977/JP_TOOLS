@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from spoolaudit.model import (
     ARTIFACT,
     CONTROL,
@@ -221,7 +223,15 @@ def safe_name(name: str) -> str:
     # Every unprintable character, ESC included, not just \n and \r:
     # "\x1b[1A\x1b[2K" moves the cursor up and erases the line, so a filename
     # could overwrite the verdict it appears under.
-    return "".join(ch if ch.isprintable() or ch == " " else repr(ch)[1:-1] for ch in out)
+    out = "".join(ch if ch.isprintable() or ch == " " else repr(ch)[1:-1] for ch in out)
+    # And the word itself, in any case. The listing prints before the verdict,
+    # so a name merely containing "VERDICT: spool is clean." would be the first
+    # line `grep VERDICT | head -1` returns. Its V is written as \x56 (or \x76),
+    # the same escape as above, so the name stays readable and exact.
+    return _VERDICT_V.sub(lambda m: f"\\x{ord(m.group()):02x}", out)
+
+
+_VERDICT_V = re.compile(r"v(?=erdict)", re.IGNORECASE)
 
 
 def classify_top(e: TopEntry) -> TopDecision:
