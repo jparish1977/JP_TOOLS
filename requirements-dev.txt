@@ -19,3 +19,8 @@ actionlint-py==1.7.12.25
 # The standard YAML parser, which tests/test_ci_template.py reads the template
 # with. 6.0.1 is the version Ubuntu 24.04's python3-yaml gives the dev boxes.
 pyyaml==6.0.1
+# The smells arm's measures (jpcheck/measure.py). lizard: cyclomatic complexity
+# of C and C++ functions. shfmt-py ships shfmt's release binary (v3.14.1 in
+# 4.2.0), the standard shell parser, whose JSON tree the shell measure reads.
+lizard==1.24.0
+shfmt-py==4.2.0

@@ -65,12 +65,13 @@ DEFAULT_TOOLS = {
     "python": ["ruff", "mypy", "no-cover", "suppress-reason", "noqa", "smells"],
     # directive-reason: each linter's own suppression directives need a reason,
     # as noqa does for Python (jpcheck/directives.py).
-    "js":     ["eslint", "prettier", "directive-reason"],
+    # smells: every language with code to measure (jpcheck/measure.py).
+    "js":     ["eslint", "prettier", "directive-reason", "smells"],
     "css":    ["stylelint", "prettier", "directive-reason"],
     "html":   ["eslint", "stylelint", "prettier", "directive-reason"],
-    "php":    ["phpstan", "phpcs", "rector", "directive-reason"],
-    "cpp":    ["cppcheck", "directive-reason"],
-    "shell":  ["shellcheck", "directive-reason"],
+    "php":    ["phpstan", "phpcs", "rector", "directive-reason", "smells"],
+    "cpp":    ["cppcheck", "directive-reason", "smells"],
+    "shell":  ["shellcheck", "directive-reason", "smells"],
 }
 
 AUDIT_TOOLS = {
@@ -79,8 +80,10 @@ AUDIT_TOOLS = {
     "php":    ["composer-audit"],
 }
 
-# Tools that accept directories natively (pass the dir, not individual files)
-_DIR_CAPABLE = {"ruff", "mypy", "no-cover", "suppress-reason", "noqa", "smells", "phpstan",
+# Tools that accept directories natively (pass the dir, not individual files).
+# Not smells: several languages run it, and each run over the whole directory
+# would report every language's smells again.
+_DIR_CAPABLE = {"ruff", "mypy", "no-cover", "suppress-reason", "noqa", "phpstan",
                 "phpcs", "rector", "pip-audit", "npm-audit", "composer-audit"}
 # cppcheck is deliberately not in _DIR_CAPABLE: the .ino suppression is decided
 # per file, and passing a directory would apply sketch rules to every .cpp.

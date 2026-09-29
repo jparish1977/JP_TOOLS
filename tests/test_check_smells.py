@@ -125,13 +125,16 @@ def file_smells(repo: Path) -> None:
     big = repo / "big.py"
     big.write_text("x = 1\n" * 1000, encoding="utf-8")
     rc, pairs, raw = smells(big)
-    check("a NEW 1000-line file fails, exit 1",
-          rc == 1 and ("SMELL-FILE-LINES", "error") in pairs, raw)
+    # 1000 lines of code at the top level: the file is long, and so is its main.
+    check("a NEW 1000-line file fails, exit 1, and so does its 1000-line top level",
+          rc == 1 and pairs == [("SMELL-FILE-LINES", "error"), ("SMELL-FUNC-LINES", "error")],
+          raw)
     commit(repo, "big file")
     big.write_text("x = 1\n" * 1001, encoding="utf-8")
     rc, pairs, raw = smells(big)
-    check("an existing 1000-line file only warns, exit 0",
-          rc == 0 and pairs == [("SMELL-FILE-LINES", "warning")], raw)
+    check("an existing 1000-line file only warns, exit 0, and so does its top level",
+          rc == 0 and pairs == [("SMELL-FILE-LINES", "warning"), ("SMELL-FUNC-LINES", "warning")],
+          raw)
     busy = repo / "busy.py"
     busy.write_text(busy_source(), encoding="utf-8")
     rc, pairs, raw = smells(busy)
@@ -187,6 +190,33 @@ def moves(repo: Path) -> None:
           rc == 1 and ("SMELL-FUNC-COMPLEXITY", "error") in pairs, raw)
 
 
+def top_level_source(k: int) -> str:
+    """Code outside any function, of complexity exactly k."""
+    return "a = 1\n" + "".join(f"if a == {i}:\n    a = {i}\n" for i in range(k - 1))
+
+
+def top_level(repo: Path) -> None:
+    """Code outside every function is the file's main, measured as one more function."""
+    print("\nThe top level (code outside every function):")
+    script = repo / "script.py"
+    script.write_text(top_level_source(11), encoding="utf-8")
+    rc, pairs, raw = smells(script)
+    check("top-level code of complexity 11 fails as a NEW function smell, exit 1",
+          rc == 1 and ("SMELL-FUNC-COMPLEXITY", "error") in pairs and "(top level)" in raw, raw)
+    script.write_text(top_level_source(10), encoding="utf-8")
+    rc, pairs, raw = smells(script)
+    check("CONTROL: top-level code of complexity 10 is no smell", rc == 0 and not pairs, raw)
+    script.write_text("x = 1\n" * 100, encoding="utf-8")
+    rc, pairs, raw = smells(script)
+    check("100 top-level statements fail as a NEW function-length smell, exit 1",
+          rc == 1 and ("SMELL-FUNC-LINES", "error") in pairs and "(top level)" in raw, raw)
+    script.write_text('"""A docstring."""\n' + "import os\n" * 99 + "\n\n" + long_func("f", 5),
+                      encoding="utf-8")
+    rc, pairs, raw = smells(script)
+    check("CONTROL: a docstring, imports and definitions are not top-level code",
+          rc == 0 and not pairs, raw)
+
+
 def outside_and_clean(repo: Path, tmp: Path) -> None:
     print("\nNo history, and a clean file:")
     loose = tmp / "loose.py"
@@ -216,6 +246,7 @@ def main() -> int:
         file_smells(repo)
         the_base(repo)
         moves(repo)
+        top_level(repo)
         outside_and_clean(repo, tmp)
     print(f"\n{checks - fails}/{checks} passed")
     return 1 if fails else 0

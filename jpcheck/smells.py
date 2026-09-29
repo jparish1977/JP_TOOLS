@@ -1,11 +1,21 @@
 """The smells check: long or complex files and functions, new ones fail and existing ones warn."""
 
-import ast
 from pathlib import Path
 from typing import Any
 
 from jpcheck.common import _git, _NoGitError, _tool_missing
 from jpcheck.coverage import is_project_file
+from jpcheck.files import _detect_lang
+from jpcheck.measure import (
+    _MEASURES,
+    DEFINITION,
+    TOP_LEVEL,
+    Measure,
+    ToolMissingError,
+    file_complexity,
+    measure,
+    measure_python,
+)
 
 # ── smells ────────────────────────────────────────────────────────────────────
 # Four smells: a long file, a long function, a complex function, a complex
@@ -14,53 +24,19 @@ from jpcheck.coverage import is_project_file
 # base: HEAD by default, which is the last commit when the pre-commit hook runs;
 # CI on a pull request passes the PR's base with --smells-base.
 #
-# Python, measured with ast. Complexity is McCabe-style: 1, plus each if and
-# elif, loop, except, conditional expression, match case, extra boolean operand
-# and comprehension clause. A nested function is measured on its own. The file
-# complexity is the sum over its functions.
+# What is measured, and how, is jpcheck/measure.py: each function, and the
+# code outside every function as one more (TOP_LEVEL), by the standard tool of
+# the language. The file complexity is its top level plus its functions.
 _SMELL_FILE_LINES = 1000        # a smell at or over
 _SMELL_FUNC_LINES = 100         # a smell at or over
 _SMELL_FUNC_COMPLEXITY = 11     # over 10
 _SMELL_FILE_COMPLEXITY = 101    # over 100
 _SMELLS = {"base": "HEAD"}      # set from --smells-base in main()
-_BRANCHES = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
-             ast.IfExp, ast.match_case)
 
 
-def _complexity(fn: ast.AST) -> int:
-    n = 1
-    stack = list(ast.iter_child_nodes(fn))
-    while stack:
-        node = stack.pop()
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
-            continue
-        if isinstance(node, _BRANCHES):
-            n += 1
-        elif isinstance(node, ast.BoolOp):
-            n += len(node.values) - 1
-        elif isinstance(node, ast.comprehension):
-            n += 1 + len(node.ifs)
-        stack.extend(ast.iter_child_nodes(node))
-    return n
-
-
-def _smell_measure(src: str) -> tuple[int, dict[str, tuple[int, int, int]]]:
-    """(physical lines, {qualified function name: (lines, complexity, line)})."""
-    funcs: dict[str, tuple[int, int, int]] = {}
-    stack: list[tuple[ast.AST, str]] = [(ast.parse(src), "")]
-    while stack:
-        node, prefix = stack.pop()
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                name = prefix + child.name
-                size = (child.end_lineno or child.lineno) - child.lineno + 1
-                funcs[name] = (size, _complexity(child), child.lineno)
-                stack.append((child, name + "."))
-            elif isinstance(child, ast.ClassDef):
-                stack.append((child, prefix + child.name + "."))
-            else:
-                stack.append((child, prefix))
-    return len(src.splitlines()), funcs
+def _smell_measure(src: str) -> Measure:
+    """A Python file's measure. Other programs load check.py by path and call this."""
+    return measure_python(src)
 
 
 class _NoSmellsBaseError(Exception):
@@ -101,17 +77,20 @@ def _renamed_from(root: Path, base: str, rel: str) -> str | None:
     return None
 
 
-def _function_elsewhere(root: Path, base: str, name: str) -> tuple[int, int, int]:
-    """A function's size and complexity at the base in ANY file, for one that
-    moved: splitting a smelly file moves its smells, it does not add them.
-    The largest measure found wins."""
+def _function_elsewhere(root: Path, base: str, name: str, lang: str) -> tuple[int, int, int]:
+    """A function's size and complexity at the base in ANY file of its language,
+    for one that moved: splitting a smelly file moves its smells, it does not
+    add them. The largest measure found wins."""
+    if lang not in DEFINITION:
+        return (0, 0, 0)
+    pattern, globs = DEFINITION[lang]
     leaf = name.rsplit(".", 1)[-1]
-    hits = _git(["grep", "-l", "-E", f"def {leaf}\\(", base, "--", "*.py"], root).stdout
+    hits = _git(["grep", "-l", "-E", pattern.format(leaf), base, "--", *globs], root).stdout
     best = (0, 0, 0)
     for hit in hits.splitlines():
         src = _base_text(root, base, hit.split(":", 1)[-1])
         try:
-            found = _smell_measure(src)[1].get(name) if src is not None else None
+            found = measure(lang, src)[1].get(name) if src is not None else None
         except (SyntaxError, ValueError):
             found = None
         if found:
@@ -130,7 +109,7 @@ def _base_measure(f: Path, ctx: tuple[Path, str] | None) -> tuple[int, dict[str,
         old = _renamed_from(root, base, rel)
         src = _base_text(root, base, old) if old else None
     try:
-        return _smell_measure(src) if src is not None else (0, {})
+        return measure(_detect_lang(str(f)), src) if src is not None else (0, {})
     except (SyntaxError, ValueError):
         # reason: a base that will not parse has no smells to compare, so every smell reads NEW, the stricter side
         return 0, {}
@@ -161,11 +140,10 @@ def _smell(f: Path, line: int, rule: str, what: str,
     }
 
 
-def _unmeasured(f: Path) -> dict[str, Any]:
+def _unmeasured(f: Path, why: str) -> dict[str, Any]:
     return {"file": str(f), "line": 1, "col": 0, "severity": "warning",
             "rule": "SMELL-UNMEASURED",
-            "message": "could not be parsed, so its smells were not measured "
-                       "(ruff reports the parse error)",
+            "message": f"its smells were not measured: {why}",
             "fixable": False, "fixable_unsafe": False}
 
 
@@ -173,20 +151,22 @@ def _file_smells(f: Path) -> list[dict[str, Any]]:
     """The four smells for one file. A function missing at its own path is
     looked for across the base tree before it counts as new; a function renamed
     in place still counts as new, which is a chance to fix it."""
+    lang = _detect_lang(str(f))
+    if lang not in _MEASURES:
+        return [_unmeasured(f, f"no measure for {lang} files")]
     try:
-        lines, funcs = _smell_measure(f.read_text(encoding="utf-8", errors="replace"))
+        lines, funcs = measure(lang, f.read_text(encoding="utf-8", errors="replace"))
     except (SyntaxError, ValueError, OSError):
-        return [_unmeasured(f)]
+        return [_unmeasured(f, "it could not be parsed (its linter reports the parse error)")]
     ctx = _smells_context(f)
     history = ctx is not None
     b_lines, b_funcs = _base_measure(f, ctx)
-    cx_now = sum(c for _, c, _ in funcs.values())
-    cx_before = sum(c for _, c, _ in b_funcs.values())
     found = [
         _smell(f, 1, "SMELL-FILE-LINES", "file length",
                (lines, b_lines, _SMELL_FILE_LINES), history),
-        _smell(f, 1, "SMELL-FILE-COMPLEXITY", "file complexity (sum over its functions)",
-               (cx_now, cx_before, _SMELL_FILE_COMPLEXITY), history),
+        _smell(f, 1, "SMELL-FILE-COMPLEXITY", "file complexity (its top level and functions)",
+               (file_complexity(funcs, lang), file_complexity(b_funcs, lang),
+                _SMELL_FILE_COMPLEXITY), history),
     ]
     found.extend(_function_smells(f, funcs, b_funcs, ctx))
     return [s for s in found if s is not None]
@@ -200,8 +180,8 @@ def _function_smells(f: Path, funcs: dict[str, tuple[int, int, int]],
     for name, (size, cx, line) in funcs.items():
         before = b_funcs.get(name)
         smelly = size >= _SMELL_FUNC_LINES or cx >= _SMELL_FUNC_COMPLEXITY
-        if before is None and ctx is not None and smelly:
-            before = _function_elsewhere(ctx[0], ctx[1], name)
+        if before is None and ctx is not None and smelly and name != TOP_LEVEL:
+            before = _function_elsewhere(ctx[0], ctx[1], name, _detect_lang(str(f)))
         b_size, b_cx, _ = before or (0, 0, 0)
         out.append(_smell(f, line, "SMELL-FUNC-LINES", f"function {name} length",
                           (size, b_size, _SMELL_FUNC_LINES), ctx is not None))
@@ -212,7 +192,8 @@ def _function_smells(f: Path, funcs: dict[str, tuple[int, int, int]],
 
 def run_smells(target: str) -> dict[str, Any]:
     p = Path(target)
-    files = ([f for f in sorted(p.rglob("*.py")) if is_project_file(f, p)]
+    files = ([f for f in sorted(p.rglob("*")) if f.is_file()
+              and is_project_file(f, p) and _detect_lang(str(f)) in _MEASURES]
              if p.is_dir() else [p])
     issues: list[dict[str, Any]] = []
     try:
@@ -226,5 +207,7 @@ def run_smells(target: str) -> dict[str, Any]:
         # Without git there is no history, so new cannot be told from
         # existing: a check that did not run, never a pass.
         return _tool_missing("git (the smells arm reads history to tell new from existing)")
+    except ToolMissingError as e:
+        return _tool_missing(str(e), "the smells arm measures complexity with it")
     status = "fail" if any(i["severity"] == "error" for i in issues) else "pass"
     return {"tool": "smells", "status": status, "issues": issues}
