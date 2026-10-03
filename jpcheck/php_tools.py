@@ -150,38 +150,58 @@ def _as_list(value: Any) -> list[Any]:
     raise TypeError(f"expected a list or object, got {type(value).__name__}")
 
 
-def _composer_advisories(stdout: str) -> dict[str, list[Any]]:
-    """Package name -> its advisories. With none, composer prints "advisories": [],
-    not {}, so an empty list is an empty set; any other non-object is an error."""
-    data = json.loads(stdout)
-    if not isinstance(data, dict):
-        raise TypeError(f"expected an object, got {type(data).__name__}")
-    found = data.get("advisories", {})
+def _keyed_by_package(data: dict[str, Any], key: str) -> dict[str, Any]:
+    """DATA[KEY], an object keyed by package. With nothing to report composer
+    prints [], not {}, so an empty list is an empty set; any other non-object
+    is an error."""
+    found = data.get(key, {})
     if found == []:
         return {}
     if not isinstance(found, dict):
-        raise TypeError(f'"advisories" is a {type(found).__name__}, not an object')
-    advisories = {pkg: _as_list(advs) for pkg, advs in found.items()}
+        raise TypeError(f'"{key}" is a {type(found).__name__}, not an object')
+    return found
+
+
+def _composer_advisories(data: dict[str, Any]) -> dict[str, list[Any]]:
+    """Package name -> its advisories."""
+    advisories = {pkg: _as_list(advs)
+                  for pkg, advs in _keyed_by_package(data, "advisories").items()}
     if not all(isinstance(adv, dict) for advs in advisories.values() for adv in advs):
         raise TypeError("an advisory is not an object")
     return advisories
 
 
+def _composer_abandoned(data: dict[str, Any]) -> dict[str, str | None]:
+    """Abandoned package name -> the package its maintainer suggests instead, or None."""
+    abandoned = _keyed_by_package(data, "abandoned")
+    if not all(r is None or isinstance(r, str) for r in abandoned.values()):
+        raise TypeError("an abandoned package's replacement is not a name")
+    return abandoned
+
+
+def _composer_issue(severity: str, rule: str, message: str) -> dict[str, Any]:
+    return {"file": "composer.json", "line": 0, "col": 0, "severity": severity,
+            "rule": rule, "message": message, "fixable": False}
+
+
 def _composer_issues(stdout: str) -> list[dict[str, Any]]:
-    return [
-        {
-            "file":     "composer.json",
-            "line":     0,
-            "col":      0,
-            "severity": "error",
-            # composer prints "cve": null for an advisory with no CVE
-            "rule":     adv.get("cve") or adv.get("advisoryId") or "advisory",
-            "message":  f"{pkg}: {adv.get('title', 'security advisory')}",
-            "fixable":  False,
-        }
-        for pkg, advisories in _composer_advisories(stdout).items()
+    """An error per security advisory and a warning per abandoned package."""
+    data = json.loads(stdout)
+    if not isinstance(data, dict):
+        raise TypeError(f"expected an object, got {type(data).__name__}")
+    issues = [
+        # composer prints "cve": null for an advisory with no CVE
+        _composer_issue("error", adv.get("cve") or adv.get("advisoryId") or "advisory",
+                        f"{pkg}: {adv.get('title', 'security advisory')}")
+        for pkg, advisories in _composer_advisories(data).items()
         for adv in advisories
     ]
+    issues += [
+        _composer_issue("warning", "abandoned",
+                        f"{pkg} is abandoned" + (f"; use {r} instead" if r else ""))
+        for pkg, r in _composer_abandoned(data).items()
+    ]
+    return issues
 
 
 def run_composer_audit(target: str) -> dict[str, Any]:

@@ -12,6 +12,10 @@ WHAT THIS PINS DOWN
     read the object as findings, and report any other shape as an error
     result rather than a traceback.
 
+    "abandoned" has the same two shapes, and maps a package to its suggested
+    replacement or null. An abandoned package is a warning: reported, and
+    check.py still exits 0 when it is the only finding.
+
     A fake composer on PATH stands in for the real one, so every shape is
     tested on every box whatever composer and advisory database it has.
 
@@ -19,11 +23,12 @@ WHAT THIS PINS DOWN
 """
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-from _harness import check, check_true, run
+from _harness import ROOT, check, check_true, run
 from fake_tools import fake_tools
 from jpcheck.php_tools import _composer_issues, run_composer_audit
 
@@ -40,7 +45,11 @@ BAD_SHAPES = {
     "a package's advisories as a string": '{"advisories": {"a/b": "x"}}',
     "an advisory that is not an object":  '{"advisories": {"a/b": ["x"]}}',
     "not JSON":                           "Composer could not find a composer.lock\n",
+    "abandoned as a string":              '{"advisories": [], "abandoned": "none"}',
+    "a replacement that is not a name":   '{"advisories": [], "abandoned": {"a/b": 1}}',
 }
+ABANDONED = json.dumps({"advisories": [],
+                        "abandoned": {"old/pkg": "new/pkg", "dead/pkg": None}})
 
 
 def audit(stdout: str) -> dict[str, Any]:
@@ -48,6 +57,15 @@ def audit(stdout: str) -> dict[str, Any]:
     with fake_tools(composer=f"sys.stdout.write({stdout!r})\n") as (work, _log):
         (Path(work) / "composer.json").write_text("{}", encoding="utf-8")
         return run_composer_audit(str(work))
+
+
+def gate_exit(stdout: str) -> int:
+    """check.py's exit code auditing a project whose composer prints STDOUT."""
+    with fake_tools(composer=f"sys.stdout.write({stdout!r})\n") as (work, _log):
+        (Path(work) / "composer.json").write_text("{}", encoding="utf-8")
+        return subprocess.run([sys.executable, str(ROOT / "check.py"), str(work),
+                               "--tools", "composer-audit"],
+                              capture_output=True, text=True, check=False).returncode
 
 
 def test_parse() -> None:
@@ -61,6 +79,16 @@ def test_parse() -> None:
     check("advisories keyed by index, named by id with no CVE",
           [(i["rule"], i["message"]) for i in keyed],
           [("PKSA-2", "vendor/pkg: SQL injection")])
+    abandoned = _composer_issues(ABANDONED)
+    check("each abandoned package is a warning, naming any replacement",
+          [(i["severity"], i["rule"], i["message"]) for i in abandoned],
+          [("warning", "abandoned", "old/pkg is abandoned; use new/pkg instead"),
+           ("warning", "abandoned", "dead/pkg is abandoned")])
+
+
+def test_abandoned_warns_without_failing_the_gate() -> None:
+    check("an abandoned package alone: check.py exits 0", gate_exit(ABANDONED), 0)
+    check("control, an advisory: check.py exits 1", gate_exit(ONE_ADVISORY), 1)
 
 
 def test_runner_clean_and_found() -> None:
