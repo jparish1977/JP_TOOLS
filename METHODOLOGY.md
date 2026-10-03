@@ -390,7 +390,7 @@ Checklist for greenfield work that should inherit this discipline:
 
 0. **Search before you scaffold (§2.10).** Ask the project record, the platform's own documentation, and the tracker whether this exists already. Numbered zero because it is the only step that can make the other ten unnecessary, and because its omission never produces a failure: a duplicate passes every gate below.
 
-1. **Three-or-fewer packages.** Minimum: domain. If the project has IO, add infrastructure. If the project has a UI or CLI, add delivery. Don't start with one mega-package that mixes layers.
+1. **Keep the layers visible: a package per layer is the default, not the rule.** Minimum: domain. If the project has IO, add infrastructure. If the project has a UI or CLI, add delivery. Related layers may instead live under one parent, as sub-namespaces of a single package, when each layer is its own namespace and a test enforces that dependencies only flow downward (§4). What is ruled out is the mega-package: layers mixed together so that nothing shows where one ends and the next begins. When a single package's namespaces start getting out of hand, it is approaching one; split it then.
 
 2. **Declare zero framework deps in the domain package.** Check `composer.json` / `pyproject.toml` / `package.json` after scaffolding.
 
@@ -595,7 +595,7 @@ Things that look like they save time but defeat the methodology:
 - **God adapters.** An adapter implementing six port interfaces at once is a sign the ports are carved wrong. Split the adapter or merge the ports.
 - **Vendoring a shared library instead of depending on it.** Copying a library into a consumer gives two divergent copies and no contract. Depend on the package and let the package manager resolve it.
 - **Skipping the hook.** `git commit --no-verify` is sometimes legitimate (you're mid-refactor, CI will catch it). Make it rare. If you're doing it daily, the gate is misconfigured or the code has accumulated debt that should be paid.
-- **One mega-package.** Mixing domain, infrastructure, and delivery in one package makes the layering invisible. The layers are the point.
+- **One mega-package.** Mixing domain, infrastructure, and delivery with no boundary between them makes the layering invisible. One package is not the problem; one package whose layers you cannot see is, and a package whose namespaces keep multiplying is on its way there (§7). The layers are the point.
 - **Placeholder content where silence would do.** Don't synthesize fake data to fill a slot that's meant to be optional (§2.7).
 - **Reimplementing what the platform already does (§2.10).** The only anti-pattern here that passes every gate in §2.5, because a duplicate is correct code. Search first, and treat "could not look" as distinct from "not there".
 - **Reading a search result as an answer.** A hit is an address. Summarising snippets back is the same error as quoting a search hit instead of reading the function it points at, and a pointer that no longer resolves is a finding about the pointer, not evidence the thing is gone.
