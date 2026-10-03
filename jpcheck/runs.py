@@ -28,7 +28,11 @@ class NoSourceError(Exception):
 
 
 def tool_names(lang: str, tools_arg: str | None, audit: bool) -> list[str]:
-    """The tools to run on one target: those named, else the language's defaults."""
+    """The tools to run on one target: those named, else the language's defaults.
+
+    Each once, in first-named order: --audit adds the language's audit tool to
+    a --tools list that may already name it, and a check run twice reports
+    every finding twice."""
     if tools_arg:
         names = [t.strip() for t in tools_arg.split(",")]
     elif lang in DEFAULT_TOOLS:
@@ -37,7 +41,7 @@ def tool_names(lang: str, tools_arg: str | None, audit: bool) -> list[str]:
         raise NoToolsError(lang)
     if audit:
         names.extend(AUDIT_TOOLS.get(lang, []))
-    return names
+    return list(dict.fromkeys(names))
 
 
 def _served(name: str, lang: str, groups: dict[str, list[str]]) -> list[str]:
