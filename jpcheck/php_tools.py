@@ -140,6 +140,33 @@ def _composer_cmd(php: str | None, composer: str | None) -> list[str] | None:
     return None
 
 
+def _as_list(value: Any) -> list[Any]:
+    """A JSON array, or an object read as its values; PHP's json_encode writes
+    an empty array as [] and a non-sequential one as an object keyed by index."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return list(value.values())
+    raise TypeError(f"expected a list or object, got {type(value).__name__}")
+
+
+def _composer_advisories(stdout: str) -> dict[str, list[Any]]:
+    """Package name -> its advisories. With none, composer prints "advisories": [],
+    not {}, so an empty list is an empty set; any other non-object is an error."""
+    data = json.loads(stdout)
+    if not isinstance(data, dict):
+        raise TypeError(f"expected an object, got {type(data).__name__}")
+    found = data.get("advisories", {})
+    if found == []:
+        return {}
+    if not isinstance(found, dict):
+        raise TypeError(f'"advisories" is a {type(found).__name__}, not an object')
+    advisories = {pkg: _as_list(advs) for pkg, advs in found.items()}
+    if not all(isinstance(adv, dict) for advs in advisories.values() for adv in advs):
+        raise TypeError("an advisory is not an object")
+    return advisories
+
+
 def _composer_issues(stdout: str) -> list[dict[str, Any]]:
     return [
         {
@@ -147,11 +174,12 @@ def _composer_issues(stdout: str) -> list[dict[str, Any]]:
             "line":     0,
             "col":      0,
             "severity": "error",
-            "rule":     adv.get("cve", adv.get("advisoryId", "advisory")),
+            # composer prints "cve": null for an advisory with no CVE
+            "rule":     adv.get("cve") or adv.get("advisoryId") or "advisory",
             "message":  f"{pkg}: {adv.get('title', 'security advisory')}",
             "fixable":  False,
         }
-        for pkg, advisories in json.loads(stdout).get("advisories", {}).items()
+        for pkg, advisories in _composer_advisories(stdout).items()
         for adv in advisories
     ]
 
