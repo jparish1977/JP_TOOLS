@@ -18,5 +18,13 @@
     "config": {
         "optimize-autoloader": true,
         "sort-packages": true
+    },
+    "extra": {
+        "jp-tools-gate": [
+            "nikic/php-parser",
+            "phpstan/phpstan",
+            "rector/rector",
+            "squizlabs/php_codesniffer"
+        ]
     }
 }

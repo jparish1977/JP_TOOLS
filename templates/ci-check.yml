@@ -144,17 +144,27 @@ jobs:
       #                         jp_eslint.mjs imports them from
       #                         ../JP_TOOLS/node_modules; a global npm install
       #                         does not satisfy an ES module import.
-      #   composer.json         phpstan, phpcs, rector, found in vendor/bin
+      #   composer.json         phpstan, phpcs, rector, found in vendor/bin.
+      #                         Only the dev packages its extra.jp-tools-gate
+      #                         names: the rest are libraries JP_TOOLS' own
+      #                         scripts use, which this runner may not be able
+      #                         to read, and the gate does not need them.
       #   requirements-system.txt  shellcheck (and cppcheck): apt, not a
       #                         language package manager
       # One declaration each, instead of a second copy of the pins here.
       - name: Install tool dependencies
         if: steps.present.outputs.found == 'yes'
+        shell: bash
         run: |
           case "${{ matrix.lang }}" in
             python) pip install -r ../JP_TOOLS/requirements-dev.txt ;;
             js)     npm --prefix ../JP_TOOLS install ;;
-            php)    composer --working-dir=../JP_TOOLS install --no-interaction --no-progress ;;
+            php)
+              read -ra drop <<< "$(python -c 'import json, sys; c = json.load(open(sys.argv[1])); print(" ".join(p for p in c["require-dev"] if p not in c["extra"]["jp-tools-gate"]))' ../JP_TOOLS/composer.json)"
+              if [ "${#drop[@]}" -gt 0 ]; then
+                composer --working-dir=../JP_TOOLS remove --dev --no-update --no-interaction "${drop[@]}"
+              fi
+              composer --working-dir=../JP_TOOLS install --no-interaction --no-progress ;;
             shell)
               if ! command -v shellcheck >/dev/null 2>&1; then
                 SUDO=$(command -v sudo || true)

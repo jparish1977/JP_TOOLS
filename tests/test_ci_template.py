@@ -22,9 +22,18 @@ WHAT IS CHECKED
     - The template's text names no host or owner internal to one forge.
     Control: master's template before this change fails all of it.
 
+    The PHP install takes only the dev packages composer.json's
+    extra.jp-tools-gate names. The others are libraries JP_TOOLS' own scripts
+    use, held where an adopting repo's runner cannot read them, and installing
+    them stopped every adopter's PHP job before it checked anything. The
+    template's own install step runs here against a fake composer: it removes
+    exactly the non-gate packages, then installs. The gate list covers every
+    PHP tool check.py runs and names only declared packages.
+
     python3 tests/test_ci_template.py
 """
 
+import json
 import shutil
 import subprocess
 import sys
@@ -35,6 +44,7 @@ from typing import Any
 import yaml
 
 from _harness import ROOT, check, check_true, run
+from fake_tools import fake_tools
 
 TEMPLATE = ROOT / "templates" / "ci-check.yml"
 WORKFLOWS = (ROOT / ".github" / "workflows" / "check.yml", TEMPLATE)
@@ -124,6 +134,46 @@ def test_control_master_before_the_change_fails() -> None:
         old.write_text(r.stdout, encoding="utf-8")
         rc, out = actionlint(old)
     check_true("control: actionlint reports the old template's SC2086", rc == 1 and "SC2086" in out)
+
+
+# What check.py's PHP runners and measures call from vendor: phpstan, phpcs and
+# rector (jpcheck/php_tools.py), php-parser (jpcheck/measure.py).
+GATE_PACKAGES = {"phpstan/phpstan", "squizlabs/php_codesniffer", "rector/rector",
+                 "nikic/php-parser"}
+
+
+def install_script() -> str:
+    """The template's PHP tool install, as the runner's shell would get it."""
+    step = next(s for s in steps(TEMPLATE.read_text(encoding="utf-8"))
+                if s.get("name") == "Install tool dependencies")
+    return str(step["run"]).replace("${{ matrix.lang }}", "php")
+
+
+def composer_calls() -> list[list[str]]:
+    """The composer commands the template's PHP install runs on JP_TOOLS' composer.json."""
+    fakes = {"composer": "",
+             "python": "os.execv(sys.executable, [sys.executable, *sys.argv[1:]])\n"}
+    with fake_tools(keep_path=True, named=fakes) as (work, log):
+        jp_tools = Path(work).parent / "JP_TOOLS"
+        jp_tools.mkdir()
+        shutil.copy(ROOT / "composer.json", jp_tools / "composer.json")
+        subprocess.run(["bash", "-e", "-c", install_script()], cwd=work, check=True)
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+    return [c[1:] for c in calls if c[0] == "composer"]
+
+
+def test_php_install_takes_only_the_gate_packages() -> None:
+    manifest = json.loads((ROOT / "composer.json").read_text(encoding="utf-8"))
+    gate = set(manifest["extra"]["jp-tools-gate"])
+    dev = set(manifest["require-dev"])
+    check("the gate list covers every PHP tool check.py runs", GATE_PACKAGES - gate, set())
+    check("the gate list names only declared dev packages", gate - dev, set())
+    calls = composer_calls()
+    removed = [c for c in calls if c[1:2] == ["remove"]]
+    check("one remove, of exactly the non-gate dev packages",
+          [sorted(c[c.index("--no-interaction") + 1:]) for c in removed], [sorted(dev - gate)])
+    check_true("the remove only edits composer.json", all("--no-update" in c for c in removed))
+    check("then install", [c[1] for c in calls], ["remove", "install"])
 
 
 if __name__ == "__main__":
