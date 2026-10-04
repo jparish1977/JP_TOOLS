@@ -149,25 +149,40 @@ def install_script(lang: str = "php") -> str:
     return str(step["run"]).replace("${{ matrix.lang }}", lang)
 
 
-def test_shell_install_takes_shfmt_at_its_pin() -> None:
-    # The smells check measures shell through shfmt's parser; without it the
-    # shell job reported smells "unavailable" and exited 2 on every repo with
-    # a .sh file, whatever its code.
-    pin = next(ln.strip() for ln in (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
-               .splitlines() if ln.startswith("shfmt-py=="))
+def shell_install(requirements: str) -> tuple[int, list[list[str]]]:
+    """The shell install step's exit code and the tools it ran, with a
+    requirements-dev.txt holding REQUIREMENTS."""
     fakes = {"pip": "", "shellcheck": "", "shfmt": "",
              "python": "os.execv(sys.executable, [sys.executable, *sys.argv[1:]])\n"}
     with fake_tools(keep_path=True, named=fakes) as (work, log):
         jp_tools = Path(work).parent / "JP_TOOLS"
         jp_tools.mkdir()
-        shutil.copy(ROOT / "requirements-dev.txt", jp_tools / "requirements-dev.txt")
+        (jp_tools / "requirements-dev.txt").write_text(requirements, encoding="utf-8")
         r = subprocess.run(["bash", "-e", "-c", install_script("shell")], cwd=work,
                            capture_output=True, text=True, check=False)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
-    check("the shell install step succeeds", r.returncode, 0)
+    return r.returncode, calls
+
+
+def test_shell_install_takes_shfmt_at_its_pin() -> None:
+    # The smells check measures shell through shfmt's parser; without it the
+    # shell job reported smells "unavailable" and exited 2 on every repo with
+    # a .sh file, whatever its code.
+    text = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    pin = next(ln.strip() for ln in text.splitlines() if ln.startswith("shfmt-py=="))
+    rc, calls = shell_install(text)
+    check("the shell install step succeeds", rc, 0)
     check("pip installs exactly requirements-dev.txt's shfmt-py pin",
           [c[1:] for c in calls if c[0] == "pip"], [["install", pin]])
     check_true("and shfmt is on PATH after it", any(c[0] == "shfmt" for c in calls))
+
+
+def test_shell_install_drops_a_comment_on_the_pin() -> None:
+    # pip -r accepts an inline comment on a requirement; pip install refuses
+    # the same text as one argument, so the comment is not passed on.
+    rc, calls = shell_install("ruff==1\nshfmt-py==4.2.0  # the shell parser\n")
+    check("a commented pin: pip is given the requirement alone",
+          (rc, [c[1:] for c in calls if c[0] == "pip"]), (0, [["install", "shfmt-py==4.2.0"]]))
 
 
 def composer_calls(manifest: str | None = None,

@@ -183,7 +183,7 @@ jobs:
               fi
               # shfmt too: the smells check measures shell through its parser.
               # At requirements-dev.txt's pin, read from there, not restated.
-              shfmt_pin=$(python -c 'import sys; print(next(ln.strip() for ln in open(sys.argv[1]) if ln.startswith("shfmt-py==")))' ../JP_TOOLS/requirements-dev.txt)
+              shfmt_pin=$(python -c 'import sys; print(next(ln.split("#")[0].strip() for ln in open(sys.argv[1]) if ln.startswith("shfmt-py==")))' ../JP_TOOLS/requirements-dev.txt)
               pip install "$shfmt_pin"
               shellcheck --version
               shfmt --version ;;
