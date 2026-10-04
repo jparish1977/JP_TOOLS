@@ -220,9 +220,12 @@ def run_npm_audit(target: str) -> dict[str, Any]:
                 "file":     "package.json",
                 "line":     0,
                 "col":      0,
-                "severity": adv.get("severity", "error"),
+                # An error, as pip-audit's and composer's are; npm's own level
+                # (low to critical) goes in the message, since the summary
+                # counts only "error" toward the exit code.
+                "severity": "error",
                 "rule":     f"npm-audit:{name}",
-                "message":  f"{name}: {adv.get('title', adv.get('severity', 'vulnerability'))} (via {', '.join(adv.get('via', []) if isinstance(adv.get('via', [None])[0], str) else [v.get('title','?') for v in adv.get('via',[])])})",
+                "message":  f"{name} [{adv.get('severity', 'unrated')}]: {adv.get('title', adv.get('severity', 'vulnerability'))} (via {', '.join(adv.get('via', []) if isinstance(adv.get('via', [None])[0], str) else [v.get('title','?') for v in adv.get('via',[])])})",
                 "fixable":  adv.get("fixAvailable", False) is not False,
             })
     except (json.JSONDecodeError, TypeError, IndexError) as e:

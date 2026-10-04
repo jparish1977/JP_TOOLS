@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from jpcheck.common import _rel
+from jpcheck.common import _VERDICTS, _rel, _verdict
 
 _EXT_TO_LANG = {
     ".py":   "python",
@@ -201,5 +201,5 @@ def _drop_ignored_issues(result: dict[str, Any], root: Path, ignores: list[Ignor
     kept = [i for i in issues if not ignored_by(i.get("file", ""), root, ignores)]
     if len(kept) != len(issues):
         result["issues"] = kept
-        if result.get("status") == "fail" and not kept:
-            result["status"] = "pass"
+        if result.get("status") in _VERDICTS:
+            result["status"] = _verdict(kept)

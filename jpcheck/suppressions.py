@@ -387,8 +387,4 @@ def run_noqa(target: str) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
     for f in files:
         issues.extend(_noqa_issues(f))
-    # Every issue this emits is an error today, so _status() would do. Said by
-    # severity anyway, because the day something here warns is the day a silent
-    # `_status()` would start failing runs that should pass.
-    status = "fail" if any(i["severity"] == "error" for i in issues) else "pass"
-    return {"tool": "noqa", "status": status, "issues": issues}
+    return {"tool": "noqa", "status": _status(issues), "issues": issues}

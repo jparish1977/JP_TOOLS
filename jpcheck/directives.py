@@ -44,6 +44,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from jpcheck.common import _verdict
 from jpcheck.files import _detect_lang
 
 # A comment opener before a C-family directive on the same line: `//`, `/*`,
@@ -146,5 +147,4 @@ def run_directive_reason(target: str) -> dict[str, Any]:
                    f"tool honours. Say why as {_FORM[d['name']]}, or remove it",
         "fixable": False, "fixable_unsafe": False,
     } for d in directives(text, lang) if not d["reasoned"]]
-    return {"tool": "directive-reason", "status": "fail" if issues else "pass",
-            "issues": issues}
+    return {"tool": "directive-reason", "status": _verdict(issues), "issues": issues}

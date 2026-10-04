@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from jpcheck.common import _git, _NoGitError
+from jpcheck.common import _git, _NoGitError, _verdict
 from jpcheck.coverage import is_project_file
 from jpcheck.files import _detect_lang
 from jpcheck.measure import (
@@ -215,5 +215,4 @@ def run_smells(target: str) -> dict[str, Any]:
         return _unavailable("git, to read history and tell a new smell from an existing one")
     except ToolMissingError as e:
         return _unavailable(f"{e}, to measure")
-    status = "fail" if any(i["severity"] == "error" for i in issues) else "pass"
-    return {"tool": "smells", "status": status, "issues": issues}
+    return {"tool": "smells", "status": _verdict(issues), "issues": issues}

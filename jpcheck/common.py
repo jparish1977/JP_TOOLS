@@ -191,10 +191,24 @@ def _is_repo_root(directory: Path) -> bool:
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+def _verdict(issues: list[dict[str, Any]]) -> str:
+    """fail on any error, warn when every finding is a warning, pass on none.
+    Exempt findings are listed, never counted, as in the summary."""
+    counted = [i for i in issues if not i.get("exempt")]
+    if any(i.get("severity") == "error" for i in counted):
+        return "fail"
+    return "warn" if counted else "pass"
+
+
+def _worse(a: str, b: str) -> str:
+    """The worse of two verdicts: fail over warn over pass."""
+    return max(a, b, key=_VERDICTS.index)
+
+
 def _status(issues: list[dict[str, Any]], returncode: int | None = None) -> str:
     if returncode is not None and returncode not in (0, 1):
         return "error"
-    return "fail" if issues else "pass"
+    return _verdict(issues)
 
 
 def _tool_result(tool: str, issues: list[dict[str, Any]],
@@ -234,9 +248,12 @@ def _tool_missing(name: str, install: str = "") -> dict[str, Any]:
     }
 
 
+# A check's verdict on what it found, mildest first (_verdict). Only errors
+# decide the exit code; "warn" is reported and exits 0.
+_VERDICTS = ("pass", "warn", "fail")
 # Statuses that mean a check ran and reached a verdict. "skip" is a runner
 # deciding it does not apply (npm-audit with no package.json), not a failure.
-_RAN = ("pass", "fail", "skip")
+_RAN = (*_VERDICTS, "skip")
 
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:

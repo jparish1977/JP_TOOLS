@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from jpcheck.common import _rel, _repo_root
+from jpcheck.common import _VERDICTS, _rel, _repo_root
 from jpcheck.files import _collect_files, _detect_lang, _drop_ignored, ignored_by, load_ignores
 from jpcheck.registry import AUDIT_TOOLS, DEFAULT_TOOLS, _run_tools, _summarize
 
@@ -194,7 +194,7 @@ def _report_recorded(dest: str, files: dict[str, Any], tools: list[str],
         if dropped:
             note += f", discarding {len(dropped)} on --force-baseline"
         print(note)
-    missing = [t for t, s in sorted(status.items()) if s not in ("pass", "fail")]
+    missing = [t for t, s in sorted(status.items()) if s not in _VERDICTS]
     if missing:
         print("  WARNING: recorded while these tools were not running: "
               + ", ".join(f"{t} ({status[t]})" for t in missing))
@@ -258,7 +258,7 @@ def _uncomparable(status: dict[str, str], old_versions: dict[str, str]) -> list[
     """(tool, why) for each tool that did not run, or whose version changed."""
     skipped: list[tuple[str, str]] = []
     for tool, st in sorted(status.items()):
-        if st not in ("pass", "fail"):
+        if st not in _VERDICTS:
             skipped.append((tool, f"did not run ({st})"))
             continue
         was_v, now_v = old_versions.get(tool, ""), _tool_version(tool)

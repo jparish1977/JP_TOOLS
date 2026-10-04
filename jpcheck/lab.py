@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from jpcheck.common import _VERDICTS, _verdict
+
 # A LAB FILE IS HELD TO ITS HEADER, NOT TO ZERO. METHODOLOGY 2.9: a tools/lab
 # instrument has no bar at entry ("dusty is fine, lost is not"); what it owes
 # is a header saying what it answers, what it was tested against, and what it
@@ -57,5 +59,5 @@ def _mark_lab_exempt(checks: list[dict[str, Any]]) -> None:
                 claims[f] = bool(f) and lab_claim(Path(f))
             if claims[f]:
                 i["exempt"] = _LAB_EXEMPT_REASON
-        if c.get("status") == "fail" and issues and all(i.get("exempt") for i in issues):
-            c["status"] = "pass"
+        if c.get("status") in _VERDICTS:
+            c["status"] = _verdict(issues)

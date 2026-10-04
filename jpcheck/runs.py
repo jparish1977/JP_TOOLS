@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from jpcheck.common import _RAN
+from jpcheck.common import _RAN, _VERDICTS, _worse
 from jpcheck.files import Ignore, _collect_files, _drop_ignored, _drop_ignored_issues
 from jpcheck.lab import _mark_lab_exempt
 from jpcheck.registry import (
@@ -78,8 +78,8 @@ def _fold(result: dict[str, Any], extra: dict[str, Any]) -> None:
     if extra["status"] not in _RAN and result["status"] in _RAN:
         result["status"] = extra["status"]
         result["note"] = extra.get("note", "")
-    elif extra["status"] == "fail" and result["status"] == "pass":
-        result["status"] = "fail"
+    elif extra["status"] in _VERDICTS and result["status"] in _VERDICTS:
+        result["status"] = _worse(result["status"], extra["status"])
 
 
 def _dir_capable_result(runner: Runner, target: str, files: list[str], root: Path,
@@ -116,7 +116,8 @@ def _per_file_result(name: str, runner: Runner, files: list[str]) -> dict[str, A
     not_run = sorted(statuses - set(_RAN))
     merged: dict[str, Any] = {
         "tool":   name,
-        "status": not_run[0] if not_run else ("fail" if "fail" in statuses else "pass"),
+        "status": not_run[0] if not_run else max(statuses & set(_VERDICTS), default="pass",
+                                                 key=_VERDICTS.index),
         "issues": issues,
     }
     if note:

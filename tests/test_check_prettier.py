@@ -10,7 +10,8 @@ WHAT THIS PINS DOWN
         [warn] Code style issues found in the above file. Run Prettier with --write to fix.
 
     Read as a filename, that line would turn each unformatted file into two
-    warnings, one of them "file": "Code style issues found...".
+    warnings, one of them "file": "Code style issues found...". An
+    unformatted file is a warning, so the status is "warn", not "fail".
 
 A fake prettier stands in for the real one, so this needs neither node nor
 prettier installed, and it pins the output shapes prettier 2 and 3 print.
@@ -60,15 +61,15 @@ def test_the_summary_line_is_not_a_file() -> None:
         ("prettier 3, one file",
          ("Checking formatting...\n[warn] a.js\n"
           "[warn] Code style issues found in the above file. Run Prettier with --write to fix.\n"),
-         1, ["a.js"], "fail"),
+         1, ["a.js"], "warn"),
         ("prettier 3, two files",
          ("Checking formatting...\n[warn] a.js\n[warn] b.js\n"
           "[warn] Code style issues found in 2 files. Run Prettier with --write to fix.\n"),
-         1, ["a.js", "b.js"], "fail"),
+         1, ["a.js", "b.js"], "warn"),
         ("prettier 2 wording",
          ("Checking formatting...\n[warn] a.js\n"
           "[warn] Code style issues found in the above file(s). Forgot to run Prettier?\n"),
-         1, ["a.js"], "fail"),
+         1, ["a.js"], "warn"),
         ("clean",
          "Checking formatting...\nAll matched files use Prettier code style!\n",
          0, [], "pass"),
