@@ -14,9 +14,22 @@ from jpcheck.common import (
     _status,
     _tool_missing,
 )
+from jpcheck.files import source_paths
 
 # What a missing PHP tool tells the reader to run: composer.json declares them.
 COMPOSER_INSTALL = "run: composer install in JP_TOOLS"
+_PHP = (".php",)
+
+
+def _no_php(tool: str) -> dict[str, Any]:
+    return {"tool": tool, "status": "skip", "issues": [], "note": "No PHP files to check"}
+
+
+def _autoload_args(target: str) -> list[str]:
+    """The project's own Composer autoloader, so phpstan knows the classes its
+    code uses from vendor/ (PHPUnit's TestCase, say) without analysing vendor/."""
+    autoload = _find_project_config(target, ["vendor/autoload.php"], stop_at_repo_root=True)
+    return ["--autoload-file", str(autoload)] if autoload else []
 
 
 def run_phpstan(target: str) -> dict[str, Any]:
@@ -29,10 +42,13 @@ def run_phpstan(target: str) -> dict[str, Any]:
     cfg = _find_project_config(target, ["phpstan.neon", "phpstan.neon.dist"])
     if cfg is None:
         cfg = TOOLS_ROOT / "configs" / "phpstan.neon"
-    args = [php, bin_, "analyse", "--error-format=json", "--no-progress"]
+    paths = source_paths(target, _PHP)
+    if not paths:
+        return _no_php("phpstan")
+    args = [php, bin_, "analyse", "--error-format=json", "--no-progress", *_autoload_args(target)]
     if cfg.exists():
         args += ["-c", str(cfg)]
-    result = subprocess.run([*args, target], capture_output=True, text=True, check=False)
+    result = subprocess.run([*args, *paths], capture_output=True, text=True, check=False)
     issues = []
     try:
         data = json.loads(result.stdout)
@@ -68,10 +84,13 @@ def run_phpcs(target: str) -> dict[str, Any]:
     cfg = _find_project_config(target, ["phpcs.xml", "phpcs.xml.dist", ".phpcs.xml", ".phpcs.xml.dist"])
     if cfg is None:
         cfg = TOOLS_ROOT / "configs" / "phpcs.xml"
+    paths = source_paths(target, _PHP)
+    if not paths:
+        return _no_php("phpcs")
     args = [php, bin_, "--report=json"]
     if cfg.exists():
         args += [f"--standard={cfg}"]
-    result = subprocess.run([*args, target], capture_output=True, text=True, check=False)
+    result = subprocess.run([*args, *paths], capture_output=True, text=True, check=False)
     issues = []
     try:
         data = json.loads(result.stdout)
@@ -104,10 +123,13 @@ def run_rector(target: str) -> dict[str, Any]:
     cfg = _find_project_config(target, ["rector.php", "rector.php.dist"])
     if cfg is None:
         cfg = TOOLS_ROOT / "configs" / "rector.php"
+    paths = source_paths(target, _PHP)
+    if not paths:
+        return _no_php("rector")
     args = [php, bin_, "process", "--dry-run", "--output-format=json", "--no-progress-bar"]
     if cfg.exists():
         args += [f"--config={cfg}"]
-    result = subprocess.run([*args, target], capture_output=True, text=True, check=False)
+    result = subprocess.run([*args, *paths], capture_output=True, text=True, check=False)
     issues = []
     try:
         data = json.loads(result.stdout)

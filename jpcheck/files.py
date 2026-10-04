@@ -32,6 +32,40 @@ _SKIP_DIRS = {"node_modules", "vendor", "__pycache__", ".git", ".venv", "venv",
               ".tox", "site-packages"}
 
 
+def source_paths(target: str, suffixes: tuple[str, ...]) -> list[str]:
+    """TARGET as the paths to hand a tool that walks whatever it is given.
+
+    A file is itself. A directory is the fewest paths that cover its files
+    without entering a _SKIP_DIRS directory: whole where nothing beneath it is
+    skipped, else split into its subdirectories and its own files ending in
+    one of SUFFIXES. Handed the directory itself, phpstan, phpcs and rector
+    analysed vendor/ as if it were the project's own code.
+    """
+    p = Path(target)
+    return _cover(p, suffixes)[0] if p.is_dir() else [target]
+
+
+def _cover(d: Path, suffixes: tuple[str, ...]) -> tuple[list[str], bool]:
+    """(the paths covering D, whether D holds no skipped directory at any depth)."""
+    parts: list[str] = []
+    clean = True
+    for e in sorted(d.iterdir()):
+        if e.is_symlink():
+            # reason: not walked into, and a link to a file is measured at
+            # its target, as in _collect_files
+            continue
+        if e.is_dir():
+            if e.name in _SKIP_DIRS:
+                clean = False
+                continue
+            sub, sub_clean = _cover(e, suffixes)
+            parts.extend(sub)
+            clean = clean and sub_clean
+        elif e.suffix.lower() in suffixes:
+            parts.append(str(e))
+    return ([str(d)] if clean else parts), clean
+
+
 def _shebang_lang(p: Path) -> str | None:
     """The language a script's #! line names, for a file with NO suffix.
 
