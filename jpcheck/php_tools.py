@@ -21,8 +21,17 @@ COMPOSER_INSTALL = "run: composer install in JP_TOOLS"
 _PHP = (".php",)
 
 
-def _no_php(tool: str) -> dict[str, Any]:
-    return {"tool": tool, "status": "skip", "issues": [], "note": "No PHP files to check"}
+def _php_paths(tool: str, target: str) -> tuple[list[str], dict[str, Any] | None]:
+    """The paths to hand TOOL, or the result to report instead: a skip when
+    there is no PHP to check, an error when a directory cannot be listed."""
+    try:
+        paths = source_paths(target, _PHP)
+    except OSError as e:
+        return [], {"tool": tool, "status": "error", "issues": [],
+                    "note": f"cannot list {e.filename}: {e.strerror}"}
+    if not paths:
+        return [], {"tool": tool, "status": "skip", "issues": [], "note": "No PHP files to check"}
+    return paths, None
 
 
 def _autoload_args(target: str) -> list[str]:
@@ -42,9 +51,9 @@ def run_phpstan(target: str) -> dict[str, Any]:
     cfg = _find_project_config(target, ["phpstan.neon", "phpstan.neon.dist"])
     if cfg is None:
         cfg = TOOLS_ROOT / "configs" / "phpstan.neon"
-    paths = source_paths(target, _PHP)
-    if not paths:
-        return _no_php("phpstan")
+    paths, instead = _php_paths("phpstan", target)
+    if instead:
+        return instead
     args = [php, bin_, "analyse", "--error-format=json", "--no-progress", *_autoload_args(target)]
     if cfg.exists():
         args += ["-c", str(cfg)]
@@ -84,9 +93,9 @@ def run_phpcs(target: str) -> dict[str, Any]:
     cfg = _find_project_config(target, ["phpcs.xml", "phpcs.xml.dist", ".phpcs.xml", ".phpcs.xml.dist"])
     if cfg is None:
         cfg = TOOLS_ROOT / "configs" / "phpcs.xml"
-    paths = source_paths(target, _PHP)
-    if not paths:
-        return _no_php("phpcs")
+    paths, instead = _php_paths("phpcs", target)
+    if instead:
+        return instead
     args = [php, bin_, "--report=json"]
     if cfg.exists():
         args += [f"--standard={cfg}"]
@@ -123,9 +132,9 @@ def run_rector(target: str) -> dict[str, Any]:
     cfg = _find_project_config(target, ["rector.php", "rector.php.dist"])
     if cfg is None:
         cfg = TOOLS_ROOT / "configs" / "rector.php"
-    paths = source_paths(target, _PHP)
-    if not paths:
-        return _no_php("rector")
+    paths, instead = _php_paths("rector", target)
+    if instead:
+        return instead
     args = [php, bin_, "process", "--dry-run", "--output-format=json", "--no-progress-bar"]
     if cfg.exists():
         args += [f"--config={cfg}"]

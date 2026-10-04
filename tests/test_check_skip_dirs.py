@@ -60,6 +60,35 @@ def test_source_paths() -> None:
         check("a file is itself", source_paths(f, (".php",)), [f])
 
 
+def test_a_symlinked_directory_is_not_handed_over() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        tree(root, ["src/A.php", "vendor/x/V.php"])
+        (root / "src" / "lib").symlink_to(root / "vendor")
+        check("src/ holding a link to vendor/: split, the link left out",
+              rel(root, source_paths(str(root / "src"), (".php",))), ["src/A.php"])
+
+
+def test_an_unreadable_directory_is_an_error_result() -> None:
+    if os.geteuid() == 0:
+        print("SKIP: root reads every directory, so none can be made unreadable")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        tree(root, ["src/A.php", "locked/L.php"])
+        (root / "locked").chmod(0)
+        try:
+            results = [r(td) for r in (run_phpstan, run_phpcs, run_rector)]
+        finally:
+            (root / "locked").chmod(0o755)
+    ran = [r for r in results if r["status"] != "unavailable"]
+    if not ran:
+        print("SKIP: the PHP tools are not installed in JP_TOOLS")
+        return
+    check("an unreadable directory: an error result naming it, not a traceback",
+          [(r["status"], "locked" in r.get("note", "")) for r in ran], [("error", True)] * len(ran))
+
+
 def test_php_runners_skip_vendor() -> None:
     record = ('import json, os\n'
               'open(os.environ["FAKE_LOG"] + ".php", "a").write(json.dumps(sys.argv[1:]) + "\\n")\n'
@@ -71,7 +100,9 @@ def test_php_runners_skip_vendor() -> None:
         (root / ".git").mkdir()
         for runner in (run_phpstan, run_phpcs, run_rector):
             runner(str(root))
-        calls = [json.loads(line) for line in Path(f"{log}.php").read_text().splitlines()]
+        made = Path(f"{log}.php")
+        calls = ([json.loads(line) for line in made.read_text().splitlines()]
+                 if made.exists() else [])
     if len(calls) != 3:
         print(f"SKIP: the PHP tools are not installed in JP_TOOLS ({len(calls)} of 3 ran)")
         return

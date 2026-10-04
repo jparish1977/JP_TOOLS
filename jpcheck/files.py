@@ -39,7 +39,8 @@ def source_paths(target: str, suffixes: tuple[str, ...]) -> list[str]:
     without entering a _SKIP_DIRS directory: whole where nothing beneath it is
     skipped, else split into its subdirectories and its own files ending in
     one of SUFFIXES. Handed the directory itself, phpstan, phpcs and rector
-    analysed vendor/ as if it were the project's own code.
+    analysed vendor/ as if it were the project's own code. A directory that
+    cannot be listed raises OSError.
     """
     p = Path(target)
     return _cover(p, suffixes)[0] if p.is_dir() else [target]
@@ -51,8 +52,11 @@ def _cover(d: Path, suffixes: tuple[str, ...]) -> tuple[list[str], bool]:
     clean = True
     for e in sorted(d.iterdir()):
         if e.is_symlink():
-            # reason: not walked into, and a link to a file is measured at
-            # its target, as in _collect_files
+            # Not followed, and not handed over: a link to a directory could
+            # lead anywhere, vendor/ included, so its parent is split rather
+            # than walked whole. A link to a file is measured at its target,
+            # as in _collect_files.
+            clean = clean and not e.is_dir()
             continue
         if e.is_dir():
             if e.name in _SKIP_DIRS:
