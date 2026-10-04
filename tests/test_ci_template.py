@@ -149,9 +149,11 @@ def install_script() -> str:
     return str(step["run"]).replace("${{ matrix.lang }}", "php")
 
 
-def composer_calls(manifest: str | None = None) -> tuple[int, list[list[str]]]:
+def composer_calls(manifest: str | None = None,
+                   project_manifest: bool = False) -> tuple[int, list[list[str]]]:
     """The install step's exit code and the composer commands it runs, on
-    JP_TOOLS' composer.json or the MANIFEST text given."""
+    JP_TOOLS' composer.json or the MANIFEST text given, in a project with a
+    composer.json of its own when PROJECT_MANIFEST."""
     fakes = {"composer": "",
              "python": "os.execv(sys.executable, [sys.executable, *sys.argv[1:]])\n"}
     with fake_tools(keep_path=True, named=fakes) as (work, log):
@@ -160,6 +162,8 @@ def composer_calls(manifest: str | None = None) -> tuple[int, list[list[str]]]:
         (jp_tools / "composer.json").write_text(
             manifest if manifest is not None
             else (ROOT / "composer.json").read_text(encoding="utf-8"), encoding="utf-8")
+        if project_manifest:
+            (Path(work) / "composer.json").write_text("{}", encoding="utf-8")
         r = subprocess.run(["bash", "-e", "-c", install_script()], cwd=work,
                            capture_output=True, text=True, check=False)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
@@ -179,6 +183,19 @@ def test_php_install_takes_only_the_gate_packages() -> None:
           [sorted(c[c.index("--no-interaction") + 1:]) for c in removed], [sorted(dev - gate)])
     check_true("the remove only edits composer.json", all("--no-update" in c for c in removed))
     check("then install", [c[1] for c in calls], ["remove", "install"])
+    check("a project with no composer.json: nothing of its own is installed",
+          [c for c in calls if not c[0].startswith("--working-dir")], [])
+
+
+def test_php_install_installs_the_project_too() -> None:
+    # Without the project's own dependencies phpstan cannot load what its code
+    # uses: every test read as extending an unknown PHPUnit class.
+    rc, calls = composer_calls(project_manifest=True)
+    check("the step succeeds", rc, 0)
+    check("JP_TOOLS' remove and install, then the project's install",
+          [(c[0].startswith("--working-dir"), c[1] if c[0].startswith("--") else c[0])
+           for c in calls],
+          [(True, "remove"), (True, "install"), (False, "install")])
 
 
 def test_php_install_stops_on_a_manifest_it_cannot_read() -> None:

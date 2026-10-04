@@ -167,7 +167,13 @@ jobs:
               if [ "${#drop[@]}" -gt 0 ]; then
                 composer --working-dir=../JP_TOOLS remove --dev --no-update --no-interaction "${drop[@]}"
               fi
-              composer --working-dir=../JP_TOOLS install --no-interaction --no-progress ;;
+              composer --working-dir=../JP_TOOLS install --no-interaction --no-progress
+              # The project's own dependencies too, so phpstan loads what its
+              # code uses (PHPUnit, for tests) from the project's autoloader.
+              # check.py does not analyse vendor/ itself.
+              if [ -f composer.json ]; then
+                composer install --no-interaction --no-progress
+              fi ;;
             shell)
               if ! command -v shellcheck >/dev/null 2>&1; then
                 SUDO=$(command -v sudo || true)
