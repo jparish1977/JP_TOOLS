@@ -150,7 +150,8 @@ jobs:
       #                         scripts use, which this runner may not be able
       #                         to read, and the gate does not need them.
       #   requirements-system.txt  shellcheck (and cppcheck): apt, not a
-      #                         language package manager
+      #                         language package manager. The shell job also
+      #                         takes requirements-dev.txt's shfmt-py line.
       # One declaration each, instead of a second copy of the pins here.
       - name: Install tool dependencies
         if: steps.present.outputs.found == 'yes'
@@ -180,7 +181,12 @@ jobs:
                 $SUDO apt-get update -q
                 $SUDO apt-get install -y -q shellcheck
               fi
-              shellcheck --version ;;
+              # shfmt too: the smells check measures shell through its parser.
+              # At requirements-dev.txt's pin, read from there, not restated.
+              shfmt_pin=$(python -c 'import sys; print(next(ln.strip() for ln in open(sys.argv[1]) if ln.startswith("shfmt-py==")))' ../JP_TOOLS/requirements-dev.txt)
+              pip install "$shfmt_pin"
+              shellcheck --version
+              shfmt --version ;;
           esac
 
       - name: Run check

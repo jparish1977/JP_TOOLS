@@ -142,11 +142,32 @@ GATE_PACKAGES = {"phpstan/phpstan", "squizlabs/php_codesniffer", "rector/rector"
                  "nikic/php-parser"}
 
 
-def install_script() -> str:
-    """The template's PHP tool install, as the runner's shell would get it."""
+def install_script(lang: str = "php") -> str:
+    """The template's tool install for LANG, as the runner's shell would get it."""
     step = next(s for s in steps(TEMPLATE.read_text(encoding="utf-8"))
                 if s.get("name") == "Install tool dependencies")
-    return str(step["run"]).replace("${{ matrix.lang }}", "php")
+    return str(step["run"]).replace("${{ matrix.lang }}", lang)
+
+
+def test_shell_install_takes_shfmt_at_its_pin() -> None:
+    # The smells check measures shell through shfmt's parser; without it the
+    # shell job reported smells "unavailable" and exited 2 on every repo with
+    # a .sh file, whatever its code.
+    pin = next(ln.strip() for ln in (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+               .splitlines() if ln.startswith("shfmt-py=="))
+    fakes = {"pip": "", "shellcheck": "", "shfmt": "",
+             "python": "os.execv(sys.executable, [sys.executable, *sys.argv[1:]])\n"}
+    with fake_tools(keep_path=True, named=fakes) as (work, log):
+        jp_tools = Path(work).parent / "JP_TOOLS"
+        jp_tools.mkdir()
+        shutil.copy(ROOT / "requirements-dev.txt", jp_tools / "requirements-dev.txt")
+        r = subprocess.run(["bash", "-e", "-c", install_script("shell")], cwd=work,
+                           capture_output=True, text=True, check=False)
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+    check("the shell install step succeeds", r.returncode, 0)
+    check("pip installs exactly requirements-dev.txt's shfmt-py pin",
+          [c[1:] for c in calls if c[0] == "pip"], [["install", pin]])
+    check_true("and shfmt is on PATH after it", any(c[0] == "shfmt" for c in calls))
 
 
 def composer_calls(manifest: str | None = None,
