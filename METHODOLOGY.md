@@ -148,7 +148,7 @@ A directory is a blanket claim ("lesser tested") with no per-tool justification,
 
 **A generator writes the shape, never the substance.** It emits the interface, the wiring and the index row. What differs every time (the assertion, the control, the reason) stays with the person, because a generator that fills those in writes a test that cannot fail. A generated test stub fails until it is filled in. A generator is a tool like any other: it lands in the lab with the header, and its index row names the standard it makes cheap.
 
-**A dependency is the signal to promote a tool out of the lab.** Once something else depends on a lab tool, its untestedness is inherited by that thing: a wrapper over an untested tool makes the untested tool part of whatever trusts the wrapper. Promotion costs a test file that pins the invariants the tool was built to keep, not its happy path.
+**A lab tool that grows a dependency requires promotion out of the lab.** Once something else depends on a lab tool, its untestedness is inherited by that thing: a wrapper over an untested tool makes the untested tool part of whatever trusts the wrapper. Promotion costs a test file that pins the invariants the tool was built to keep, not its happy path.
 
 Unsettled: whether writing a tool's evidence down should also be a promotion trigger. For: the dependency trigger fires after the risk has already moved. Against: a tax on keeping things produces silence rather than headers.
 

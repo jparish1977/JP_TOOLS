@@ -11,17 +11,16 @@ the test that must catch each mutant:
 
     mutate-on-target.py TREE <target> <test> <spec>
 
-`TREE` is a checkout of this repository. The runner mutates it IN PLACE and
-restores it, so give it a scratch copy. A mutant counts only when the test
-fails on the check it names; one killed by some other check, or by a crash,
-has shown nothing.
+`TREE` is a checkout of this repository. The runner, `mutate-on-target.py` at
+the top of this repository, mutates it IN PLACE and restores it, so give it a
+scratch copy. A mutant counts only when the test fails on the check it names;
+one killed by some other check, or by a crash, has shown nothing.
 
-The runner, `mutate-on-target.py`, is not part of this repository, and
-neither is its batch driver, `mutate-spec.py`, which runs every spec at once,
-each in its own copy of the tree, taking each target and test from the spec's
-run line:
+Its batch driver, `mutate-spec.py` beside it, runs every spec at once, each in
+its own copy of the tree, taking each target and test from the spec's run
+line:
 
-    mutate-spec.py ROOT tests/mutants/*.json
+    python3 mutate-spec.py ROOT tests/mutants/*.json
 
 ROOT is left untouched. Point `$MUTATE_OUT_DIR` at a scratch directory; the
 runner's full output for each spec is written there.
