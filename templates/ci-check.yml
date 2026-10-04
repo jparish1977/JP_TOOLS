@@ -160,7 +160,10 @@ jobs:
             python) pip install -r ../JP_TOOLS/requirements-dev.txt ;;
             js)     npm --prefix ../JP_TOOLS install ;;
             php)
-              read -ra drop <<< "$(python -c 'import json, sys; c = json.load(open(sys.argv[1])); print(" ".join(p for p in c["require-dev"] if p not in c["extra"]["jp-tools-gate"]))' ../JP_TOOLS/composer.json)"
+              # Assigned first: a failing python inside `read <<<` would not stop
+              # the step, and the job would die later at install, misleadingly.
+              non_gate=$(python -c 'import json, sys; c = json.load(open(sys.argv[1])); print(" ".join(p for p in c["require-dev"] if p not in c["extra"]["jp-tools-gate"]))' ../JP_TOOLS/composer.json)
+              read -ra drop <<< "$non_gate"
               if [ "${#drop[@]}" -gt 0 ]; then
                 composer --working-dir=../JP_TOOLS remove --dev --no-update --no-interaction "${drop[@]}"
               fi

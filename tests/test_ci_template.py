@@ -149,17 +149,21 @@ def install_script() -> str:
     return str(step["run"]).replace("${{ matrix.lang }}", "php")
 
 
-def composer_calls() -> list[list[str]]:
-    """The composer commands the template's PHP install runs on JP_TOOLS' composer.json."""
+def composer_calls(manifest: str | None = None) -> tuple[int, list[list[str]]]:
+    """The install step's exit code and the composer commands it runs, on
+    JP_TOOLS' composer.json or the MANIFEST text given."""
     fakes = {"composer": "",
              "python": "os.execv(sys.executable, [sys.executable, *sys.argv[1:]])\n"}
     with fake_tools(keep_path=True, named=fakes) as (work, log):
         jp_tools = Path(work).parent / "JP_TOOLS"
         jp_tools.mkdir()
-        shutil.copy(ROOT / "composer.json", jp_tools / "composer.json")
-        subprocess.run(["bash", "-e", "-c", install_script()], cwd=work, check=True)
+        (jp_tools / "composer.json").write_text(
+            manifest if manifest is not None
+            else (ROOT / "composer.json").read_text(encoding="utf-8"), encoding="utf-8")
+        r = subprocess.run(["bash", "-e", "-c", install_script()], cwd=work,
+                           capture_output=True, text=True, check=False)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
-    return [c[1:] for c in calls if c[0] == "composer"]
+    return r.returncode, [c[1:] for c in calls if c[0] == "composer"]
 
 
 def test_php_install_takes_only_the_gate_packages() -> None:
@@ -168,12 +172,21 @@ def test_php_install_takes_only_the_gate_packages() -> None:
     dev = set(manifest["require-dev"])
     check("the gate list covers every PHP tool check.py runs", GATE_PACKAGES - gate, set())
     check("the gate list names only declared dev packages", gate - dev, set())
-    calls = composer_calls()
+    rc, calls = composer_calls()
+    check("the step succeeds", rc, 0)
     removed = [c for c in calls if c[1:2] == ["remove"]]
     check("one remove, of exactly the non-gate dev packages",
           [sorted(c[c.index("--no-interaction") + 1:]) for c in removed], [sorted(dev - gate)])
     check_true("the remove only edits composer.json", all("--no-update" in c for c in removed))
     check("then install", [c[1] for c in calls], ["remove", "install"])
+
+
+def test_php_install_stops_on_a_manifest_it_cannot_read() -> None:
+    # No gate list: the step stops where it reads it, before any composer runs,
+    # rather than installing everything and failing on the private libraries.
+    rc, calls = composer_calls('{"require-dev": {"a/b": "1"}}')
+    check("a manifest with no gate list: the step fails, and runs no composer",
+          (rc != 0, calls), (True, []))
 
 
 if __name__ == "__main__":
