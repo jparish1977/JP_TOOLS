@@ -78,6 +78,25 @@ def test_a_requirements_file_is_audited_with_r() -> None:
           [["--format", "json", "-r", str(root / "requirements.txt")]])
 
 
+def test_every_requirements_file_is_audited_and_names_its_findings() -> None:
+    # Only the first file found was audited, so a repo's dev pins never were.
+    # The fake reports a vulnerability for the dev file alone.
+    fake = ('dev = any(a.endswith("requirements-dev.txt") for a in sys.argv)\n'
+            f'sys.stdout.write({ONE_VULN!r} if dev else {CLEAN!r})\n')
+    with tempfile.TemporaryDirectory() as td, fake_tools(named={"pip-audit": fake}) as (_work, log):
+        root = Path(td)
+        for name in ("requirements.txt", "requirements-dev.txt"):
+            (root / name).write_text("x\n", encoding="utf-8")
+        result = run_pip_audit(td)
+        calls = [json.loads(line)[1:] for line in log.read_text().splitlines()]
+    check("both requirements files are audited, one run each", calls,
+          [["--format", "json", "-r", str(root / "requirements.txt")],
+           ["--format", "json", "-r", str(root / "requirements-dev.txt")]])
+    check("the dev file's finding names the dev file",
+          (result["status"], [i["file"] for i in result["issues"]]),
+          ("fail", [str(root / "requirements-dev.txt")]))
+
+
 def test_a_pyproject_with_a_project_table_is_audited_as_the_directory() -> None:
     files = {"pyproject.toml": "[project]\nname = 'd'\ndependencies = ['requests==2.19.0']\n"}
     result, calls, root = audit(files, output=ONE_VULN)

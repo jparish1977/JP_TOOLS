@@ -148,10 +148,12 @@ def run_mypy(target: str) -> dict[str, Any]:
 _REQUIREMENTS = ("requirements.txt", "requirements-dev.txt", "requirements.lock")
 
 
-def _audit_source(target: str) -> tuple[list[str], str] | str:
-    """What pip-audit audits for TARGET, as (its arguments, the file findings
-    name), or why nothing is: a requirements file, else a pyproject.toml with
-    a [project] table (`pip-audit DIR` resolves its dependencies).
+def _audit_sources(target: str) -> list[tuple[list[str], str]] | str:
+    """What pip-audit audits for TARGET, one run each as (its arguments, the
+    file its findings name), or why nothing is: every requirements file there,
+    else a pyproject.toml with a [project] table (`pip-audit DIR` resolves its
+    dependencies). One run per file, so each finding names the file whose pin
+    it is.
 
     Never pip-audit with neither. It then audits the environment it runs in,
     which is the gate's own, and reports those packages as the project's.
@@ -159,14 +161,14 @@ def _audit_source(target: str) -> tuple[list[str], str] | str:
     p = Path(target)
     if not p.is_dir():
         if p.suffix == ".txt":
-            return ["-r", target], target
+            return [(["-r", target], target)]
         return "not a requirements file, so no Python dependencies to audit"
-    for name in _REQUIREMENTS:
-        if (p / name).exists():
-            return ["-r", str(p / name)], str(p / name)
+    requirements = [str(p / name) for name in _REQUIREMENTS if (p / name).exists()]
+    if requirements:
+        return [(["-r", f], f) for f in requirements]
     pyproject = p / "pyproject.toml"
     if pyproject.exists() and _declares_section(pyproject, "project"):
-        return [str(p)], str(pyproject)
+        return [([str(p)], str(pyproject))]
     if (p / "setup.py").exists():
         return ("setup.py declares the dependencies, and pip-audit cannot read one; "
                 "a requirements file would let it")
@@ -193,18 +195,19 @@ def run_pip_audit(target: str) -> dict[str, Any]:
     cmd = shutil.which("pip-audit") or shutil.which("pip-audit.exe")
     if not cmd:
         return _tool_missing("pip-audit", PIP_INSTALL)
-    source = _audit_source(target)
-    if isinstance(source, str):
-        return {"tool": "pip-audit", "status": "skip", "issues": [], "note": source}
-    audit_args, named = source
-    result = subprocess.run([cmd, "--format", "json", *audit_args],
-                            capture_output=True, text=True, check=False)
-    try:
-        issues = _pip_audit_issues(result.stdout, named)
-    except (json.JSONDecodeError, TypeError) as e:
-        # An audit whose output did not parse did not run, and a check that
-        # did not run is not a pass. pip-audit says why on stderr.
-        said = result.stderr.strip().splitlines()[-1:] or [str(e)]
-        return {"tool": "pip-audit", "status": "error", "issues": [],
-                "note": f"pip-audit's output was not the JSON expected: {said[0][:300]}"}
+    sources = _audit_sources(target)
+    if isinstance(sources, str):
+        return {"tool": "pip-audit", "status": "skip", "issues": [], "note": sources}
+    issues: list[dict[str, Any]] = []
+    for audit_args, named in sources:
+        result = subprocess.run([cmd, "--format", "json", *audit_args],
+                                capture_output=True, text=True, check=False)
+        try:
+            issues += _pip_audit_issues(result.stdout, named)
+        except (json.JSONDecodeError, TypeError) as e:
+            # An audit whose output did not parse did not run, and a check
+            # that did not run is not a pass. pip-audit says why on stderr.
+            said = result.stderr.strip().splitlines()[-1:] or [str(e)]
+            return {"tool": "pip-audit", "status": "error", "issues": [],
+                    "note": f"pip-audit on {named}: output was not the JSON expected: {said[0][:300]}"}
     return {"tool": "pip-audit", "status": _status(issues), "issues": issues}
