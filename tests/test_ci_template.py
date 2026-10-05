@@ -30,6 +30,9 @@ WHAT IS CHECKED
     exactly the non-gate packages, then installs. The gate list covers every
     PHP tool check.py runs and names only declared packages.
 
+    After the install, check-pins.py reads each language's tools back against
+    its manifest, in the template's jobs (not shell's) and in JP_TOOLS' own CI.
+
     python3 tests/test_ci_template.py
 """
 
@@ -240,6 +243,26 @@ def test_php_install_stops_on_a_manifest_it_cannot_read() -> None:
     rc, calls = composer_calls('{"require-dev": {"a/b": "1"}}')
     check("a manifest with no gate list: the step fails, and runs no composer",
           (rc != 0, calls), (True, []))
+
+
+PIN_STEP = "Tools installed at their pins"
+
+
+def test_the_installs_are_read_back_against_their_pins() -> None:
+    """After the install and before the check, each language's tools are read
+    back against the manifest they came from; shell has no manifest arm."""
+    names = [s.get("name") for s in steps(TEMPLATE.read_text(encoding="utf-8"))]
+    check_true("the pin step comes after the install and before the check",
+               PIN_STEP in names
+               and names.index("Install tool dependencies") < names.index(PIN_STEP) < names.index("Run check"))
+    step = next((s for s in steps(TEMPLATE.read_text(encoding="utf-8")) if s.get("name") == PIN_STEP), {})
+    check("the pin step runs check-pins.py for the job's language",
+          step.get("run"), "python ../JP_TOOLS/check-pins.py ${{ matrix.lang }}")
+    check_true("the pin step skips the shell job", "matrix.lang != 'shell'" in str(step.get("if", "")))
+    own = steps((ROOT / ".github" / "workflows" / "check.yml").read_text(encoding="utf-8"))
+    check("JP_TOOLS' own CI reads back every arm",
+          sorted(str(s["run"]) for s in own if s.get("name") == PIN_STEP),
+          ["python check-pins.py js", "python check-pins.py python php"])
 
 
 ENTRY_STEP = "How are this repo's tests run?"

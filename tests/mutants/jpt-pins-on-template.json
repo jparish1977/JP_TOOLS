@@ -1,0 +1,20 @@
+{
+  "about": "The CI template reads each language's install back against its pins. Run: mutate-on-target.py TREE templates/ci-check.yml tests/test_ci_template.py tests/mutants/jpt-pins-on-template.json",
+  "mutants": [
+    {
+      "name": "the pin step runs for the shell job too",
+      "edits": [["        if: steps.present.outputs.found == 'yes' && matrix.lang != 'shell'\n        run: python ../JP_TOOLS/check-pins.py", "        if: steps.present.outputs.found == 'yes'\n        run: python ../JP_TOOLS/check-pins.py"]],
+      "target": "the pin step skips the shell job"
+    },
+    {
+      "name": "the pin step checks every arm, not the job's",
+      "edits": [["        run: python ../JP_TOOLS/check-pins.py ${{ matrix.lang }}", "        run: python ../JP_TOOLS/check-pins.py"]],
+      "target": "the pin step runs check-pins.py for the job's language"
+    },
+    {
+      "name": "the pin step dropped",
+      "edits": [["      - name: Tools installed at their pins\n        if: steps.present.outputs.found == 'yes' && matrix.lang != 'shell'\n        run: python ../JP_TOOLS/check-pins.py ${{ matrix.lang }}\n", ""]],
+      "target": "the pin step comes after the install and before the check"
+    }
+  ]
+}

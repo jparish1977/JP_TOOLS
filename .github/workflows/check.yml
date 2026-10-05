@@ -78,6 +78,10 @@ jobs:
           auth=$(python -c 'import json, os, sys
           print(json.dumps({"http-basic": {sys.argv[1]: {"username": "ci", "password": os.environ["FLEET_READ_TOKEN"]}}}))' "${SERVER#*://}")
           COMPOSER_AUTH=$auth composer install --no-interaction --no-progress
+      # requirements-dev.txt and composer.json read back against what the two
+      # installs above put in place (METHODOLOGY 7.9).
+      - name: Tools installed at their pins
+        run: python check-pins.py python php
       # Every file is checked on its own, by one worker per core, each taking
       # every Nth file in turn. Each file writes its own log, printed
       # afterwards in file order, so the output reads as a serial run's would.
@@ -185,6 +189,8 @@ jobs:
         with:
           node-version: '22'
       - run: npm install
+      - name: Tools installed at their pins
+        run: python check-pins.py js
       # As the Python job's gate step: one worker per core, each taking every
       # Nth file, each file's log printed afterwards in file order, and each
       # worker with `set +e` so a finding is recorded rather than fatal.

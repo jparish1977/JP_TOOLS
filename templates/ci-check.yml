@@ -203,6 +203,13 @@ jobs:
               shfmt --version ;;
           esac
 
+      # The install above, read back against the manifest it came from: a pin
+      # the runner resolved differently, or one that is not a single version,
+      # fails here (METHODOLOGY 7.9) instead of changing the gate quietly.
+      - name: Tools installed at their pins
+        if: steps.present.outputs.found == 'yes' && matrix.lang != 'shell'
+        run: python ../JP_TOOLS/check-pins.py ${{ matrix.lang }}
+
       - name: Run check
         if: steps.present.outputs.found == 'yes'
         env:

@@ -1,0 +1,60 @@
+{
+  "about": "check-pins: each manifest's pins are one exact version and installed at it; an absent install is not run. Run: mutate-on-target.py TREE check-pins.py tests/test_check_pins.py tests/mutants/jpt-check-pins.json",
+  "mutants": [
+    {
+      "name": "any constraint counts as a pin",
+      "edits": [["EXACT = re.compile(r\"v?\\d+(\\.\\d+)*([-+][0-9A-Za-z.-]+)?\")", "EXACT = re.compile(r\".*\")"]],
+      "target": "php, a caret range: not pinned"
+    },
+    {
+      "name": "a composer x wildcard read as a version tail",
+      "edits": [["EXACT = re.compile(r\"v?\\d+(\\.\\d+)*([-+][0-9A-Za-z.-]+)?\")", "EXACT = re.compile(r\"v?\\d+(\\.\\d+)*([-+.][0-9A-Za-z.-]+)?\")"]],
+      "target": "php, an x wildcard: not pinned"
+    },
+    {
+      "name": "a version with no == taken as pinned",
+      "edits": [["        if not spec.startswith(\"==\") or not EXACT.fullmatch(version):", "        if not EXACT.fullmatch(version):"]],
+      "target": "python, a version with no ==: exit"
+    },
+    {
+      "name": "an option line in requirements-dev.txt passed over",
+      "edits": [["        elif text:\n            # An option line (-r, -e, --index-url) pins nothing this can check.\n            pins.append((text, \"\"))\n", ""]],
+      "target": "python, an option line: exit"
+    },
+    {
+      "name": "a pin that is not installed not named as such",
+      "edits": [["        if have is None:\n            findings.append(f\"python: {name}=={version} is not installed\")", "        if have is None and False:\n            findings.append(f\"python: {name}=={version} is not installed\")"]],
+      "target": "python, not installed: says so"
+    },
+    {
+      "name": "composer's v prefix compared as text",
+      "edits": [["    return pin.removeprefix(\"v\") == installed.removeprefix(\"v\")", "    return pin == installed"]],
+      "target": "php, at their pins (a v prefix is the same version): exit"
+    },
+    {
+      "name": "a dev- branch skipped without a word",
+      "edits": [["            print(f\"php: NOT CHECKED {name} {pin}: a branch, not a version\")", "            pass"]],
+      "target": "php, a dev- branch is printed as not checked"
+    },
+    {
+      "name": "an install directory that is not there is looked in anyway",
+      "edits": [["    found = next((r / name for r in roots if (r / name).is_dir()), None)", "    found = next((r / name for r in roots), None)"]],
+      "target": "js, no node_modules/: exit"
+    },
+    {
+      "name": "a v-prefixed npm pin accepted",
+      "edits": [["        if not EXACT.fullmatch(pin) or pin.startswith(\"v\"):", "        if not EXACT.fullmatch(pin):"]],
+      "target": "js, a v prefix npm does not write: not pinned"
+    },
+    {
+      "name": "an arm not run reads as its findings",
+      "edits": [["    if not_run:\n        return jpexit.NOT_RUN", "    if False:\n        return jpexit.NOT_RUN"]],
+      "target": "every arm, php not installed, a python finding: exit"
+    },
+    {
+      "name": "findings exit OK",
+      "edits": [["    if findings:\n        return jpexit.FINDINGS", "    if False:\n        return jpexit.FINDINGS"]],
+      "target": "python, another version installed: exit"
+    }
+  ]
+}

@@ -2,6 +2,8 @@
 # gate expects. composer.json declares the PHP runners, package.json the JS
 # ones and requirements-system.txt the apt ones; this is the one place the
 # Python ones are pinned, and CI installs from it rather than keeping a copy.
+# All three take exact versions only, and check-pins.py reads each back
+# against what is installed.
 #
 # A missing runner is reported as a check that did not run (exit 2), not as a
 # pass. Pins are deliberate: an unpinned linter turns a green build red

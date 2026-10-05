@@ -4,11 +4,11 @@
     "require-dev": {
         "iteration8/core": "dev-master",
         "iteration8/utilities": "dev-master",
-        "nikic/php-parser": "^5.0",
-        "phpstan/phpstan": "^2.0",
-        "phpunit/phpunit": "^12.5",
-        "rector/rector": "^2.0",
-        "squizlabs/php_codesniffer": "^3.10"
+        "nikic/php-parser": "5.8.0",
+        "phpstan/phpstan": "2.2.8",
+        "phpunit/phpunit": "12.5.33",
+        "rector/rector": "2.6.2",
+        "squizlabs/php_codesniffer": "3.13.6"
     },
     "autoload": {
         "psr-4": {
