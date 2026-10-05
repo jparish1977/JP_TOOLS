@@ -8,7 +8,10 @@ A spec's `about` carries its own run line (`mutate-on-target.py TREE TARGET
 TEST SPEC`), so the caller does not restate it and get it wrong. Prints one
 line per spec as it finishes, the runner's verdict and exit code, and exits 1
 if any spec is not all killed on target. The runner's full output goes to
-<spec stem>.mutate.out in $MUTATE_OUT_DIR (default the current directory).
+<stem>.mutate.out in $MUTATE_OUT_DIR (default the current directory), where
+the stem is the spec's path under the directory all the given specs share,
+'/' as '__' (pb/books/code.json is pb__books__code); specs in one directory
+keep their file names.
 
 PARALLEL BY DEFAULT: every spec at once, up to --jobs (default: the CPU
 count). The runner mutates its tree in place and refuses a tree another run
@@ -38,9 +41,18 @@ RUNNER = Path(__file__).resolve().parent / "mutate-on-target.py"
 RUN_LINE = re.compile(r"mutate-on-target\.py\s+\S+\s+(\S+)\s+(\S+)")
 
 
-def run_spec(root: str, spec: str, outdir: str) -> tuple[str, int, str]:
+def spec_stem(spec: str, base: str) -> str:
+    """SPEC's name for its label and output file: its path under BASE, the
+    directory all the specs given share, '/' as '__'. Two specs with one file
+    name in different directories (books/code.json, figures/code.json) stay
+    apart; specs in one directory keep their file names."""
+    rel = os.path.relpath(os.path.abspath(spec), base)
+    return rel.removesuffix(".json").replace(os.sep, "__")
+
+
+def run_spec(root: str, spec: str, outdir: str, base: str) -> tuple[str, int, str]:
     """One spec in a private copy of ROOT: (stem, rc, the runner's last line)."""
-    stem = os.path.basename(spec).removesuffix(".json")
+    stem = spec_stem(spec, base)
     with open(spec, encoding="utf-8") as fh:
         m = RUN_LINE.search(json.load(fh).get("about", ""))
     if not m:
@@ -71,9 +83,10 @@ def main(argv: list[str]) -> int:
     name_process("mutate-spec")
     root, specs = os.path.abspath(argv[0]), argv[1:]
     outdir = os.environ.get("MUTATE_OUT_DIR", ".")
+    base = os.path.commonpath([os.path.dirname(os.path.abspath(sp)) for sp in specs])
     bad = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(jobs, len(specs))) as pool:
-        futures = [pool.submit(run_spec, root, sp, outdir) for sp in specs]
+        futures = [pool.submit(run_spec, root, sp, outdir, base) for sp in specs]
         for fut in concurrent.futures.as_completed(futures):
             stem, rc, last = fut.result()
             print(f"{stem}: rc={rc} {last[:140]}", flush=True)

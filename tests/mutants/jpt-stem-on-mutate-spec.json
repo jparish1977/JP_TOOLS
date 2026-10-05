@@ -1,0 +1,20 @@
+{
+  "about": "mutate-spec names each spec by its path under the directory the given specs share. Run: mutate-on-target.py TREE mutate-spec.py tests/test_mutate_on_target.py tests/mutants/jpt-stem-on-mutate-spec.json",
+  "mutants": [
+    {
+      "name": "the stem is the file name alone, as before",
+      "edits": [["    rel = os.path.relpath(os.path.abspath(spec), base)", "    rel = os.path.basename(spec)"]],
+      "target": "same file name: two labels"
+    },
+    {
+      "name": "the path separator kept in the stem",
+      "edits": [["    return rel.removesuffix(\".json\").replace(os.sep, \"__\")", "    return rel.removesuffix(\".json\")"]],
+      "target": "same file name: two output files"
+    },
+    {
+      "name": "the stem measured from the current directory",
+      "edits": [["    base = os.path.commonpath([os.path.dirname(os.path.abspath(sp)) for sp in specs])", "    base = os.getcwd()"]],
+      "target": "specs in one directory keep their file names as labels"
+    }
+  ]
+}

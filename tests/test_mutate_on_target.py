@@ -182,9 +182,39 @@ def test_specs_at_once() -> None:
           (r.returncode, r.stdout.count("every one killed on target")), (0, 2))
     check_true(f"mutate-spec: they ran at once, under the 6 s two in a row need ({took:.1f} s)",
                took < 5.5)
+    check("mutate-spec: specs in one directory keep their file names as labels",
+          sorted(line.split(":")[0] for line in r.stdout.splitlines()), ["spec-one", "spec-two"])
     check("mutate-spec: ROOT itself untouched, byte for byte", target_bytes(tree), ORIGINAL)
     check("mutate-spec: no private copy left beside ROOT",
           [d for d in os.listdir(TMP) if d.startswith(".mutate-")], [])
+
+
+def test_specs_with_one_file_name() -> None:
+    """Two specs named code.json in different directories (another repo mirrors
+    its tests this way) each get their own output file and label, carrying
+    their own last line: one spec's mutant is killed, the other's survives."""
+    tree, _, env = fixture("same-name-tree")
+    specs = []
+    for sub, edit in (("books", ["VALUE = 1", "VALUE = 2"]), ("figures", ["OTHER = 0", "OTHER = 9"])):
+        sp = os.path.join(TMP, "same-name", sub, "code.json")
+        os.makedirs(os.path.dirname(sp))
+        with open(sp, "w", encoding="utf-8") as fh:
+            json.dump({"about": "Run: mutate-on-target.py TREE t.py test.py SPEC.",
+                       "mutants": [{"name": sub, "edits": [edit], "target": "value is one"}]}, fh)
+        specs.append(sp)
+    outdir = os.path.join(TMP, "same-name-out")
+    os.makedirs(outdir)
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(RUNNER), "mutate-spec.py"),
+                        tree, *specs], capture_output=True, text=True,
+                       env=dict(env, MUTATE_OUT_DIR=outdir), check=False, timeout=120)
+    by_label = {line.split(":")[0]: line for line in r.stdout.splitlines()}
+    check("same file name: two output files", sorted(os.listdir(outdir)),
+          ["books__code.mutate.out", "figures__code.mutate.out"])
+    check("same file name: two labels", sorted(by_label), ["books__code", "figures__code"])
+    check_true("same file name: each label carries its own spec's line",
+               "every one killed" in by_label.get("books__code", "")
+               and "1 wrong" in by_label.get("figures__code", ""))
+    check("same file name: the surviving mutant still fails the run", r.returncode, 1)
 
 
 if __name__ == "__main__":
