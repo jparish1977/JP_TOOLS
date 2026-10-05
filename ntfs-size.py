@@ -23,6 +23,11 @@ Examples:
     python ntfs-size.py /dev/sdb3 /Movies
     python ntfs-size.py /dev/sdb3 /Movies --depth 4
     python ntfs-size.py /dev/sdb3 / --top 20
+
+Exit codes (jpexit): 0 OK, every directory under the path was read; 2
+NOT_RUN, ntfsls is missing, nothing could be listed, or a directory was not
+read (a failed or timed-out listing, or one below --depth), each named after
+the totals, which leave it out.
 """
 
 import argparse
@@ -33,14 +38,18 @@ from pathlib import Path
 # The packages beside this file import when another program loads it by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from ntfstools.listing import Entry, join, listdir, walk
+import jpexit
+from ntfstools.listing import Entry, Missed, join, listdir, walk
 
 
-def entry_size(device: str, path: str, entry: Entry, maxdepth: int, timeout: int) -> tuple[int, int]:
-    """(bytes, files) for one entry listed under PATH: itself, or its whole subtree."""
+def entry_size(device: str, path: str, entry: Entry, maxdepth: int, timeout: int,
+               missed: Missed | None = None) -> tuple[int, int]:
+    """(bytes, files) for one entry listed under PATH: itself, or its whole
+    subtree, with any directory it could not read added to MISSED."""
     if not entry.is_dir:
         return entry.size, 1
-    sizes = [size for _, size in walk(device, join(path, entry.name), maxdepth, timeout, depth=1)]
+    sizes = [size for _, size in walk(device, join(path, entry.name), maxdepth, timeout,
+                                      depth=1, missed=missed)]
     return sum(sizes), len(sizes)
 
 
@@ -63,15 +72,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if shutil.which("ntfsls") is None:
         print("ntfsls not found -- install the ntfs-3g package", file=sys.stderr)
-        return 1
-    entries = listdir(args.device, args.path, args.timeout)
+        return jpexit.NOT_RUN
+    missed: Missed = []
+    entries = listdir(args.device, args.path, args.timeout, missed)
     if not entries:
         print(f"nothing listed at {args.path} on {args.device}", file=sys.stderr)
         print("(is it an NTFS partition, and are you root?)", file=sys.stderr)
-        return 1
-    rows = [(*entry_size(args.device, args.path, e, args.depth, args.timeout), e.name) for e in entries]
+        return jpexit.NOT_RUN
+    rows = [(*entry_size(args.device, args.path, e, args.depth, args.timeout, missed), e.name)
+            for e in entries]
     print("\n".join(report(rows, args.top)))
-    return 0
+    if missed:
+        print(f"\nTOTAL leaves out {len(missed)} directories not read:")
+        print("\n".join(f"  not read: {path} ({why})" for path, why in missed))
+        return jpexit.NOT_RUN
+    return jpexit.OK
 
 
 if __name__ == "__main__":

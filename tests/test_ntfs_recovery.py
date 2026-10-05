@@ -31,15 +31,24 @@ from pathlib import Path
 
 from _harness import check, check_true, load_script, run
 from fake_tools import calls, env, fake_tools, run_main
-from ntfstools.listing import parse_listing
+from jpexit import NOT_RUN, OK
+from ntfstools.listing import parse_listing, walk
 
 EXTRACT = load_script("ntfs-extract.py")
 SIZE = load_script("ntfs-size.py")
 INVENTORY = load_script("ntfs-inventory.py")
 
-# FAKE_TREE is {"/dir": [[size, name, is_dir], ...]}; FAKE_DATA is {"/path": content}.
+# FAKE_TREE is {"/dir": [[size, name, is_dir], ...]}; FAKE_DATA is {"/path": content};
+# FAKE_FAIL is {"/dir": "error" | "hang"}, a listing that exits 1 or outlasts its timeout.
 FAKE_NTFSLS = """\
+import time
 path = sys.argv[sys.argv.index("-p") + 1]
+fail = json.loads(os.environ.get("FAKE_FAIL", "{}")).get(path.rstrip("/") or "/")
+if fail == "error":
+    print("ntfsls: Failed to read index", file=sys.stderr)
+    sys.exit(1)
+if fail == "hang":
+    time.sleep(5)
 for size, name, is_dir in json.loads(os.environ["FAKE_TREE"]).get(path.rstrip("/") or "/", []):
     print(f"{size:>10} Jan  1 00:00 2020 {name}{'/' if is_dir else ''}")
 """
@@ -81,7 +90,78 @@ def test_walk_and_depth_limit() -> None:
         with contextlib.redirect_stderr(err):
             shallow = [p for p, _ in EXTRACT.collect(str(w / "img"), "/", 1, 30, 0)]
         check_true("depth 1 stops above deep/", "/docs/deep/b.txt" not in shallow and len(shallow) == 5)
-        check_true("and says so", "depth limit 1 reached" in err.getvalue())
+        check_true("and says so", "not read: /docs/deep (depth limit 1)" in err.getvalue())
+
+
+def test_walk_records_what_it_could_not_read() -> None:
+    """A listing that fails, one that times out, and a directory below the
+    depth limit are each recorded in MISSED and said on stderr, and the walk
+    carries on with the rest. Control: a clean walk misses nothing."""
+    with fake_tools(ntfsls=FAKE_NTFSLS) as (w, _log), _fakes(w / "img"):
+        img = str(w / "img")
+        clean: list[tuple[str, str]] = []
+        files = [p for p, _ in walk(img, "/", 6, 30, missed=clean)]
+        check("control: a clean walk misses nothing", clean, [])
+        check_true("control: and finds the deep file", "/docs/deep/b.txt" in files)
+        for how, expect in (("error", "ntfsls exited 1"), ("hang", "timed out")):
+            missed: list[tuple[str, str]] = []
+            err = io.StringIO()
+            with env(FAKE_FAIL=json.dumps({"/docs/deep": how})), contextlib.redirect_stderr(err):
+                files = [p for p, _ in walk(img, "/", 6, 1, missed=missed)]
+            check(f"{how}: recorded", [(p, why.startswith(expect)) for p, why in missed],
+                  [("/docs/deep", True)])
+            check_true(f"{how}: said on stderr", "/docs/deep" in err.getvalue())
+            check_true(f"{how}: the rest still walked", "/docs/a.txt" in files and "/top.txt" in files)
+        missed = []
+        with contextlib.redirect_stderr(io.StringIO()):
+            list(walk(img, "/", 1, 30, missed=missed))
+        check("depth limit: recorded", [p for p, _ in missed], ["/docs/deep"])
+
+
+def test_extract_counts_an_unread_directory_as_failed() -> None:
+    """Every file it enumerated copies, but /docs could not be listed: the run
+    did not take everything, so exit 1 ("anything failed"). Control: a tree
+    that lists and copies cleanly exits 0."""
+    with fake_tools(keep_path=True, ntfsls=FAKE_NTFSLS, ntfscat=FAKE_NTFSCAT) as (w, _log), _fakes(w / "img"):
+        code, out = run_main(EXTRACT.main, str(w / "img"), "/docs/deep", str(w / "clean"))
+        check("control: a clean tree exits 0", code, OK)
+        with env(FAKE_FAIL=json.dumps({"/docs": "error"})):
+            code, out = run_main(EXTRACT.main, str(w / "img"), "/", str(w / "out"))
+        check("unread directory: exit", code, EXTRACT.EXIT_FAILED)
+        check_true("unread directory: the copies still happened", "copied 2" in out)
+        check_true("unread directory: named", "not read: /docs" in out)
+
+
+def test_size_with_an_unread_subtree_is_not_run() -> None:
+    with fake_tools(keep_path=True, ntfsls=FAKE_NTFSLS) as (w, _log), _fakes(w / "img"):
+        with env(FAKE_FAIL=json.dumps({"/docs/deep": "error"})):
+            code, out = run_main(SIZE.main, str(w / "img"))
+        check("unread subtree: exit", code, NOT_RUN)
+        check_true("unread subtree: named", "not read: /docs/deep" in out)
+        with env(FAKE_FAIL=json.dumps({"/": "error"})):
+            code, out = run_main(SIZE.main, str(w / "img"))
+        check("unread root: exit", code, NOT_RUN)
+
+
+def test_inventory_does_not_mark_an_incomplete_entry_done() -> None:
+    """/docs/deep cannot be listed: docs is recorded as far as it goes but not
+    marked done, so the next run re-reads it, and the run exits NOT_RUN. The
+    re-run with the listing back is OK and leaves each file once."""
+    with fake_tools(keep_path=True, ntfsls=FAKE_NTFSLS) as (w, _log), _fakes(w / "img"):
+        tsv = w / "inv.tsv"
+        with env(FAKE_FAIL=json.dumps({"/docs/deep": "error"})):
+            code, out = run_main(INVENTORY.main, str(w / "img"), str(tsv))
+        check("incomplete: exit", code, NOT_RUN)
+        done = [line for line in tsv.read_text().splitlines() if line.startswith("#done")]
+        check_true("incomplete: docs not marked done", "#done\tdocs" not in done)
+        check_true("incomplete: top.txt marked done", "#done\ttop.txt" in done)
+        check_true("incomplete: named", "not read: /docs/deep" in out)
+        code, out = run_main(INVENTORY.main, str(w / "img"), str(tsv))
+        check("re-run: exit", code, OK)
+        check_true("re-run: docs re-read", "re-recording unfinished: docs" in out)
+        with env(FAKE_FAIL=json.dumps({"/": "error"})):
+            code, out = run_main(INVENTORY.main, str(w / "img"), str(w / "root.tsv"))
+        check("unread root: exit", code, NOT_RUN)
 
 
 def test_extract() -> None:
@@ -109,7 +189,7 @@ def test_containment() -> None:
 def test_size() -> None:
     with fake_tools(keep_path=True, ntfsls=FAKE_NTFSLS) as (w, _log), _fakes(w / "img"):
         code, out = run_main(SIZE.main, str(w / "img"))
-        check("exit", code, 0)
+        check("exit", code, OK)
         check_true("docs subtree summed", "docs" in out and "4 files" in out)
         check_true("total", "TOTAL" in out and "      6 files" in out)
 
@@ -119,7 +199,7 @@ def test_inventory_resumes_an_interrupted_entry() -> None:
         tsv = w / "inv.tsv"
         tsv.write_text("#path\tsize\n/top.txt\t5\n#done\ttop.txt\n/docs/a.txt\t3\n")
         code, out = run_main(INVENTORY.main, str(w / "img"), str(tsv))
-        check("exit", code, 0)
+        check("exit", code, OK)
         check_true("docs re-read", "re-recording unfinished: docs" in out)
         rows = [line.split("\t")[0] for line in tsv.read_text().splitlines() if not line.startswith("#")]
         check("each file once, $Extend never", sorted(rows),

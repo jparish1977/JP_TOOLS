@@ -1,0 +1,20 @@
+{
+  "about": "ntfs-extract counts a directory it could not read as failed. Run: mutate-on-target.py TREE ntfs-extract.py tests/test_ntfs_recovery.py tests/mutants/jpt-missed-on-ntfs-extract.json",
+  "mutants": [
+    {
+      "name": "an unread directory is not a failure",
+      "edits": [["    return EXIT_FAILED if missed or failed else jpexit.OK", "    return EXIT_FAILED if failed else jpexit.OK"]],
+      "target": "unread directory: exit"
+    },
+    {
+      "name": "the walk's misses not collected",
+      "edits": [["    return [(p, s) for p, s in walk(device, path, maxdepth, timeout, missed=missed) if s >= minsize]", "    return [(p, s) for p, s in walk(device, path, maxdepth, timeout) if s >= minsize]"]],
+      "target": "unread directory: exit"
+    },
+    {
+      "name": "a clean run reads as failed",
+      "edits": [["    return EXIT_FAILED if missed or failed else jpexit.OK", "    return EXIT_FAILED"]],
+      "target": "control: a clean tree exits 0"
+    }
+  ]
+}

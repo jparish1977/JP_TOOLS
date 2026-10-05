@@ -3,8 +3,13 @@
 
 The lightest operation available on a failing drive: directory entries only,
 no file data. Written as "path<TAB>size" one top-level entry at a time and
-resumable per entry (inventory/resume.py): an entry cut off by a disconnect
-is re-read whole on the next run, never left half-recorded.
+resumable per entry (inventory/resume.py): an entry cut off by a disconnect,
+or one with a directory that could not be listed (a failed or timed-out
+listing, or one below the depth limit), is not marked done, so the next run
+re-reads it whole.
+
+Exit codes (jpexit): 0 OK, every entry recorded whole; 2 NOT_RUN, a usage
+error, or a directory not read, each named.
 
 usage: ntfs-inventory.py DEVICE OUTPUT.tsv [DIR ...]
 
@@ -32,8 +37,9 @@ from typing import TextIO
 # The packages beside this file import when another program loads it by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import jpexit
 from inventory.resume import mark_done, resume_state
-from ntfstools.listing import Entry, listdir, walk
+from ntfstools.listing import Entry, Missed, listdir, walk
 from platformtools.windows import is_system_area
 
 HEADER = "#path\tsize\n"
@@ -61,22 +67,28 @@ def _sudo_warning(device: str, argv: list[str]) -> str | None:
             f"         Re-run as: {rerun}")
 
 
-def record(device: str, entry: Entry, out: TextIO) -> tuple[int, int]:
-    """Write one top-level entry's rows and its #done. Returns (files, bytes)."""
+def record(device: str, entry: Entry, out: TextIO, missed: Missed) -> tuple[int, int]:
+    """Write one top-level entry's rows, and its #done only when every
+    directory under it was read: one it could not read (added to MISSED)
+    leaves the entry unfinished, so the next run re-reads it whole. Returns
+    (files, bytes)."""
     path = "/" + entry.name
-    rows = [(path, entry.size)] if not entry.is_dir else walk(device, path, MAXDEPTH, TIMEOUT)
+    before = len(missed)
+    rows = ([(path, entry.size)] if not entry.is_dir
+            else walk(device, path, MAXDEPTH, TIMEOUT, missed=missed))
     files = size = 0
     for child, child_size in rows:
         out.write(f"{child}\t{child_size}\n")
         files += 1
         size += child_size
-    mark_done(out, entry.name)
+    if len(missed) == before:
+        mark_done(out, entry.name)
     return files, size
 
 
-def _pending(device: str, only: set[str], done: set[str]) -> list[Entry]:
+def _pending(device: str, only: set[str], done: set[str], missed: Missed) -> list[Entry]:
     """The top-level entries still to record: not system areas, not done, in ONLY if given."""
-    return [e for e in listdir(device, "/", TIMEOUT)
+    return [e for e in listdir(device, "/", TIMEOUT, missed)
             if not is_system_area(e.name) and (not only or e.name in only) and e.name not in done]
 
 
@@ -85,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     wants_help = bool(args) and args[0] in ("-h", "--help")
     if len(args) < 2 or wants_help:
         print(__doc__)
-        return 0 if wants_help else 2
+        return jpexit.OK if wants_help else jpexit.NOT_RUN
     device, output = args[0], args[1]
     warning = _sudo_warning(device, args)
     if warning:
@@ -94,16 +106,22 @@ def main(argv: list[str] | None = None) -> int:
     done = resume_state(output)
     if done:
         print("resuming -- done: {}".format(", ".join(sorted(done))))
-    tops = _pending(device, set(args[2:]), done)
+    missed: Missed = []
+    tops = _pending(device, set(args[2:]), done, missed)
     with open(output, "a", encoding="utf-8", errors="surrogateescape") as out:
         if fresh:
             out.write(HEADER)
         restore_owner(output)  # now, so an interrupted run still leaves it usable
         for entry in tops:
-            files, size = record(device, entry, out)
+            files, size = record(device, entry, out, missed)
             print(f"  {entry.name[:24]:<24} {files:7d} files {size / 1e9:8.1f} GB")
     print(f"wrote {output}")
-    return 0
+    if missed:
+        print(f"incomplete: {len(missed)} directories not read; their entries are not marked "
+              "done, so the next run re-reads them:")
+        print("\n".join(f"  not read: {path} ({why})" for path, why in missed))
+        return jpexit.NOT_RUN
+    return jpexit.OK
 
 
 if __name__ == "__main__":

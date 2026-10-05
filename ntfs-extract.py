@@ -39,7 +39,9 @@ Examples:
     python ntfs-extract.py /dev/sdb3 /Photos ~/rescue --depth 6
 
 Exit status: 0 everything copied or already present, 1 anything failed, a
-missing tool, or nothing found.
+missing tool, or nothing found. A directory that could not be listed (a
+failed or timed-out listing, or one below --depth) is something failed: its
+files were never attempted, and it is named after the counts.
 """
 
 import argparse
@@ -55,9 +57,13 @@ from pathlib import Path
 # The packages beside this file import when another program loads it by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from ntfstools.listing import as_root, walk
+import jpexit
+from ntfstools.listing import Missed, as_root, walk
 
 LISTING_TIMEOUT = 60
+
+# This script's own documented codes (the usage above): jpexit.OK, and
+EXIT_FAILED = 1  # anything failed or was never attempted, a missing tool, or nothing found
 
 
 @dataclass
@@ -68,9 +74,11 @@ class Tally:
     done_bytes: int = 0
 
 
-def collect(device: str, path: str, maxdepth: int, timeout: int, minsize: int) -> list[tuple[str, int]]:
-    """Every file at or under PATH of at least MINSIZE bytes, as (full path, size)."""
-    return [(p, s) for p, s in walk(device, path, maxdepth, timeout) if s >= minsize]
+def collect(device: str, path: str, maxdepth: int, timeout: int, minsize: int,
+            missed: Missed | None = None) -> list[tuple[str, int]]:
+    """Every file at or under PATH of at least MINSIZE bytes, as (full path,
+    size), with any directory that could not be read added to MISSED."""
+    return [(p, s) for p, s in walk(device, path, maxdepth, timeout, missed=missed) if s >= minsize]
 
 
 def within(root: str, candidate: str) -> bool:
@@ -169,19 +177,25 @@ def main(argv: list[str] | None = None) -> int:
     missing = [t for t in ("ntfsls", "ntfscat") if shutil.which(t) is None]
     if missing:
         print(f"{missing[0]} not found -- install the ntfs-3g package", file=sys.stderr)
-        return 1
+        return EXIT_FAILED
     print(f"enumerating {args.path} ...")
-    files = collect(args.device, args.path, args.depth, LISTING_TIMEOUT, args.min_size)
+    missed: Missed = []
+    files = collect(args.device, args.path, args.depth, LISTING_TIMEOUT, args.min_size, missed)
     if not files:
         print(f"nothing found at {args.path}", file=sys.stderr)
-        return 1
+        return EXIT_FAILED
     print(f"  {len(files)} files, {sum(s for _, s in files) / 1e9:.1f} GB")
+    failed = 0
     if args.dry_run:
         _preview(files)
-        return 0
-    tally = extract_all(args, files)
-    print(f"copied {tally.copied}, skipped {tally.skipped} already present, failed {tally.failed}")
-    return 1 if tally.failed else 0
+    else:
+        tally = extract_all(args, files)
+        failed = tally.failed
+        print(f"copied {tally.copied}, skipped {tally.skipped} already present, failed {failed}")
+    if missed:
+        print(f"{len(missed)} directories not read, so their files were never attempted:")
+        print("\n".join(f"  not read: {path} ({why})" for path, why in missed))
+    return EXIT_FAILED if missed or failed else jpexit.OK
 
 
 if __name__ == "__main__":

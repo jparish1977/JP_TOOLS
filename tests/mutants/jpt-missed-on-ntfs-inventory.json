@@ -1,0 +1,25 @@
+{
+  "about": "ntfs-size and ntfs-inventory act on what the walk missed. Run: mutate-on-target.py TREE ntfs-inventory.py tests/test_ntfs_recovery.py tests/mutants/jpt-missed-on-ntfs-scripts.json",
+  "mutants": [
+    {
+      "name": "an incomplete entry marked done",
+      "edits": [["    if len(missed) == before:\n        mark_done(out, entry.name)", "    if True:\n        mark_done(out, entry.name)"]],
+      "target": "incomplete: docs not marked done"
+    },
+    {
+      "name": "a complete entry never marked done",
+      "edits": [["    if len(missed) == before:\n        mark_done(out, entry.name)", "    if False:\n        mark_done(out, entry.name)"]],
+      "target": "incomplete: top.txt marked done"
+    },
+    {
+      "name": "inventory exits OK with directories missed",
+      "edits": [["        return jpexit.NOT_RUN\n    return jpexit.OK", "        return jpexit.OK\n    return jpexit.OK"]],
+      "target": "incomplete: exit"
+    },
+    {
+      "name": "the walk's misses not collected",
+      "edits": [["            else walk(device, path, MAXDEPTH, TIMEOUT, missed=missed))", "            else walk(device, path, MAXDEPTH, TIMEOUT))"]],
+      "target": "incomplete: exit"
+    }
+  ]
+}
