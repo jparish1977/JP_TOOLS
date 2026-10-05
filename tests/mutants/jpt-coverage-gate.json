@@ -12,6 +12,16 @@
       "target": "zero statements: exit"
     },
     {
+      "name": "more covered than counted is accepted",
+      "edits": [["    if not 0 <= covered <= total:", "    if not 0 <= covered:"]],
+      "target": "more covered than counted: exit"
+    },
+    {
+      "name": "a negative covered count is accepted",
+      "edits": [["    if not 0 <= covered <= total:", "    if not covered <= total:"]],
+      "target": "a negative covered count: exit"
+    },
+    {
       "name": "an unreadable report reads as under the threshold",
       "edits": [["        print(f\"coverage-gate: {e}\", file=sys.stderr)\n        return jpexit.NOT_RUN", "        print(f\"coverage-gate: {e}\", file=sys.stderr)\n        return jpexit.FINDINGS"]],
       "target": "missing: exit"

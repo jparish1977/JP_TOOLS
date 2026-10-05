@@ -69,6 +69,11 @@ def test_a_report_that_cannot_be_read_is_not_run() -> None:
     code, out = gate(clover(0, 0))
     check("zero statements: exit", code, NOT_RUN)
     check_true("zero statements: refuses to call it covered", "no statements" in out)
+    for name, statements, covered in (("more covered than counted", 10, 12),
+                                      ("a negative covered count", 10, -1)):
+        code, out = gate(clover(statements, covered))
+        check(f"{name}: exit", code, NOT_RUN)
+        check_true(f"{name}: says so", "not a coverage" in out)
 
 
 def test_a_threshold_outside_0_to_100_is_refused() -> None:

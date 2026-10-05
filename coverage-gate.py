@@ -12,8 +12,9 @@ The figure is the PROJECT's line coverage: Clover's project-level
 coveredstatements over statements, not any one file's.
 
 Exit codes (jpexit): 0 OK, at or over the threshold; 1 FINDINGS, under it;
-2 NOT_RUN, the report is missing, is not Clover, or counts no statements at
-all, so nothing was measured. A report that cannot be read, or one with
+2 NOT_RUN, the report is missing, is not Clover, counts no statements at
+all, or counts something that is not a coverage (more covered than there
+are, or a negative count), so nothing sensible was measured. A report that cannot be read, or one with
 nothing in it, is never a pass.
 
 Why not an established Composer tool (METHODOLOGY 2.15): the two that exist,
@@ -28,6 +29,7 @@ import argparse
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import NoReturn
 
 # The packages beside this file import when another program loads it by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -67,6 +69,8 @@ def line_coverage(report: Path) -> tuple[int, int]:
         raise UnreadableError(f"{report}'s project metrics are not counts: {e}") from e
     if total == 0:
         raise UnreadableError(f"{report} has no statements counted; refusing to call that covered")
+    if not 0 <= covered <= total:
+        raise UnreadableError(f"{report} counts {covered} covered of {total}, which is not a coverage")
     return covered, total
 
 
@@ -83,7 +87,7 @@ def _threshold(text: str) -> float:
 class _Parser(argparse.ArgumentParser):
     """argparse, but a usage error is jpexit.NOT_RUN rather than argparse's own 2."""
 
-    def error(self, message: str) -> None:  # type: ignore[override]
+    def error(self, message: str) -> NoReturn:
         self.print_usage(sys.stderr)
         print(f"coverage-gate: {message}", file=sys.stderr)
         raise SystemExit(jpexit.NOT_RUN)
