@@ -1,0 +1,10 @@
+{
+  "about": "The report's verdict is judged once, at the end, from each check's findings: a reasonless directive reports fail. (Skipping that judgement is caught by jpt-verdict-on-lab-ignore, where the status before it is stale; here directive-reason's own is already right.) Run: mutate-on-target.py TREE jpcheck/lab.py tests/test_check_directive_reason.py tests/mutants/jpt-verdict-on-lab-directives.json",
+  "mutants": [
+    {
+      "name": "the check never fails",
+      "edits": [["            c[\"status\"] = _verdict(issues)", "            c[\"status\"] = \"pass\""]],
+      "target": "a reasonless shellcheck directive fails the gate"
+    }
+  ]
+}

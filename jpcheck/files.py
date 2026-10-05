@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from jpcheck.common import _VERDICTS, _rel, _verdict
+from jpcheck.common import _rel
 
 _EXT_TO_LANG = {
     ".py":   "python",
@@ -232,12 +232,13 @@ def _drop_ignored(groups: dict[str, list[str]], root: Path,
 
 
 def _drop_ignored_issues(result: dict[str, Any], root: Path, ignores: list[Ignore]) -> None:
-    """A dir-capable tool finds its own files, ignored ones included: drop their findings."""
+    """A dir-capable tool finds its own files, ignored ones included: drop
+    their findings. The status is judged afresh from what is left by
+    jpcheck/lab.py's _mark_lab_exempt, the one place a report's verdict is
+    decided."""
     if not ignores:
         return
     issues = result.get("issues", [])
     kept = [i for i in issues if not ignored_by(i.get("file", ""), root, ignores)]
     if len(kept) != len(issues):
         result["issues"] = kept
-        if result.get("status") in _VERDICTS:
-            result["status"] = _verdict(kept)

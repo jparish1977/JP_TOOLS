@@ -37,11 +37,6 @@
       "target": "js: '// eslint-disable-next-line no-eval reason: a user formula' is found, unreasoned"
     },
     {
-      "name": "the check never fails",
-      "edits": [["    return {\"tool\": \"directive-reason\", \"status\": \"fail\" if issues else \"pass\",", "    return {\"tool\": \"directive-reason\", \"status\": \"pass\","]],
-      "target": "a reasonless shellcheck directive fails the gate"
-    },
-    {
       "name": "cppcheck-suppress is not a directive",
       "edits": [["                      _C_OPEN + r\"cppcheck-suppress(?:-file|-begin|-macro)?\"", "                      _C_OPEN + r\"cppcheck-supress(?:-file|-begin|-macro)?\""]],
       "target": "a reasonless cppcheck-suppress fails the gate"

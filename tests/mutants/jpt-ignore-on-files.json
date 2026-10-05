@@ -1,10 +1,9 @@
 {
- "about": ".jp-tools-ignore, the parts in jpcheck/files.py: the required reason, the glob match, the dir-mode file drop, and the dir-capable findings filter and its status flip. Run: mutate-on-target.py TREE jpcheck/files.py tests/test_ignore.py tests/mutants/jpt-ignore-on-files.json",
+ "about": ".jp-tools-ignore, the parts in jpcheck/files.py: the required reason, the glob match, the dir-mode file drop, and the dir-capable findings filter (the status after it is jpcheck/lab.py's, in jpt-verdict-on-lab-*). Run: mutate-on-target.py TREE jpcheck/files.py tests/test_ignore.py tests/mutants/jpt-ignore-on-files.json",
  "mutants": [
   {"name": "an entry needs no reason", "edits": [["        if not glob.strip() or not reason.strip():\n            raise _IgnoreError(", "        if not glob.strip():\n            raise _IgnoreError("]], "target": "an entry with no reason refuses, exit 2, naming its line"},
   {"name": "the glob must match the whole path exactly", "edits": [["if fnmatch.fnmatchcase(rel, g)), None)", "if rel == g), None)"]], "target": "an ignored file is skipped, exit 0, naming the entry and its reason"},
   {"name": "dir mode keeps ignored files", "edits": [["            hit = ignored_by(f, root, ignores)\n            if hit:", "            hit = ignored_by(f, root, ignores)\n            if False:"]], "target": "dir mode lists each ignored file with its entry"},
-  {"name": "dir-capable findings are not filtered", "edits": [["    if not ignores:\n        return\n    issues = result.get(\"issues\", [])", "    if True:\n        return\n    issues = result.get(\"issues\", [])"]], "target": "dir mode drops the dir-capable tools' findings in ignored files"},
-  {"name": "a filtered fail stays fail", "edits": [["        if result.get(\"status\") == \"fail\" and not kept:", "        if False:"]], "target": "with only ignored files at fault, ruff reads pass and the run exits 0"}
+  {"name": "dir-capable findings are not filtered", "edits": [["    if not ignores:\n        return\n    issues = result.get(\"issues\", [])", "    if True:\n        return\n    issues = result.get(\"issues\", [])"]], "target": "dir mode drops the dir-capable tools' findings in ignored files"}
  ]
 }

@@ -49,7 +49,10 @@ def lab_claim(p: Path) -> bool:
 
 
 def _mark_lab_exempt(checks: list[dict[str, Any]]) -> None:
-    """Tag each issue in a lab file under its header as exempt."""
+    """Tag each issue in a lab file under its header as exempt, then judge
+    each check that ran from the findings it is left with. Both report paths
+    (jpcheck/runs.py) end here, so this is the one place a report's verdict
+    is decided: what a runner or a filter set before it is overwritten."""
     claims: dict[str, bool] = {}
     for c in checks:
         issues = c.get("issues", [])
