@@ -1,0 +1,25 @@
+{
+  "about": "fix-dashes never reads a git step that failed as done. Run: mutate-on-target.py TREE fix-dashes.py tests/test_dashes.py tests/mutants/jpt-git-failed-on-fix-dashes.json",
+  "mutants": [
+    {
+      "name": "a failed git add claims re-staged",
+      "edits": [["    if added.returncode != 0:\n", "    if False:\n"]],
+      "target": "a git add that fails is not 're-staged', and exits FINDINGS"
+    },
+    {
+      "name": "a refused file exits OK",
+      "edits": [["    return jpexit.OK if all(results) else jpexit.FINDINGS", "    return jpexit.OK"]],
+      "target": "a git add that fails is not 're-staged', and exits FINDINGS"
+    },
+    {
+      "name": "a failed git diff reads as no em-dashes",
+      "edits": [["    if result.returncode != 0:\n        said", "    if False:\n        said"]],
+      "target": "a git diff that fails makes --check NOT_RUN, never clean"
+    },
+    {
+      "name": "a git failure exits OK",
+      "edits": [["        print(f\"fix-dashes: {e}; nothing was checked\", file=sys.stderr)\n        return jpexit.NOT_RUN", "        print(f\"fix-dashes: {e}; nothing was checked\", file=sys.stderr)\n        return jpexit.OK"]],
+      "target": "a git diff that fails makes --check NOT_RUN, never clean"
+    }
+  ]
+}

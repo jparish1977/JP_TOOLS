@@ -23,7 +23,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from _harness import ROOT
+from jpexit import FINDINGS, NOT_RUN
+
 DASH = chr(0x2014)  # built from its code point, so this file does not carry one
 
 fails = 0
@@ -166,6 +168,38 @@ def rename_cases(tmp: Path) -> None:
         check(what, ok and "moved.md:6" not in out, out)
 
 
+def git_failure_cases(tmp: Path) -> None:
+    """git refusing a step must not read as done: a `git add` that fails
+    leaves the dash staged, and a `git diff --cached` that fails reads as no
+    em-dashes. Controls: fixer_cases, where both succeed."""
+    print("\ngit steps that fail:")
+    d = tmp / "gitfail"
+    d.mkdir()
+    repo = setup(d)
+    add_line(repo, "notes.md", f"new {DASH} line")
+    lock = repo / ".git" / "index.lock"
+    lock.touch()
+    try:
+        r = run(repo, sys.executable, str(ROOT / "fix-dashes.py"))
+    finally:
+        lock.unlink()
+    staged = git(repo, "show", ":notes.md").stdout
+    check("a git add that fails is not 're-staged', and exits FINDINGS",
+          r.returncode == FINDINGS and "NOT re-staged" in r.stdout and DASH in staged,
+          r.stdout + r.stderr)
+    if os.geteuid() == 0:
+        print("  SKIP: running as root, which reads a mode-000 index anyway")
+        return
+    index = repo / ".git" / "index"
+    index.chmod(0)
+    try:
+        r = run(repo, sys.executable, str(ROOT / "fix-dashes.py"), "--check")
+    finally:
+        index.chmod(0o644)
+    check("a git diff that fails makes --check NOT_RUN, never clean",
+          r.returncode == NOT_RUN and "git diff" in r.stderr, r.stdout + r.stderr)
+
+
 def crash_case(tmp: Path) -> None:
     """A fixer that crashes prints nothing. Anything but exit 0 or 1 from
     --check must read as BROKEN, never clean."""
@@ -206,6 +240,7 @@ def main() -> int:
         unstaged_case(repo)
         edge_cases(Path(td))
         rename_cases(Path(td))
+        git_failure_cases(Path(td))
         crash_case(Path(td))
     print(f"\n{checks - fails}/{checks} passed")
     return 1 if fails else 0

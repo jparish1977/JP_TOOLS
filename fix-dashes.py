@@ -20,6 +20,12 @@ usage:
 
 The pre-commit hook runs --check. JP_TOOLS_ALLOW_EMDASH=1 on a commit that
 genuinely needs one lets it through, and the hook says so every time.
+
+Exit codes (jpexit): 0 OK, none listed or all fixed and re-staged; 1
+FINDINGS, --check listed some, or a file was left for you (unstaged changes,
+or a `git add` that failed, which leaves the staged copy unfixed); 2
+NOT_RUN, not in a git repository or a git step failed, so nothing was
+checked. The hook reads anything but 0 or 1 from --check as BROKEN.
 """
 
 import os
@@ -27,6 +33,11 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import jpexit
 
 DASH = chr(0x2014)  # built from its code point, so this file does not carry one
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
@@ -41,9 +52,24 @@ def name_process() -> None:
         pass
 
 
+class GitFailedError(Exception):
+    """A git step this needs did not work; the message says which and why."""
+
+
 def git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], capture_output=True, text=True, check=False,
                           encoding="utf-8", errors="replace")
+
+
+def git_out(*args: str) -> str:
+    """git's stdout, or GitFailedError: an empty diff from a git that failed
+    would read as "no em-dashes", and the hook would let the commit through."""
+    result = git(*args)
+    if result.returncode != 0:
+        said = result.stderr.strip().splitlines()
+        raise GitFailedError(f"git {args[0]} {args[1] if len(args) > 1 else ''} exited "
+                             f"{result.returncode}: {said[-1] if said else 'no message'}")
+    return result.stdout
 
 
 def staged_files() -> list[list[str]]:
@@ -51,7 +77,7 @@ def staged_files() -> list[list[str]]:
     [path], or [old, new] for a rename, so the lines a moved file carries are
     not read as added. NUL-separated, so git does not quote a non-ASCII name
     the way it does in a diff header."""
-    out = git("diff", "--cached", "--name-status", "-z", "-M", "--diff-filter=ACMR").stdout
+    out = git_out("diff", "--cached", "--name-status", "-z", "-M", "--diff-filter=ACMR")
     fields = out.split("\0")
     entries: list[list[str]] = []
     i = 0
@@ -97,7 +123,13 @@ def fix_file(path: str, lines: list[int]) -> bool:
     for n in lines:
         rows[n - 1] = replace(rows[n - 1])
     p.write_text("".join(rows), encoding="utf-8")
-    git("add", "--", path)
+    added = git("add", "--", path)
+    if added.returncode != 0:
+        said = added.stderr.strip().splitlines()
+        print(f"  {path}: fixed line(s) {lines} in the working tree, but NOT re-staged "
+              f"(git add: {said[-1] if said else 'exit ' + str(added.returncode)}); "
+              f"the staged copy still has them. Run: git add -- {path}")
+        return False
     print(f"  {path}: fixed line(s) {lines}, re-staged")
     return True
 
@@ -106,7 +138,7 @@ def find_dashes() -> dict[str, list[int]]:
     """{path: [line numbers]} for every staged file, one diff per file."""
     found: dict[str, list[int]] = {}
     for paths in staged_files():
-        diff = git("diff", "--cached", "-U0", "-M", "--no-color", "--no-ext-diff", "--", *paths).stdout
+        diff = git_out("diff", "--cached", "-U0", "-M", "--no-color", "--no-ext-diff", "--", *paths)
         if lines := added_dashes(diff):
             found[paths[-1]] = lines
     return found
@@ -116,22 +148,26 @@ def main() -> int:
     name_process()
     if {"-h", "--help"} & set(sys.argv[1:]):
         print(__doc__)
-        return 0
+        return jpexit.OK
     top = git("rev-parse", "--show-toplevel")
     if top.returncode != 0:
         print("fix-dashes: not in a git repository")
-        return 2
+        return jpexit.NOT_RUN
     os.chdir(top.stdout.strip())
-    found = find_dashes()
+    try:
+        found = find_dashes()
+    except GitFailedError as e:
+        print(f"fix-dashes: {e}; nothing was checked", file=sys.stderr)
+        return jpexit.NOT_RUN
     if "--check" in sys.argv[1:]:
         for path, lines in sorted(found.items()):
             print("\n".join(f"  {path}:{n}" for n in lines))
-        return 1 if found else 0
+        return jpexit.FINDINGS if found else jpexit.OK
     if not found:
         print("fix-dashes: no em-dashes in the lines staged for commit")
-        return 0
+        return jpexit.OK
     results = [fix_file(path, lines) for path, lines in sorted(found.items())]
-    return 0 if all(results) else 1
+    return jpexit.OK if all(results) else jpexit.FINDINGS
 
 
 if __name__ == "__main__":
