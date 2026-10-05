@@ -29,19 +29,15 @@ usage: tools/lab/gate-files.py [--only-bad] [--base REF] (--tracked | FILE ...)
 import json
 import subprocess
 import sys
+from pathlib import Path
+
+# The repo root, so platformtools imports from here.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from platformtools.procname import name_process
 
 # What CI's gate steps list (.github/workflows/check.yml).
 SOURCE = ("*.py", "*.sh", "*.bash", "*.php", "*.js", "*.mjs", "*.cjs")
-
-
-def _name_process(name: bytes) -> None:
-    """Name the process (what top and btop show) instead of python3."""
-    try:
-        import ctypes
-        ctypes.CDLL(None).prctl(15, name, 0, 0, 0)
-    except (OSError, AttributeError):
-        # reason: no libc or no prctl: the process runs unnamed, which is never fatal
-        pass
 
 
 def tracked() -> list[str]:
@@ -88,5 +84,5 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    _name_process(b"gate-files")
+    name_process("gate-files")
     sys.exit(main(sys.argv[1:]))

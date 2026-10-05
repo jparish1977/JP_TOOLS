@@ -38,18 +38,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import jpexit
+from platformtools.procname import name_process
 
 DASH = chr(0x2014)  # built from its code point, so this file does not carry one
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
-
-
-def name_process() -> None:
-    try:
-        import ctypes
-        ctypes.CDLL(None).prctl(15, b"fix-dashes", 0, 0, 0)
-    except (OSError, AttributeError):
-        # reason: no libc or no prctl (named types): the process runs unnamed, which is never fatal
-        pass
 
 
 class GitFailedError(Exception):
@@ -145,7 +137,7 @@ def find_dashes() -> dict[str, list[int]]:
 
 
 def main() -> int:
-    name_process()
+    name_process("fix-dashes")
     if {"-h", "--help"} & set(sys.argv[1:]):
         print(__doc__)
         return jpexit.OK

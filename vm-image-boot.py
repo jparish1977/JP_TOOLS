@@ -24,7 +24,6 @@ a throwaway qcow2 overlay, so a botched boot cannot damage the original.
 """
 import argparse
 import contextlib
-import ctypes
 import json
 import os
 import shutil
@@ -35,7 +34,13 @@ import sys
 import tempfile
 import time
 import zlib
+from pathlib import Path
 from typing import IO
+
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from platformtools.procname import name_process
 
 OVMF_CANDIDATES = [
     "/usr/share/OVMF/OVMF_CODE_4M.fd",
@@ -47,17 +52,6 @@ VARS_CANDIDATES = [
     "/usr/share/OVMF/OVMF_VARS.fd",
     "/usr/share/edk2/ovmf/OVMF_VARS.fd",
 ]
-
-
-def set_proc_name(name: str) -> None:
-    """Name this process for btop and `pgrep -x`, per the fleet convention.
-
-    PR_SET_NAME is 15 and the kernel truncates to that. This one runs for
-    ninety seconds by default, so it is exactly the shape that otherwise shows
-    up as an anonymous `python3`. The qemu child names itself.
-    """
-    with contextlib.suppress(OSError, AttributeError):  # reason: named types, no libc or no prctl; unnamed is never fatal
-        ctypes.CDLL(None).prctl(15, name.encode()[:15], 0, 0, 0)
 
 
 def image_format(path: str) -> str:
@@ -219,7 +213,7 @@ def clean_workdir(workdir: str, keep: bool) -> None:
 
 
 def main() -> int:
-    set_proc_name("vm-image-boot")
+    name_process("vm-image-boot")
     args = build_parser().parse_args()
 
     if not os.path.exists(args.image):

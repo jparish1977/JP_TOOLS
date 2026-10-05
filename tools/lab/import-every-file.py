@@ -25,20 +25,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The repo root, so platformtools imports from here.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from platformtools.procname import name_process
+
 # Runs argv[2]'s module level with argv[1] and argv[1]/tests on sys.path.
 RUN = ("import runpy, sys\n"
        "sys.path[:0] = [sys.argv[1], sys.argv[1] + '/tests']\n"
        "runpy.run_path(sys.argv[2], run_name='not_main')\n")
-
-
-def _name_process(name: bytes) -> None:
-    """Name the process (what top and btop show) instead of python3."""
-    try:
-        import ctypes
-        ctypes.CDLL(None).prctl(15, name, 0, 0, 0)
-    except (OSError, AttributeError):
-        # reason: no libc or no prctl: the process runs unnamed, which is never fatal
-        pass
 
 
 def main(argv: list[str]) -> int:
@@ -58,5 +53,5 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    _name_process(b"import-every")
+    name_process("import-every")
     sys.exit(main(sys.argv[1:]))

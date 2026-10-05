@@ -60,6 +60,11 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# The repo root, so platformtools imports from here.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from platformtools.procname import name_process
+
 # A pointer: ~/..., $HOME/..., or /home/<user>/..., up to a character that
 # cannot be part of a path in prose or markdown.
 POINTER = re.compile(r"(?:~|\$HOME|/home/[A-Za-z0-9._-]+)/[^\s`'\"()\[\]<>{},;|]*")
@@ -76,16 +81,6 @@ class Tally:
     unreadable: int = 0
     templates: int = 0
     in_code: int = 0
-
-
-def _name_process(name: bytes) -> None:
-    """Name the process (what top and btop show) instead of python3."""
-    try:
-        import ctypes
-        ctypes.CDLL(None).prctl(15, name, 0, 0, 0)
-    except (OSError, AttributeError):
-        # reason: no libc or no prctl: the process runs unnamed, which is never fatal
-        pass
 
 
 def _canonical(pointer: str) -> str:
@@ -181,7 +176,7 @@ def _report(tally: Tally, show_all: bool) -> list[str]:
 
 
 def main() -> int:
-    _name_process(b"jp-doc-pointers")
+    name_process("jp-doc-pointers")
     ap = argparse.ArgumentParser(description="Check home-directory pointers in markdown.")
     ap.add_argument("paths", nargs="*")
     ap.add_argument("--remote", action="append", default=[], metavar="PREFIX=HOST",

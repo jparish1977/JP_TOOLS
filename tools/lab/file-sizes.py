@@ -33,6 +33,11 @@ import sys
 import tokenize
 from pathlib import Path
 
+# The repo root, so platformtools imports from here.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from platformtools.procname import name_process
+
 SUFFIXES = {".py", ".php", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
             ".sh", ".bash", ".c", ".h", ".cpp", ".hpp", ".cc", ".ino"}
 COMMENT_LEADS = ("#", "//", "/*", "*", "--")
@@ -41,16 +46,6 @@ _LAYOUT_TOKENS = (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
 _DOC_OWNERS = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
 Row = tuple[str, str, int, int, int, int]
-
-
-def _name_process(name: bytes) -> None:
-    """Name the process (what top and btop show) instead of python3."""
-    try:
-        import ctypes
-        ctypes.CDLL(None).prctl(15, name, 0, 0, 0)
-    except (OSError, AttributeError):
-        # reason: no libc or no prctl: the process runs unnamed, which is never fatal
-        pass
 
 
 def _token_rows(src: str) -> tuple[set[int], set[int]]:
@@ -143,7 +138,7 @@ def _report(repos: int, outcomes: dict[str, int], rows: list[Row], threshold: in
 
 
 def main() -> int:
-    _name_process(b"jp-file-sizes")
+    name_process("jp-file-sizes")
     args = sys.argv[1:]
     threshold = int(args.pop(0)) if args and args[0].isdigit() else 1000
     repos, outcomes, rows = _collect(args)

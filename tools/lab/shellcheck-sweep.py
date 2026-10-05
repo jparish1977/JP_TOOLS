@@ -30,16 +30,12 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
+# The repo root, so platformtools imports from here.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-def name_process() -> None:
-    """Name the process (what top and btop show) instead of python3."""
-    try:
-        import ctypes
-        ctypes.CDLL(None).prctl(15, b"shellcheck-swp", 0, 0, 0)
-    except (OSError, AttributeError):
-        # reason: no libc or no prctl: the process runs unnamed, which is never fatal
-        pass
+from platformtools.procname import name_process
 
 
 def _names_shell(first_line: bytes) -> bool:
@@ -107,7 +103,7 @@ def _tally(results: Results) -> tuple[collections.Counter[str], collections.Coun
 
 
 def main() -> int:
-    name_process()
+    name_process("shellcheck-swp")
     if not shutil.which("shellcheck"):
         print("shellcheck not found; nothing measured", file=sys.stderr)
         return 2

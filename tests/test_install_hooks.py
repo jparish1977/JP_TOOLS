@@ -328,7 +328,8 @@ def fake_jp_tools(at: Path, with_template: bool = True, git_repo: bool = True) -
     git_repo=False, a plain copy with no .git at all."""
     at.mkdir(parents=True)
     shutil.copy2(ROOT / "check.py", at / "check.py")
-    for package in ("jpcheck", "jpexit"):
+    # platformtools: fix-dashes.py names its process through it.
+    for package in ("jpcheck", "jpexit", "platformtools"):
         shutil.copytree(ROOT / package, at / package,
                         ignore=shutil.ignore_patterns("__pycache__"))
     # The template runs it before check.py and fails closed without it, so a

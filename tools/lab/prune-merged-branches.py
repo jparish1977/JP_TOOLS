@@ -43,11 +43,15 @@ NOT TESTED AGAINST:
 """
 
 import argparse
-import contextlib
-import ctypes
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
+
+# The repo root, so platformtools imports from here.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from platformtools.procname import name_process
 
 
 @dataclass
@@ -56,12 +60,6 @@ class Classes:
     merged: list[str] = field(default_factory=list)
     kept: list[tuple[str, list[str]]] = field(default_factory=list)
     forced: list[tuple[str, list[str]]] = field(default_factory=list)
-
-
-def set_proc_name(name: str) -> None:
-    """Name this process (what top, btop and `pgrep -x` see). PR_SET_NAME is 15."""
-    with contextlib.suppress(OSError, AttributeError):  # reason: best effort; without a glibc prctl the process keeps its name
-        ctypes.CDLL(None).prctl(15, name.encode()[:15], 0, 0, 0)
 
 
 def git(*args: str) -> str:
@@ -185,7 +183,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    set_proc_name("prune-branches")
+    name_process("prune-branches")
     args = _parser().parse_args()
     validate_base(args.remote, args.base)
     named = set(args.also)

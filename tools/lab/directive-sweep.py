@@ -34,17 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from jpcheck.directives import directives
 from jpcheck.files import _detect_lang
-
-
-def _name_process(name: bytes) -> None:
-    """Name the process (what top and btop show) instead of python3."""
-    try:
-        import ctypes
-        ctypes.CDLL(None).prctl(15, name, 0, 0, 0)
-    except (OSError, AttributeError):
-        # reason: no libc or no prctl: the process runs unnamed, which is never fatal
-        pass
-
+from platformtools.procname import name_process
 
 def tracked(repo: Path) -> list[str]:
     """Tracked files, NUL-separated so a name with a space stays whole."""
@@ -90,5 +80,5 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    _name_process(b"directive-sweep")
+    name_process("directive-sweep")
     sys.exit(main(sys.argv[1:]))

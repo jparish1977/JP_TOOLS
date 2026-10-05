@@ -24,22 +24,18 @@ Default keys: "--- ", "tool", "status", "errors", "warnings", "check.py: ".
 """
 
 import sys
+from pathlib import Path
+
+# The repo root, so platformtools imports from here.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from platformtools.procname import name_process
 
 DEFAULT_KEYS = ["--- ", '"tool"', '"status"', '"errors"', '"warnings"', "check.py: "]
 
 
-def _name_process(name: bytes) -> None:
-    """btop shows this instead of python3 (CLAUDE.md, every script names itself)."""
-    try:
-        import ctypes
-        ctypes.CDLL(None).prctl(15, name, 0, 0, 0)
-    except (OSError, AttributeError):
-        # reason: no libc or no prctl (named types): the process runs unnamed, which is never fatal
-        pass
-
-
 def main() -> int:
-    _name_process(b"jp-ci-fields")
+    name_process("jp-ci-fields")
     keys = sys.argv[1:] or DEFAULT_KEYS
     count = 0
     for raw in sys.stdin:

@@ -46,6 +46,7 @@ sys.path.insert(0, str(JP))
 
 from jpcheck.common import tool_roots
 from jpcheck.files import _detect_lang
+from platformtools.procname import name_process
 
 
 def _tool(rel: str) -> str:
@@ -58,16 +59,6 @@ def _tool(rel: str) -> str:
 # The candidate limits: (label, limit) pairs, each measured.
 LIMITS = {"complexity": (10, 15), "branches": (12,), "statements": (50,),
           "depth": (4,), "function-lines": (100,)}
-
-
-def _name_process(name: bytes) -> None:
-    """Name the process (what top and btop show) instead of python3."""
-    try:
-        import ctypes
-        ctypes.CDLL(None).prctl(15, name, 0, 0, 0)
-    except (OSError, AttributeError):
-        # reason: no libc or no prctl: the process runs unnamed, which is never fatal
-        pass
 
 
 def tracked(repo: Path) -> dict[str, list[str]]:
@@ -198,5 +189,5 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    _name_process(b"cx-sweep")
+    name_process("cx-sweep")
     sys.exit(main(sys.argv[1:]))

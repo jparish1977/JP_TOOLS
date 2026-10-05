@@ -30,14 +30,18 @@ Needs `autoit-ripper` 1.2.0 for the decoder (pip install autoit-ripper==1.2.0).
 It uses that package's internal modules, so pyproject.toml pins the release.
 """
 import argparse
-import contextlib
-import ctypes
 import datetime
 import os
 import re
 import struct
 import sys
+from pathlib import Path
 from typing import Any
+
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from platformtools.procname import name_process
 
 MARKER = bytes.fromhex("a3484bbe986c4aa9994c530a86d6487d")
 HEADER = 0x18                      # 16-byte marker + 8-byte "AU3!EAxx"
@@ -56,16 +60,6 @@ INDICATORS = [
     ("obfuscation", (r"\b(Execute|Call)\s*\(\s*(Binary|Chr|StringReverse|"
                      r"_?B?ase64)")),
 ]
-
-
-def set_proc_name(name: str) -> None:
-    """Name this process for btop and `pgrep -x`, per the fleet convention.
-
-    PR_SET_NAME is 15 and the kernel truncates to that. Named for what it IS,
-    never for the sample it is reading.
-    """
-    with contextlib.suppress(OSError, AttributeError):  # reason: named types, no libc or no prctl; unnamed is never fatal
-        ctypes.CDLL(None).prctl(15, name.encode()[:15], 0, 0, 0)
 
 
 def pe_facts(data: bytes) -> tuple[dict[str, Any], int] | None:
@@ -157,7 +151,7 @@ def scan(text: str) -> list[tuple[str, int, str]]:
 
 
 def main() -> int:
-    set_proc_name("autoit-extract")
+    name_process("autoit-extract")
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("file")
     ap.add_argument("-o", "--outdir", default=".", help="where to write scripts")

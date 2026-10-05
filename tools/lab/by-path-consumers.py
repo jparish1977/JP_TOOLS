@@ -32,19 +32,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The repo root, so platformtools imports from here.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from platformtools.procname import name_process
+
 LOADERS = ("spec_from_file_location", "run_path", "SourceFileLoader", "load_script",
            "import_module")
 ATTR = re.compile(r"\b(?:check|chk|mod|module|ck|_check)\.([a-z_][a-z0-9_]*)\b")
-
-
-def _name_process(name: bytes) -> None:
-    """Name the process (what top and btop show) instead of python3."""
-    try:
-        import ctypes
-        ctypes.CDLL(None).prctl(15, name, 0, 0, 0)
-    except (OSError, AttributeError):
-        # reason: no libc or no prctl: the process runs unnamed, which is never fatal
-        pass
 
 
 def tracked(repo: Path) -> list[str]:
@@ -97,5 +92,5 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    _name_process(b"by-path-users")
+    name_process("by-path-users")
     sys.exit(main(sys.argv[1:]))

@@ -35,18 +35,10 @@ from typing import NoReturn
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import jpexit
+from platformtools.procname import name_process
 
 DEFAULT_THRESHOLD = 95.0  # METHODOLOGY 2.5
 MAX_PERCENT = 100.0
-
-
-def name_process() -> None:
-    try:
-        import ctypes
-        ctypes.CDLL(None).prctl(15, b"coverage-gate", 0, 0, 0)
-    except (OSError, AttributeError):
-        # reason: no libc or no prctl (named types): the process runs unnamed, which is never fatal
-        pass
 
 
 class UnreadableError(Exception):
@@ -94,7 +86,7 @@ class _Parser(argparse.ArgumentParser):
 
 
 def main(argv: list[str] | None = None) -> int:
-    name_process()
+    name_process("coverage-gate")
     parser = _Parser(description="Fail under a line-coverage threshold, read from a Clover report.")
     parser.add_argument("report", help="the Clover report, e.g. from phpunit --coverage-clover")
     parser.add_argument("--fail-under", type=_threshold, default=DEFAULT_THRESHOLD, metavar="PERCENT",

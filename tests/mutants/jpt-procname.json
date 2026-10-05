@@ -1,0 +1,20 @@
+{
+  "about": "name_process names the process on Linux and never raises anywhere. (Dropping the cut to COMM_MAX is equivalent: the kernel cuts to 15 itself.) Run: mutate-on-target.py TREE platformtools/procname.py tests/test_procname.py tests/mutants/jpt-procname.json",
+  "mutants": [
+    {
+      "name": "libc is called off Linux",
+      "edits": [["    if not sys.platform.startswith(\"linux\"):\n        return\n", ""]],
+      "target": "win32: never raises, never calls CDLL"
+    },
+    {
+      "name": "TypeError escapes, as on Windows before",
+      "edits": [["    with contextlib.suppress(OSError, AttributeError, TypeError, ValueError):", "    with contextlib.suppress(OSError, AttributeError, ValueError):"]],
+      "target": "linux, CDLL raising TypeError: never raises"
+    },
+    {
+      "name": "the process is never named",
+      "edits": [["        ctypes.CDLL(None).prctl(PR_SET_NAME, name.encode()[:COMM_MAX], 0, 0, 0)", "        ctypes.CDLL(None)"]],
+      "target": "the kernel's name, cut to 15 characters"
+    }
+  ]
+}

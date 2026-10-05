@@ -51,8 +51,6 @@ restore did not read back byte for byte.
 
 from __future__ import annotations
 
-import contextlib
-import ctypes
 import fcntl
 import hashlib
 import importlib.util
@@ -64,7 +62,13 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, NoReturn
+
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from platformtools.procname import name_process
 
 
 @dataclass(frozen=True)
@@ -79,11 +83,6 @@ class Run:
     saved: str
     test_cmd: list[str]
     timeout: int
-
-
-def name_process() -> None:
-    with contextlib.suppress(OSError, AttributeError):  # reason: no libc or no prctl; unnamed is never fatal
-        ctypes.CDLL(None).prctl(15, b"mut-on-target", 0, 0, 0)
 
 
 def refuse(msg: str) -> NoReturn:
@@ -204,7 +203,7 @@ def mutate_all(r: Run, original: bytes, mutants: list[dict[str, Any]]) -> int:
 def main(argv: list[str]) -> int:
     if len(argv) != 4:
         sys.exit(__doc__)
-    name_process()
+    name_process("mut-on-target")
     r = make_run(*argv[:3])
     lock_tree(r.tree)
     if os.path.exists(r.saved):

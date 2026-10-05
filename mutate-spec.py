@@ -20,8 +20,6 @@ afterwards. ROOT itself is never mutated. --jobs 1 is serial.
 from __future__ import annotations
 
 import concurrent.futures
-import contextlib
-import ctypes
 import json
 import os
 import re
@@ -31,13 +29,13 @@ import sys
 import tempfile
 from pathlib import Path
 
+# The packages beside this file import when another program loads it by path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from platformtools.procname import name_process
+
 RUNNER = Path(__file__).resolve().parent / "mutate-on-target.py"
 RUN_LINE = re.compile(r"mutate-on-target\.py\s+\S+\s+(\S+)\s+(\S+)")
-
-
-def name_process() -> None:
-    with contextlib.suppress(OSError, AttributeError):  # reason: no libc or no prctl; unnamed is never fatal
-        ctypes.CDLL(None).prctl(15, b"mutate-spec", 0, 0, 0)
 
 
 def run_spec(root: str, spec: str, outdir: str) -> tuple[str, int, str]:
@@ -70,7 +68,7 @@ def main(argv: list[str]) -> int:
         jobs, argv = max(1, int(argv[1])), argv[2:]
     if len(argv) < 2:
         sys.exit(__doc__)
-    name_process()
+    name_process("mutate-spec")
     root, specs = os.path.abspath(argv[0]), argv[1:]
     outdir = os.environ.get("MUTATE_OUT_DIR", ".")
     bad = 0
