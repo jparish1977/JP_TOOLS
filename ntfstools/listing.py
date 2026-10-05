@@ -75,8 +75,10 @@ def listdir(device: str, path: str, timeout: int, missed: Missed | None = None) 
     """One directory of DEVICE.
 
     A listing that ntfsls failed (a damaged index, no privilege) or that timed
-    out is empty, said on stderr and added to MISSED: an empty directory and
-    one that could not be read must not look alike.
+    out is said on stderr and added to MISSED: an empty directory and one
+    that could not be read must not look alike. What a failed listing did
+    print is still returned: ntfsls on a damaged index can list some entries
+    and then fail, and a recovery keeps every entry it can see.
     """
     try:
         result = subprocess.run(as_root(["ntfsls", "-l", "-F", "-p", path, device], device),
@@ -87,7 +89,6 @@ def listdir(device: str, path: str, timeout: int, missed: Missed | None = None) 
     if result.returncode != 0:
         said = result.stderr.strip().splitlines()
         _miss(missed, path, f"ntfsls exited {result.returncode}: {said[-1] if said else 'no message'}")
-        return []
     return parse_listing(result.stdout)
 
 

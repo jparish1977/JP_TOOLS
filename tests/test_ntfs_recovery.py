@@ -39,7 +39,9 @@ SIZE = load_script("ntfs-size.py")
 INVENTORY = load_script("ntfs-inventory.py")
 
 # FAKE_TREE is {"/dir": [[size, name, is_dir], ...]}; FAKE_DATA is {"/path": content};
-# FAKE_FAIL is {"/dir": "error" | "hang"}, a listing that exits 1 or outlasts its timeout.
+# FAKE_FAIL is {"/dir": "error" | "partial" | "hang"}: a listing that exits 1
+# printing nothing, one that prints its entries and then exits 1 (a damaged
+# index read part-way), or one that outlasts its timeout.
 FAKE_NTFSLS = """\
 import time
 path = sys.argv[sys.argv.index("-p") + 1]
@@ -51,6 +53,9 @@ if fail == "hang":
     time.sleep(5)
 for size, name, is_dir in json.loads(os.environ["FAKE_TREE"]).get(path.rstrip("/") or "/", []):
     print(f"{size:>10} Jan  1 00:00 2020 {name}{'/' if is_dir else ''}")
+if fail == "partial":
+    print("ntfsls: Failed to read index", file=sys.stderr)
+    sys.exit(1)
 """
 FAKE_NTFSCAT = """\
 data = json.loads(os.environ["FAKE_DATA"])
@@ -116,6 +121,11 @@ def test_walk_records_what_it_could_not_read() -> None:
         with contextlib.redirect_stderr(io.StringIO()):
             list(walk(img, "/", 1, 30, missed=missed))
         check("depth limit: recorded", [p for p, _ in missed], ["/docs/deep"])
+        missed = []
+        with env(FAKE_FAIL=json.dumps({"/docs": "partial"})), contextlib.redirect_stderr(io.StringIO()):
+            files = [p for p, _ in walk(img, "/", 6, 30, missed=missed)]
+        check("partial: recorded", [p for p, _ in missed], ["/docs"])
+        check_true("partial: what it did list is kept", "/docs/a.txt" in files and "/docs/deep/b.txt" in files)
 
 
 def test_extract_counts_an_unread_directory_as_failed() -> None:

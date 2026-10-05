@@ -25,6 +25,11 @@
       "name": "a miss is not said on stderr",
       "edits": [["    print(f\"  ! not read: {path} ({why})\", file=sys.stderr)\n", ""]],
       "target": "error: said on stderr"
+    },
+    {
+      "name": "a partial listing drops what it listed",
+      "edits": [["        _miss(missed, path, f\"ntfsls exited {result.returncode}: {said[-1] if said else 'no message'}\")\n", "        _miss(missed, path, f\"ntfsls exited {result.returncode}: {said[-1] if said else 'no message'}\")\n        return []\n"]],
+      "target": "partial: what it did list is kept"
     }
   ]
 }
