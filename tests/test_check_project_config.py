@@ -186,6 +186,39 @@ def ruff_end_to_end(base: Path) -> None:
           {"N802", "C416"} <= beside, str(sorted(beside)))
 
 
+def ruff_status(target: Path, env: dict[str, str]) -> str:
+    """check.py's ruff status for TARGET, run from its directory with ENV."""
+    r = subprocess.run([sys.executable, str(CHECK_PY), str(target), "--tools", "ruff"],
+                       capture_output=True, text=True, check=False, cwd=target.parent, env=env)
+    try:
+        doc = json.loads(r.stdout)
+    except ValueError:
+        # reason: not a check.py report: no status, which fails the checks that expect one
+        return ""
+    return next((str(c.get("status")) for c in doc.get("checks", []) if c.get("tool") == "ruff"), "")
+
+
+def ruff_extend_end_to_end(base: Path) -> None:
+    """A project ruff.toml that extends JP_TOOLS through JP_TOOLS_ROOT, with no
+    JP_TOOLS beside it: the layout of a git worktree of the project."""
+    if not shutil.which("ruff"):
+        print("  SKIP: ruff is not installed")
+        return
+    t = tree(base, {"m.py": CONFIG_ONLY_FINDINGS,
+                    "ruff.toml": 'extend = "${JP_TOOLS_ROOT:-../JP_TOOLS}/configs/ruff.toml"\n'})
+    found = rules(t, "ruff", t.parent)
+    check("extending through JP_TOOLS_ROOT loads the JP_TOOLS rules with no JP_TOOLS beside",
+          {"N802", "C416"} <= found, str(sorted(found)))
+    wrong = {**os.environ, "HOME": str(t.parent), "JP_TOOLS_ROOT": str(base / "no-such-jp-tools")}
+    check("check.py sets JP_TOOLS_ROOT to its own checkout over the caller's",
+          ruff_status(t, wrong) == "fail", ruff_status(t, wrong))
+    t = tree(base, {"m.py": CONFIG_ONLY_FINDINGS,
+                    "ruff.toml": 'extend = "../JP_TOOLS/configs/ruff.toml"\n'})
+    status = ruff_status(t, {**os.environ, "HOME": str(t.parent)})
+    check("control: the plain relative extend cannot load there, and says so",
+          status == "error", status)
+
+
 def mypy_end_to_end(base: Path) -> None:
     if not shutil.which("mypy"):
         print("  SKIP: mypy is not installed")
@@ -211,6 +244,7 @@ def main() -> int:
         mypy_cases(base)
         print("\nEnd to end:")
         ruff_end_to_end(base)
+        ruff_extend_end_to_end(base)
         mypy_end_to_end(base)
 
     print(f"\n{checks - fails}/{checks} passed")

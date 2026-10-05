@@ -25,7 +25,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from jpcheck.common import _node_bin, _php_bin, _php_cmd
-from jpcheck.python_tools import _ruff_config_args
+from jpcheck.python_tools import _ruff_config_args, ruff_env
 
 TOOLS_ROOT = Path(__file__).resolve().parent
 
@@ -48,7 +48,7 @@ def _ruff_findings(target: str) -> list[dict[str, Any]] | None:
     """ruff's findings on TARGET now, or None when its output is not JSON."""
     out = subprocess.run(
         ["ruff", "check", *_ruff_config_args(target), "--output-format", "json", target],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, env=ruff_env(),
     ).stdout
     try:
         findings: list[dict[str, Any]] = json.loads(out) if out.strip() else []
@@ -75,7 +75,7 @@ def fix_ruff(target: str, dry_run: bool, unsafe: bool = False, **_: object) -> R
         args.append("--unsafe-fixes")
     if dry_run:
         args.append("--diff")
-    subprocess.run([*args, target], capture_output=True, text=True, check=False)
+    subprocess.run([*args, target], capture_output=True, text=True, check=False, env=ruff_env())
     after = _ruff_findings(target)
     fixed = None if before is None or after is None else max(0, len(before) - len(after))
     return {

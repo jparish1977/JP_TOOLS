@@ -1,6 +1,11 @@
 # JP_TOOLS shared ruff configuration
-# Applied when running: ruff check --config /path/to/this/ruff.toml <target>
-# Or copy/symlink into a project as ruff.toml
+# check.py applies it to a project with no ruff config of its own. A project
+# that has one extends this file rather than copying it:
+#
+#     extend = "${JP_TOOLS_ROOT:-../JP_TOOLS}/configs/ruff.toml"
+#
+# check.py and fix.py set JP_TOOLS_ROOT to the JP_TOOLS running them, so this
+# resolves from a git worktree too; unset, it is JP_TOOLS checked out beside.
 
 line-length = 100
 # Matches the CI runner (3.12).

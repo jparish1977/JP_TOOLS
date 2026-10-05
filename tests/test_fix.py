@@ -8,6 +8,7 @@ measured, on a real ruff when installed.
 """
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -49,6 +50,27 @@ def ruff_test_fixed_is_measured() -> None:
         result = json.loads(out)["results"][0]
         check("one fixed", result["fixed"], 1)
         check_true("the unused import is gone", "import os" not in f.read_text())
+
+
+def ruff_test_extend_through_jp_tools_root() -> None:
+    """A project ruff.toml extending JP_TOOLS through JP_TOOLS_ROOT, with no
+    JP_TOOLS beside it (a git worktree's layout), still loads under fix.py,
+    which sets the variable to its own checkout over whatever the caller has."""
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "ruff.toml").write_text(
+            'extend = "${JP_TOOLS_ROOT:-../JP_TOOLS}/configs/ruff.toml"\n')
+        f = Path(tmp) / "m.py"
+        f.write_text("import os\nimport sys\n\nprint(sys.argv)\n")
+        saved = os.environ.get("JP_TOOLS_ROOT")
+        os.environ["JP_TOOLS_ROOT"] = str(Path(tmp) / "no-such-jp-tools")
+        try:
+            _, out = run_main(FIX.main, str(f))
+        finally:
+            if saved is None:
+                del os.environ["JP_TOOLS_ROOT"]
+            else:
+                os.environ["JP_TOOLS_ROOT"] = saved
+        check("one fixed through the extended config", json.loads(out)["results"][0]["fixed"], 1)
 
 
 if __name__ == "__main__":

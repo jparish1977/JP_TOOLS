@@ -1,6 +1,7 @@
 """Runners for the Python tools: ruff, mypy, pip-audit."""
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -35,6 +36,22 @@ def _ruff_config_args(target: str) -> list[str]:
     return ["--config", str(shared)] if shared.exists() else []
 
 
+# What a project's ruff.toml extends JP_TOOLS' config through:
+#
+#     extend = "${JP_TOOLS_ROOT:-../JP_TOOLS}/configs/ruff.toml"
+#
+# ruff expands variables in `extend`. Every ruff run here sets this one to the
+# JP_TOOLS doing the checking, so the path resolves from a git worktree of the
+# project, where nothing sits at ../JP_TOOLS. With it unset, as in a plain
+# `ruff` run, the default keeps the checkout-beside layout working.
+JP_TOOLS_ROOT_VAR = "JP_TOOLS_ROOT"
+
+
+def ruff_env() -> dict[str, str]:
+    """The environment ruff runs in: this one, with JP_TOOLS_ROOT naming this checkout."""
+    return {**os.environ, JP_TOOLS_ROOT_VAR: str(TOOLS_ROOT.resolve())}
+
+
 # What a missing Python runner tells the reader to run: the pins live there.
 PIP_INSTALL = "pip install -r requirements-dev.txt"
 
@@ -45,7 +62,7 @@ def run_ruff(target: str) -> dict[str, Any]:
     result = subprocess.run(
         ["ruff", "check", *_ruff_config_args(target),
          "--output-format", "json", target],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, env=ruff_env(),
     )
     try:
         raw = json.loads(result.stdout) if result.stdout.strip() else []
