@@ -55,6 +55,34 @@ reported and not gated: a threshold over code with no suite would be red for
 reasons unrelated to any diff, and a gate that is red for unrelated reasons
 gets ignored and then removed.
 
+## PHP
+
+PHPUnit measures coverage but has no "fail under N%" of its own, so a PHP
+project writes a Clover report and `coverage-gate.py` gates it:
+
+```
+vendor/bin/phpunit --coverage-clover clover.xml
+python3 JP_TOOLS/coverage-gate.py clover.xml --fail-under 95
+```
+
+It reads the PROJECT's line coverage (Clover's project-level
+`coveredstatements` over `statements`) and exits with `jpexit`'s codes: 0 at
+or over the threshold, 1 under it, 2 when nothing was measured (no report, not
+Clover, or zero statements). An unreadable or empty report is never a pass.
+
+**A coverage driver is needed**, or PHPUnit writes no figures: `pcov`
+(preferred, it only measures) or `xdebug` with `XDEBUG_MODE=coverage` for the
+run, since xdebug is off by default where it is installed.
+
+**Why not an established Composer tool** (METHODOLOGY 2.15). Measured
+2026-10-05 against reports with a known answer: `rregeer/phpunit-coverage-check`
+(the most used, about 7M downloads, last released 2019) and its maintained
+fork `esi/phpunit-coverage-check` both pass 96% and fail 90% correctly, but
+both exit 1 for a missing report and for one with zero statements, the same
+code as "under the threshold". A gate that cannot tell "could not look" from
+"looked and found too little" fails the rule this repo's gates are built on,
+so the check is our own, and small.
+
 ## Where it stands
 
 `spool-audit.py` with `spoolaudit/`: **97%** with branch coverage (569

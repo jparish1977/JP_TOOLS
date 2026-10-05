@@ -54,6 +54,7 @@ Without access to them, `composer install` stops on the two packages.
 |---|---|
 | `check.py` | Run quality checks, output JSON report |
 | `fix.py` | Auto-fix what's fixable, report what isn't |
+| `coverage-gate.py` | Fail under a line-coverage threshold, read from a Clover report (PHP; see `docs/coverage.md`) |
 | `install-hooks.py` | Install pre-commit hook into any git repo |
 | `init-ci.py` | Copy GitHub Actions CI template into a repo |
 
