@@ -10,6 +10,9 @@ fixer that is not installed reports "unavailable" rather than being skipped.
 ruff's result counts what it fixed from its findings before and after; a
 count that could not be taken is null, never 0, and a ruff that could not run
 at all reports "error" with its reason, as check.py does.
+
+Exit codes: 0 every fixer ran (or none applies to the target), 2 a fixer did
+not run, named on stderr: a fixer that did not run is not a pass.
 """
 
 import argparse
@@ -213,6 +216,25 @@ def _detect_lang(target: str) -> str:
     return best if counts[best] > 0 else "unknown"
 
 
+_RAN = ("fixed", "dry-run")
+
+
+def _exit_code(results: list[Result]) -> int:
+    """0 when every fixer ran, 2 when one did not (not installed, or stopped
+    short of a verdict), each named on stderr, as check.py names a check that
+    did not run. What a fixer leaves unfixed does not change it: findings are
+    check.py's to count."""
+    not_run = [r for r in results if r.get("status") not in _RAN]
+    for r in not_run:
+        note = r.get("note", "")
+        print(f"fix.py: did not run {r.get('tool', '?')} "
+              f"({r.get('status', '?')}){': ' + note if note else ''}", file=sys.stderr)
+    if not_run:
+        print("fix.py: exit 2 -- a fixer that did not run is not a pass.", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Auto-fix code quality issues.")
     parser.add_argument("target", help="File or directory to fix")
@@ -230,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     results = [fn(target, args.dry_run, unsafe=args.unsafe) for _, fn in FIXERS.get(lang, [])]
     print(json.dumps({"target": target, "language": lang, "results": results},
                      indent=2 if args.pretty else None))
-    return 0
+    return _exit_code(results)
 
 
 if __name__ == "__main__":

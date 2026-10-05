@@ -1,0 +1,30 @@
+{
+  "about": "fix.py exits 2 when a fixer did not run, and names it. Run: mutate-on-target.py TREE fix.py tests/test_fix.py tests/mutants/jpt-fix-exit-on-fix.json",
+  "mutants": [
+    {
+      "name": "a fixer that did not run exits 0",
+      "edits": [["        print(\"fix.py: exit 2 -- a fixer that did not run is not a pass.\", file=sys.stderr)\n        return 2", "        print(\"fix.py: exit 2 -- a fixer that did not run is not a pass.\", file=sys.stderr)\n        return 0"]],
+      "target": "not installed: exit"
+    },
+    {
+      "name": "a fixer not installed counts as ran",
+      "edits": [["_RAN = (\"fixed\", \"dry-run\")", "_RAN = (\"fixed\", \"dry-run\", \"unavailable\")"]],
+      "target": "not installed: exit"
+    },
+    {
+      "name": "a fixer that errored counts as ran",
+      "edits": [["_RAN = (\"fixed\", \"dry-run\")", "_RAN = (\"fixed\", \"dry-run\", \"error\")"]],
+      "target": "fix: exit"
+    },
+    {
+      "name": "a dry run counts as not run",
+      "edits": [["_RAN = (\"fixed\", \"dry-run\")", "_RAN = (\"fixed\",)"]],
+      "target": "a dry run that ran exits 0"
+    },
+    {
+      "name": "the fixer that did not run is not named",
+      "edits": [["        print(f\"fix.py: did not run {r.get('tool', '?')} \"\n              f\"({r.get('status', '?')}){': ' + note if note else ''}\", file=sys.stderr)\n", ""]],
+      "target": "not installed: stderr names ruff"
+    }
+  ]
+}

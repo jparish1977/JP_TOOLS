@@ -316,6 +316,12 @@ did not run is not a pass. The same holds for a tool that exits
 abnormally, such as ruff on a config that fails to load (`"status": "error"`).
 `tests/test_check_exit_codes.py` pins this behaviour.
 
+`fix.py` follows the same rule for its fixers: `0` = every fixer ran (or none
+applies to the target), `2` = a fixer was not installed or stopped short
+(`"unavailable"` or `"error"`), named on stderr. What a fixer leaves unfixed
+does not change its exit code; run `check.py` for that. `tests/test_fix.py`
+pins it.
+
 ## Configs
 
 Shared configuration files in `configs/`:
