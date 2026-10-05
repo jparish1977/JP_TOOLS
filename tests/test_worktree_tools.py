@@ -52,14 +52,15 @@ def _main_checkout(base: Path) -> Path:
     """A repository holding jpcheck and the node hook, with untracked installed tools."""
     main = base / "main"
     main.mkdir()
-    shutil.copytree(ROOT / "jpcheck", main / "jpcheck",
-                    ignore=shutil.ignore_patterns("__pycache__"))
+    for package in ("jpcheck", "jpexit"):
+        shutil.copytree(ROOT / package, main / package,
+                        ignore=shutil.ignore_patterns("__pycache__"))
     for name in ("jp_node_resolve.mjs", "jp_node_hooks.mjs"):
         shutil.copy(ROOT / name, main / name)
     (main / "probe.mjs").write_text('import { answer } from "jp-probe-pkg";\nconsole.log(answer);\n',
                                     encoding="utf-8")
     git(main, "init", "-q")
-    git(main, "add", "jpcheck", "jp_node_resolve.mjs", "jp_node_hooks.mjs", "probe.mjs")
+    git(main, "add", "jpcheck", "jpexit", "jp_node_resolve.mjs", "jp_node_hooks.mjs", "probe.mjs")
     git(main, "commit", "-qm", "t")
     for rel in ("vendor/bin/jp-fake-php", "node_modules/.bin/jp-fake-node"):
         (main / rel).parent.mkdir(parents=True)

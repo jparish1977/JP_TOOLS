@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import jpexit
 from jpcheck.common import _VERDICTS, _rel, _repo_root
 from jpcheck.files import _collect_files, _detect_lang, _drop_ignored, ignored_by, load_ignores
 from jpcheck.registry import AUDIT_TOOLS, DEFAULT_TOOLS, _run_tools, _summarize
@@ -228,11 +229,11 @@ def record_baseline(target: str, dest: str, audit: bool = False,
     existed = Path(dest).exists()
     dropped, existing, unreadable = _dropped_entries(dest, files)
     if not force and _refuse_write(dest, files, dropped, existing, unreadable):
-        return 2
+        return jpexit.NOT_RUN
     Path(dest).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n",
                           encoding="utf-8")
     _report_recorded(dest, files, tools, status, existed, existing, dropped)
-    return 0
+    return jpexit.OK
 
 
 def _read_baseline(source: str, mode: str) -> dict[str, Any] | None:
@@ -328,10 +329,10 @@ def _report_comparison(source: str, skipped: list[tuple[str, str]], deltas: list
 
 def compare_baseline(checks: list[dict[str, Any]], target: str,
                      source: str, mode: str) -> int:
-    """0 = no worse, 1 = worse, 2 = cannot compare."""
+    """jpexit.OK no worse, FINDINGS worse, NOT_RUN cannot compare."""
     doc = _read_baseline(source, mode)
     if doc is None:
-        return 2
+        return jpexit.NOT_RUN
     root = _repo_root(target)
     now = _counts_by_file(checks, root)
     was = doc.get("files", {})
@@ -339,4 +340,4 @@ def compare_baseline(checks: list[dict[str, Any]], target: str,
     compared, unmeasured = _compared_paths(target, root, now, was)
     worse, deltas = _deltas(compared, now, was, {t for t, _ in skipped})
     _report_comparison(source, skipped, deltas, unmeasured, worse)
-    return 1 if worse else 0
+    return jpexit.FINDINGS if worse else jpexit.OK

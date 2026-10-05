@@ -7,10 +7,10 @@ Outputs structured JSON suitable for AI agent consumption.
 Usage:
     python check.py <path> [--lang python|js|auto] [--tools ruff,mypy] [--pretty]
 
-Exit codes:
-    0  - every check ran, and none found an error (warnings OK)
-    1  - one or more errors found
-    2  - usage or path error, OR a check that could not run: a tool that is
+Exit codes (named in jpexit):
+    0  OK        - every check ran, and none found an error (warnings OK)
+    1  FINDINGS  - one or more errors found
+    2  NOT_RUN   - usage or path error, OR a check that could not run: a tool that is
          unavailable, a tool that exited abnormally, or no runner for a
          requested tool. Each one is named on stderr. A check that did not
          run is not a pass.
@@ -28,6 +28,7 @@ from typing import Any, NoReturn
 # not only when it is run: a script's own directory is on sys.path only then.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import jpexit
 from jpcheck.baseline import compare_baseline, record_baseline
 from jpcheck.common import _repo_root
 from jpcheck.coverage import is_project_file
@@ -100,14 +101,14 @@ def _single(args: argparse.Namespace, target: str, root: Path,
     hit = None if is_dir else ignored_by(target, root, ignores)
     if hit:
         _stop({"target": target,
-               "skipped": f"ignored by {_IGNORE_FILE}: {hit[0]} ({hit[1]})"}, 0)
+               "skipped": f"ignored by {_IGNORE_FILE}: {hit[0]} ({hit[1]})"}, jpexit.OK)
     lang = args.lang if args.lang != "auto" else _detect_lang(target)
     try:
         names = tool_names(lang, args.tools, args.audit)
     except NoToolsError:
         if args.skip_unsupported:
-            _stop({"target": target, "skipped": "no language detected"}, 0)
-        _stop({"error": f"Cannot detect language for: {target}"}, 2)
+            _stop({"target": target, "skipped": "no language detected"}, jpexit.OK)
+        _stop({"error": f"Cannot detect language for: {target}"}, jpexit.NOT_RUN)
     # A single file IS the per-file measurement, so a per-file baseline is
     # comparable here.
     return check_target(target, lang, names, root, ignores), "per-file"
@@ -119,14 +120,14 @@ def main() -> None:
 
     target = str(Path(args.target).resolve())
     if not Path(target).exists():
-        _stop({"error": f"Path not found: {target}"}, 2)
+        _stop({"error": f"Path not found: {target}"}, jpexit.NOT_RUN)
 
     # Read before any measuring, so a bad entry refuses every mode alike.
     root = _repo_root(target)
     try:
         ignores = load_ignores(root)
     except _IgnoreError as e:
-        _stop({"error": str(e)}, 2)
+        _stop({"error": str(e)}, jpexit.NOT_RUN)
 
     # Recording MEASURES DIFFERENTLY: it runs every file on its own even when
     # handed a directory, which is exactly what `check.py .` does not do.
@@ -140,7 +141,7 @@ def main() -> None:
         try:
             output = check_directory(target, args.audit, root, ignores)
         except NoSourceError:
-            _stop({"error": f"No recognized source files in: {target}"}, 2)
+            _stop({"error": f"No recognized source files in: {target}"}, jpexit.NOT_RUN)
         # A directory run lets the dir-capable tools resolve across files, so
         # this is the WHOLE-REPO measurement. Declaring it as such is what
         # makes compare_baseline refuse rather than report scope as regression.

@@ -3,6 +3,7 @@
 import sys
 from typing import Any
 
+import jpexit
 from jpcheck.common import _RAN
 from jpcheck.coverage import run_no_cover
 from jpcheck.directives import run_directive_reason
@@ -15,14 +16,14 @@ from jpcheck.suppressions import run_noqa, run_suppress_reason
 
 
 def _exit_code(summary: dict[str, Any], checks: list[dict[str, Any]]) -> int:
-    """0 clean, 1 errors found, 2 a check could not run.
+    """jpexit.OK clean, FINDINGS errors found, NOT_RUN a check could not run.
 
-    Errors are counted from issues, so `1 if errors else 0` alone would let a
+    Errors are counted from issues, so `FINDINGS if errors else OK` alone would let a
     run whose tools were all unavailable exit 0 on a file with real errors. A
     check that did not run is not a pass, so it gets its own code, and it is
     named on stderr so a blocked commit says what to install.
 
-    Findings win over not-run: 1 is already a failure, and the not-run tools
+    Findings win over not-run: FINDINGS is already a failure, and the not-run tools
     are still named.
     """
     not_run = [c for c in checks if c.get("status") not in _RAN]
@@ -32,12 +33,12 @@ def _exit_code(summary: dict[str, Any], checks: list[dict[str, Any]]) -> int:
               f"({c.get('status', '?')}){': ' + note if note else ''}",
               file=sys.stderr)
     if summary["errors"] > 0:
-        return 1
+        return jpexit.FINDINGS
     if not_run:
-        print("check.py: exit 2 -- a check that did not run is not a pass.",
+        print(f"check.py: exit {jpexit.NOT_RUN} -- a check that did not run is not a pass.",
               file=sys.stderr)
-        return 2
-    return 0
+        return jpexit.NOT_RUN
+    return jpexit.OK
 
 
 TOOL_RUNNERS = {

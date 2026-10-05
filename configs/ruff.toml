@@ -43,7 +43,7 @@ ignore = [
 # JP_TOOLS' own packages, the test harness that puts them on sys.path, and
 # the test support module that imports them. _harness is forced to the top of
 # the section so it is always imported before what it makes importable.
-known-first-party = ["jpcheck", "spoolaudit", "chdtool", "chdmap", "recovery", "platformtools", "ntfstools", "inventory", "_harness", "spool_audit_support", "chd_support", "fake_tools"]
+known-first-party = ["jpcheck", "jpexit", "spoolaudit", "chdtool", "chdmap", "recovery", "platformtools", "ntfstools", "inventory", "_harness", "spool_audit_support", "chd_support", "fake_tools"]
 force-to-top = ["_harness"]
 
 [lint.per-file-ignores]

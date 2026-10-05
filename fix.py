@@ -28,6 +28,7 @@ from typing import Any
 # The packages beside this file import when another program loads it by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import jpexit
 from jpcheck.common import _node_bin, _php_bin, _php_cmd, _tool_result
 from jpcheck.python_tools import _ruff_config_args, ruff_env
 
@@ -220,19 +221,20 @@ _RAN = ("fixed", "dry-run")
 
 
 def _exit_code(results: list[Result]) -> int:
-    """0 when every fixer ran, 2 when one did not (not installed, or stopped
-    short of a verdict), each named on stderr, as check.py names a check that
-    did not run. What a fixer leaves unfixed does not change it: findings are
-    check.py's to count."""
+    """jpexit.OK, or jpexit.NOT_RUN when a fixer did not run (not installed,
+    or stopped short of a verdict), each named on stderr, as check.py names a
+    check that did not run. What a fixer leaves unfixed does not change it:
+    findings are check.py's to count."""
     not_run = [r for r in results if r.get("status") not in _RAN]
     for r in not_run:
         note = r.get("note", "")
         print(f"fix.py: did not run {r.get('tool', '?')} "
               f"({r.get('status', '?')}){': ' + note if note else ''}", file=sys.stderr)
     if not_run:
-        print("fix.py: exit 2 -- a fixer that did not run is not a pass.", file=sys.stderr)
-        return 2
-    return 0
+        print(f"fix.py: exit {jpexit.NOT_RUN} -- a fixer that did not run is not a pass.",
+              file=sys.stderr)
+        return jpexit.NOT_RUN
+    return jpexit.OK
 
 
 def main(argv: list[str] | None = None) -> int:

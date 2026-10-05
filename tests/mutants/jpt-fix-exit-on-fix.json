@@ -3,7 +3,7 @@
   "mutants": [
     {
       "name": "a fixer that did not run exits 0",
-      "edits": [["        print(\"fix.py: exit 2 -- a fixer that did not run is not a pass.\", file=sys.stderr)\n        return 2", "        print(\"fix.py: exit 2 -- a fixer that did not run is not a pass.\", file=sys.stderr)\n        return 0"]],
+      "edits": [["        return jpexit.NOT_RUN\n    return jpexit.OK", "        return jpexit.OK\n    return jpexit.OK"]],
       "target": "not installed: exit"
     },
     {

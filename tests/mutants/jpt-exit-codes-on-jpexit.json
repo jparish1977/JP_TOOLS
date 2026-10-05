@@ -1,0 +1,20 @@
+{
+  "about": "jpexit's values are pinned. Run: mutate-on-target.py TREE jpexit/__init__.py tests/test_exit_codes.py tests/mutants/jpt-exit-codes-on-jpexit.json",
+  "mutants": [
+    {
+      "name": "OK renumbered",
+      "edits": [["OK = 0\n", "OK = 3\n"]],
+      "target": "OK"
+    },
+    {
+      "name": "FINDINGS renumbered",
+      "edits": [["FINDINGS = 1\n", "FINDINGS = 2\n"]],
+      "target": "FINDINGS"
+    },
+    {
+      "name": "NOT_RUN folded into FINDINGS",
+      "edits": [["NOT_RUN = 2\n", "NOT_RUN = 1\n"]],
+      "target": "NOT_RUN"
+    }
+  ]
+}
