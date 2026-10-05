@@ -1,8 +1,18 @@
 # JP_TOOLS CI -- drop this into .github/workflows/check.yml
 # (Forgejo Actions reads the same syntax from .forgejo/workflows/.)
-# Runs check.py on every push and PR.
+# Runs check.py, and the project's own tests, on every push and PR.
 #
 # Install: python JP_TOOLS/init-ci.py  (copies this into your repo)
+#
+# --- Tests ---
+# The tests job runs whichever of these the repo has, and FAILS when the repo
+# has code and neither, since a test that did not run is not a pass:
+#   phpunit.xml or phpunit.xml.dist  PHPUnit with pcov, then JP_TOOLS'
+#       coverage-gate.py on its Clover report, at the repository variable
+#       COVERAGE_FAIL_UNDER (default 95, METHODOLOGY 2.5).
+#   tests/run  an executable the project provides, for anything else. It owns
+#       its dependencies and its own coverage threshold (for Python,
+#       `coverage report --fail-under=N`), and its exit code is the verdict.
 #
 # --- Where JP_TOOLS comes from ---
 # On GitHub, the public copy, unless the repository variable
@@ -206,3 +216,94 @@ jobs:
             base=HEAD
           fi
           python ../JP_TOOLS/check.py . --lang ${{ matrix.lang }} --pretty --smells-base "$base"
+
+  # THE PROJECT'S OWN TESTS (METHODOLOGY 2.5, 7.5). check.py is the static
+  # half; this is the other. See "--- Tests ---" at the top for what a
+  # project provides.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # A test that did not run is not a pass (METHODOLOGY 8): a repo with code
+      # and no way to run its tests stops here, saying what to add, rather than
+      # going green with nothing tested.
+      - name: How are this repo's tests run?
+        id: entry
+        shell: bash
+        run: |
+          phpunit=no
+          if [ -f phpunit.xml ] || [ -f phpunit.xml.dist ]; then phpunit=yes; fi
+          run=no
+          if [ -e tests/run ]; then
+            if [ ! -x tests/run ]; then
+              echo "tests/run is not executable: git update-index --chmod=+x tests/run" >&2
+              exit 1
+            fi
+            run=yes
+          fi
+          echo "phpunit=$phpunit" >> "$GITHUB_OUTPUT"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          if [ "$phpunit" = no ] && [ "$run" = no ]; then
+            code=('*.py' '*.php' '*.js' '*.mjs' '*.cjs' '*.jsx' '*.ts' '*.tsx' '*.sh' '*.bash')
+            if [ -n "$(git ls-files -- "${code[@]}" | head -n 1)" ]; then
+              echo "This repo has code and no way to run its tests: add phpunit.xml(.dist)" >&2
+              echo "(PHP), or an executable tests/run. A test that did not run is not a pass." >&2
+              exit 1
+            fi
+            echo "No code in this repo: no tests to run."
+          fi
+
+      # PHPUnit, with pcov as the coverage driver, writing Clover for the gate.
+      # From apt, as the check job sets PHP up, for the same Forgejo reason.
+      - name: Set up PHP with pcov
+        if: steps.entry.outputs.phpunit == 'yes'
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update -q
+          $SUDO apt-get install -y -q php-cli php-xml php-mbstring php-curl php-pcov unzip composer
+          php -r 'echo "pcov: ", extension_loaded("pcov") ? "loaded" : "MISSING", PHP_EOL;'
+
+      - name: Install the project's dependencies
+        if: steps.entry.outputs.phpunit == 'yes'
+        run: composer install --no-interaction --no-progress
+
+      - name: PHPUnit, with coverage
+        if: steps.entry.outputs.phpunit == 'yes'
+        run: vendor/bin/phpunit --coverage-clover clover.xml --coverage-text --only-summary-for-coverage-text
+
+      - name: JP_TOOLS_REPOSITORY is set, off GitHub
+        if: >-
+          steps.entry.outputs.phpunit == 'yes' && !vars.JP_TOOLS_REPOSITORY
+          && github.server_url != 'https://github.com'
+        run: |
+          echo "Set the repository variable JP_TOOLS_REPOSITORY to JP_TOOLS' owner/name on this forge" >&2
+          echo "(and the secret JP_TOOLS_TOKEN if it is not public): the coverage gate is JP_TOOLS'." >&2
+          exit 1
+
+      - name: Check out JP_TOOLS
+        if: steps.entry.outputs.phpunit == 'yes'
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}
+          token: ${{ secrets.JP_TOOLS_TOKEN || github.token }}
+          path: _jp_tools
+
+      - name: Put JP_TOOLS beside the checkout
+        if: steps.entry.outputs.phpunit == 'yes'
+        run: mv _jp_tools ../JP_TOOLS
+
+      # The runner's own python3, not actions/setup-python: the gate is
+      # stdlib only, and setup-python downloads a whole CPython into every
+      # container, on every run.
+      # Exit 0 at or over the threshold, 1 under it, 2 when nothing was
+      # measured (no report, or one counting no statements): never a pass.
+      - name: Coverage gate
+        if: steps.entry.outputs.phpunit == 'yes'
+        run: python3 ../JP_TOOLS/coverage-gate.py clover.xml --fail-under ${{ vars.COVERAGE_FAIL_UNDER || '95' }}
+
+      # Anything else: the project's own runner, which owns its dependencies
+      # and its coverage threshold (Python: coverage report --fail-under).
+      - name: tests/run
+        if: steps.entry.outputs.run == 'yes'
+        run: ./tests/run

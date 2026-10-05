@@ -1,0 +1,35 @@
+{
+  "about": "The CI template's tests job: finds PHPUnit or tests/run, fails code with neither, gates PHP coverage. Run: mutate-on-target.py TREE templates/ci-check.yml tests/test_ci_template.py tests/mutants/jpt-tests-job-on-template.json",
+  "mutants": [
+    {
+      "name": "code with no entry point goes green",
+      "edits": [["              echo \"(PHP), or an executable tests/run. A test that did not run is not a pass.\" >&2\n              exit 1", "              echo \"(PHP), or an executable tests/run. A test that did not run is not a pass.\" >&2\n              exit 0"]],
+      "target": "python code, no entry: exit"
+    },
+    {
+      "name": "a tests/run that is not executable is accepted",
+      "edits": [["            if [ ! -x tests/run ]; then", "            if false; then"]],
+      "target": "a tests/run that is not executable: exit"
+    },
+    {
+      "name": "phpunit.xml.dist is not looked for",
+      "edits": [["          if [ -f phpunit.xml ] || [ -f phpunit.xml.dist ]; then phpunit=yes; fi", "          if [ -f phpunit.xml ]; then phpunit=yes; fi"]],
+      "target": "phpunit.xml.dist: phpunit, no tests/run"
+    },
+    {
+      "name": "a docs-only repo fails for want of tests",
+      "edits": [["            if [ -n \"$(git ls-files -- \"${code[@]}\" | head -n 1)\" ]; then", "            if true; then"]],
+      "target": "no code: nothing to run, and green"
+    },
+    {
+      "name": "the coverage threshold is fixed, not the repository's",
+      "edits": [["--fail-under ${{ vars.COVERAGE_FAIL_UNDER || '95' }}", "--fail-under 95"]],
+      "target": "coverage-gate.py gates it at the repository threshold"
+    },
+    {
+      "name": "tests/run runs whether or not it was found",
+      "edits": [["      - name: tests/run\n        if: steps.entry.outputs.run == 'yes'", "      - name: tests/run\n        if: always()"]],
+      "target": "tests/run runs only when found"
+    }
+  ]
+}

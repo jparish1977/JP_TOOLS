@@ -71,8 +71,8 @@ def _checkout_findings(all_steps: list[dict[str, Any]]) -> list[str]:
     checkouts = [s for s in all_steps if s.get("with", {}).get("repository") == REPOSITORY]
     if not checkouts:
         return ["no checkout of vars.JP_TOOLS_REPOSITORY with the GitHub default"]
-    if checkouts[0]["with"].get("token") != TOKEN:
-        return ["the JP_TOOLS checkout does not use JP_TOOLS_TOKEN"]
+    if any(c["with"].get("token") != TOKEN for c in checkouts):
+        return ["a JP_TOOLS checkout does not use JP_TOOLS_TOKEN"]
     return []
 
 
@@ -240,6 +240,93 @@ def test_php_install_stops_on_a_manifest_it_cannot_read() -> None:
     rc, calls = composer_calls('{"require-dev": {"a/b": "1"}}')
     check("a manifest with no gate list: the step fails, and runs no composer",
           (rc != 0, calls), (True, []))
+
+
+ENTRY_STEP = "How are this repo's tests run?"
+GATE_RUN = ("python3 ../JP_TOOLS/coverage-gate.py clover.xml"
+            " --fail-under ${{ vars.COVERAGE_FAIL_UNDER || '95' }}")
+
+
+def tests_job(text: str) -> dict[str, Any]:
+    return dict(yaml.safe_load(text).get("jobs", {}).get("tests", {}))
+
+
+def entry(files: dict[str, str], executable: tuple[str, ...] = ()) -> tuple[int, dict[str, str], str]:
+    """The template's test-entry step run in a git repo holding FILES (tracked,
+    EXECUTABLE ones mode 755): its exit code, the outputs it set, and stderr."""
+    step = next(s for s in tests_job(TEMPLATE.read_text(encoding="utf-8")).get("steps", [])
+                if s.get("name") == ENTRY_STEP)
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp) / "repo"
+        repo.mkdir()
+        for name, body in files.items():
+            (repo / name).parent.mkdir(parents=True, exist_ok=True)
+            (repo / name).write_text(body, encoding="utf-8")
+            (repo / name).chmod(0o755 if name in executable else 0o644)
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        out = Path(tmp) / "github_output"
+        out.touch()
+        r = subprocess.run(["bash", "-eo", "pipefail", "-c", str(step["run"])], cwd=repo,
+                           env={"PATH": "/usr/bin:/bin", "GITHUB_OUTPUT": str(out)},
+                           capture_output=True, text=True, check=False)
+        outputs = dict(line.split("=", 1) for line in out.read_text().splitlines() if "=" in line)
+    return r.returncode, outputs, r.stderr
+
+
+def test_the_tests_entry_is_found() -> None:
+    """PHP with a phpunit config runs PHPUnit; any project with an executable
+    tests/run runs it; both may apply."""
+    rc, out, _ = entry({"src/A.php": "<?php\n", "phpunit.xml.dist": "<phpunit/>\n"})
+    check("phpunit.xml.dist: phpunit, no tests/run", (rc, out), (0, {"phpunit": "yes", "run": "no"}))
+    rc, out, _ = entry({"src/A.php": "<?php\n", "phpunit.xml": "<phpunit/>\n"})
+    check("phpunit.xml: phpunit", (rc, out.get("phpunit")), (0, "yes"))
+    rc, out, _ = entry({"a.py": "x = 1\n", "tests/run": "#!/bin/sh\n"}, executable=("tests/run",))
+    check("an executable tests/run: run", (rc, out), (0, {"phpunit": "no", "run": "yes"}))
+    rc, out, _ = entry({"src/A.php": "<?php\n", "phpunit.xml.dist": "<phpunit/>\n",
+                        "tests/run": "#!/bin/sh\n"}, executable=("tests/run",))
+    check("both: both", (rc, out), (0, {"phpunit": "yes", "run": "yes"}))
+
+
+def test_code_with_no_way_to_run_its_tests_fails() -> None:
+    """A test that did not run is not a pass (METHODOLOGY 8): code and no
+    entry point stops the job, saying what to add. A repo with no code at
+    all has nothing to test, and says so."""
+    for name, files in (("python", {"a.py": "x = 1\n"}), ("php", {"src/A.php": "<?php\n"}),
+                        ("js", {"a.js": "1\n"}), ("shell", {"a.sh": "true\n"})):
+        rc, _, err = entry(files)
+        check(f"{name} code, no entry: exit", rc, 1)
+        check_true(f"{name} code, no entry: says what to add",
+                   "phpunit.xml" in err and "tests/run" in err)
+    rc, _, err = entry({"a.py": "x = 1\n", "tests/run": "#!/bin/sh\n"})
+    check("a tests/run that is not executable: exit", rc, 1)
+    check_true("a tests/run that is not executable: says how to fix it", "chmod=+x" in err)
+    rc, out, _ = entry({"README.md": "# docs only\n"})
+    check("no code: nothing to run, and green", (rc, out), (0, {"phpunit": "no", "run": "no"}))
+
+
+def test_the_template_runs_tests() -> None:
+    """The tests job: PHPUnit writes Clover and coverage-gate.py gates it at
+    the repository's threshold (95 by default), each only when the entry step
+    found phpunit; tests/run runs only when it found one."""
+    job = tests_job(TEMPLATE.read_text(encoding="utf-8"))
+    by_run = {str(s.get("run", "")).strip(): str(s.get("if", "")) for s in job.get("steps", [])}
+    phpunit = next((r for r in by_run if "phpunit" in r and "--coverage-clover clover.xml" in r), None)
+    check_true("PHPUnit runs, writing clover.xml", phpunit is not None)
+    check_true("only when the entry found phpunit",
+               phpunit is not None and "steps.entry.outputs.phpunit == 'yes'" in by_run[phpunit])
+    check_true("coverage-gate.py gates it at the repository threshold",
+               any(GATE_RUN in r for r in by_run))
+    check("tests/run runs only when found",
+          by_run.get("./tests/run"), "steps.entry.outputs.run == 'yes'")
+    check("the tests job downloads no Python of its own (the runner's python3 runs the gate)",
+          [s.get("uses") for s in job.get("steps", []) if "setup-python" in str(s.get("uses", ""))], [])
+
+
+def test_control_master_before_the_change_has_no_tests_job() -> None:
+    old = subprocess.run(["git", "-C", str(ROOT), "show", "7cd8c09:templates/ci-check.yml"],
+                         capture_output=True, text=True, check=False)
+    check("control: the template before #140 has no tests job", tests_job(old.stdout), {})
 
 
 if __name__ == "__main__":
