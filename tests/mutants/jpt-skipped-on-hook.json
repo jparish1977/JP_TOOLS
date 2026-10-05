@@ -1,0 +1,40 @@
+{
+  "about": "The pre-commit hook's verdict counts a skipped file as skipped, not checked, and says why. Run: mutate-on-target.py TREE hooks/pre-commit.sh tests/test_install_hooks.py tests/mutants/jpt-skipped-on-hook.json",
+  "mutants": [
+    {
+      "name": "a skipped file counted as checked",
+      "edits": [["        if [ -n \"$why\" ]; then\n            skipped=", "        if false; then\n            skipped="]],
+      "target": "some skipped, one reason"
+    },
+    {
+      "name": "check.py's skip report not recognised",
+      "edits": [["if isinstance(doc, dict) and isinstance(doc.get(\"skipped\"), str):", "if False:"]],
+      "target": "every file skipped"
+    },
+    {
+      "name": "a skip reason kept whole, so each ignore entry is its own kind",
+      "edits": [["    print(doc[\"skipped\"].split(\":\")[0])", "    print(doc[\"skipped\"])"]],
+      "target": "two reasons, each counted"
+    },
+    {
+      "name": "one reason counted as if there were several",
+      "edits": [["    if [ \"$(printf '%s\\n' \"$counted\" | wc -l)\" -eq 1 ]; then", "    if false; then"]],
+      "target": "some skipped, one reason"
+    },
+    {
+      "name": "nothing checked still called clean",
+      "edits": [["    if [ \"$checked\" -eq 0 ] && [ -n \"$summary\" ]; then", "    if false; then"]],
+      "target": "every file skipped"
+    },
+    {
+      "name": "a failing file not failing the commit",
+      "edits": [["        if [ \"$file_rc\" -ne 0 ]; then\n            rc=1", "        if false; then\n            rc=1"]],
+      "target": "a staged file with errors is blocked"
+    },
+    {
+      "name": "check.py's report not printed",
+      "edits": [["        printf '%s\\n' \"$out\"\n", ""]],
+      "target": "... and its findings are printed above the verdict"
+    }
+  ]
+}

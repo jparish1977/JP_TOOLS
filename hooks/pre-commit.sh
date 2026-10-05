@@ -107,7 +107,22 @@ check_emdashes() {
     fi
 }
 
-# Each staged file through check.py; sets rc (1 on any failure) and checked.
+# Why check.py skipped a file, from the one JSON object it prints for a skip
+# ({"target": ..., "skipped": "no language detected"}, or "ignored by
+# .jp-tools-ignore: ENTRY (WHERE)"): the reason up to its first colon, so one
+# kind counts as one. Prints nothing for a file that was checked.
+skip_reason() {
+    printf '%s' "$1" | "$PY" -c 'import json, sys
+try:
+    doc = json.load(sys.stdin)
+except ValueError:
+    sys.exit(0)  # not one JSON object: a report, so the file was checked
+if isinstance(doc, dict) and isinstance(doc.get("skipped"), str):
+    print(doc["skipped"].split(":")[0])'
+}
+
+# Each staged file through check.py; sets rc (1 on any failure), checked, and
+# skipped, one reason per line for each file check.py skipped.
 #
 # Split on newlines only, so paths with spaces survive.
 #
@@ -121,17 +136,49 @@ check_staged() {
 '
     rc=0
     checked=0
+    skipped=""
     for f in $STAGED; do
         [ -f "$f" ] || continue     # staged then removed from the tree
-        # --skip-unsupported: a staged README or JSON file exits 0 rather than 2.
+        # --skip-unsupported: a staged README or JSON file exits 0 rather than 2,
+        # and says it was skipped, which is how it is told from a checked file.
         if [ -f "$BASELINE_FILE" ]; then
-            "$PY" "$CHECK_PY" "$f" --baseline "$BASELINE_FILE" --pretty --skip-unsupported || rc=1
+            out=$("$PY" "$CHECK_PY" "$f" --baseline "$BASELINE_FILE" --pretty --skip-unsupported)
         else
-            "$PY" "$CHECK_PY" "$f" --pretty --skip-unsupported || rc=1
+            out=$("$PY" "$CHECK_PY" "$f" --pretty --skip-unsupported)
         fi
-        checked=$((checked + 1))
+        file_rc=$?
+        printf '%s\n' "$out"
+        why=""
+        if [ "$file_rc" -ne 0 ]; then
+            rc=1
+        else
+            why=$(skip_reason "$out")
+        fi
+        if [ -n "$why" ]; then
+            skipped="$skipped$why
+"
+        else
+            checked=$((checked + 1))
+        fi
     done
     IFS=$OLDIFS
+}
+
+# "4 skipped: no language detected" when every skip has one reason, "4
+# skipped: 3 no language detected, 1 ignored by .jp-tools-ignore" when they
+# differ, and nothing when no file was skipped.
+skipped_summary() {
+    [ -n "$skipped" ] || return 0
+    n=$(printf '%s' "$skipped" | wc -l | tr -d ' ')
+    counted=$(printf '%s' "$skipped" | sort | uniq -c)
+    if [ "$(printf '%s\n' "$counted" | wc -l)" -eq 1 ]; then
+        echo "$n skipped: $(printf '%s' "$skipped" | head -n 1)"
+        return 0
+    fi
+    kinds=$(printf '%s\n' "$counted" | while read -r count why; do
+        printf '%s %s, ' "$count" "$why"
+    done)
+    echo "$n skipped: ${kinds%, }"
 }
 
 # The verdict. Say so on success too: a gate that only speaks when it fails
@@ -146,7 +193,17 @@ verdict() {
         echo "====================================="
         exit 1
     fi
-    echo "JP_TOOLS: $checked staged file(s) checked, clean."
+    # The denominator is in the verdict (METHODOLOGY 10.14): a skipped file
+    # was not checked, and is never counted as if it had been.
+    total=$((checked + $(printf '%s' "$skipped" | wc -l)))
+    summary=$(skipped_summary)
+    if [ "$checked" -eq 0 ] && [ -n "$summary" ]; then
+        echo "JP_TOOLS: 0 of $total staged file(s) checked, nothing here to check ($summary)."
+    elif [ -n "$summary" ]; then
+        echo "JP_TOOLS: $checked of $total staged file(s) checked, clean ($summary)."
+    else
+        echo "JP_TOOLS: $checked of $total staged file(s) checked, clean."
+    fi
     exit 0
 }
 

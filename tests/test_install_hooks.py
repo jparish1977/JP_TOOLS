@@ -18,7 +18,9 @@ WHAT THIS PINS DOWN
       - it runs `python3` where there is no bare `python`;
       - a path with a space is one path, not two that do not exist and are
         skipped in silence;
-      - a file whose language check.py cannot detect does not block a commit.
+      - a file whose language check.py cannot detect does not block a commit,
+        and is not counted as checked: the verdict says how many of the
+        staged files were, and why the others were skipped.
 
 Skips rather than fails when the environment cannot support it:
   - no git         -> skip
@@ -448,6 +450,42 @@ def _shim_refusals(tmp: Path, env: dict[str, str], repo: Path) -> None:
           r.returncode == 0 and "(not a git checkout)" in out, out)
 
 
+def commit_files(repo: Path, files: dict[str, str]) -> str:
+    """Write and stage FILES, commit them, and return the hook's verdict line."""
+    for name, body in files.items():
+        (repo / name).write_text(body, encoding="utf-8")
+    git(repo, "add", "--", *files)
+    r = git(repo, "commit", "-m", "several")
+    lines = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.startswith("JP_TOOLS: ")]
+    return lines[-1] if lines else f"(rc {r.returncode}, no verdict) {r.stdout + r.stderr}"
+
+
+def skipped_count_cases(tmp: Path) -> None:
+    """A skipped file is not counted as checked: the verdict says how many of
+    the staged files were checked, and why the rest were not."""
+    print("\nSkipped files in the verdict:")
+    repo, _ = build_repo(tmp)
+    cases = (
+        ("every file checked",
+         {"one.py": CLEAN_PY},
+         "JP_TOOLS: 1 of 1 staged file(s) checked, clean."),
+        ("some skipped, one reason",
+         {"two.py": CLEAN_PY, "NOTES.md": "# n\n", "data.json": "{}\n"},
+         "JP_TOOLS: 1 of 3 staged file(s) checked, clean (2 skipped: no language detected)."),
+        ("every file skipped",
+         {"NOTES.md": "# m\n", "data.json": "[]\n"},
+         "JP_TOOLS: 0 of 2 staged file(s) checked, nothing here to check (2 skipped: no language detected)."),
+        ("two reasons, each counted",
+         {".jp-tools-ignore": "gen.py  # generated, not ours\n", "gen.py": CLEAN_PY,
+          "three.py": CLEAN_PY},
+         ("JP_TOOLS: 1 of 3 staged file(s) checked, clean "
+          "(2 skipped: 1 ignored by .jp-tools-ignore, 1 no language detected).")),
+    )
+    for label, files, verdict in cases:
+        got = commit_files(repo, files)
+        check(f"{label}: {verdict}", got == verdict, got)
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
@@ -499,6 +537,8 @@ def main() -> int:
         r = commit_file(repo, "broken.py", DIRTY_PY)
         check("a staged file with errors is blocked",
               r.returncode != 0, r.stdout + r.stderr)
+        check("... and its findings are printed above the verdict",
+              "F401" in r.stdout + r.stderr, r.stdout + r.stderr)
         git(repo, "reset", "-q", "HEAD", "--", "broken.py")
         (repo / "broken.py").unlink()
 
@@ -519,6 +559,8 @@ def main() -> int:
         check("a failing path containing a space is still blocked",
               r.returncode != 0, r.stdout + r.stderr)
 
+    with tempfile.TemporaryDirectory() as td:
+        skipped_count_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:
         incapable_tools_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:
