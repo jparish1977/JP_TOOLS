@@ -17,13 +17,23 @@
       "target": "php + python, phpunit only: exit"
     },
     {
-      "name": "tools/lab/ is not exempt",
-      "edits": [["          has() { [ -n \"$(git ls-files -- \"$@\" ':(exclude)tools/lab/' | head -n 1)\" ]; }", "          has() { [ -n \"$(git ls-files -- \"$@\" | head -n 1)\" ]; }"]],
+      "name": "no lab/ is exempt",
+      "edits": [["':(exclude,glob)**/lab/**'", "':(exclude,glob)never-a-path/**'"]],
       "target": "php + tools/lab scripts, phpunit only: lab is exempt"
     },
     {
+      "name": "only tools/lab/ is exempt, as before",
+      "edits": [["':(exclude,glob)**/lab/**'", "':(exclude)tools/lab/'"]],
+      "target": "php + lab/probe.py, phpunit only: a lab/ anywhere is exempt"
+    },
+    {
+      "name": "any directory starting lab is exempt",
+      "edits": [["':(exclude,glob)**/lab/**'", "':(exclude,glob)**/lab*/**'"]],
+      "target": "php + labs/probe.py, phpunit only: only a directory named lab is exempt"
+    },
+    {
       "name": "a docs-only repo fails for want of tests",
-      "edits": [["          has() { [ -n \"$(git ls-files -- \"$@\" ':(exclude)tools/lab/' | head -n 1)\" ]; }", "          has() { true; }"]],
+      "edits": [["          has() { [ -n \"$(git ls-files -- \"$@\" ':(exclude,glob)**/lab/**' | head -n 1)\" ]; }", "          has() { true; }"]],
       "target": "no code: nothing to run, and green"
     },
     {

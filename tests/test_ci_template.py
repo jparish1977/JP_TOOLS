@@ -311,8 +311,9 @@ def test_code_with_no_way_to_run_its_tests_fails() -> None:
 def test_a_mixed_repo_tests_every_language() -> None:
     """PHPUnit tests PHP only: a mixed repo whose other code has no tests/run
     fails, naming that language, rather than going green with it untested. A
-    tests/run covers the whole repo. tools/lab/ is exempt (METHODOLOGY 2.9:
-    lab files are held to their header, not to zero)."""
+    tests/run covers the whole repo. A lab/ directory anywhere is exempt, as in
+    check.py's lab rule (METHODOLOGY 2.9: lab files are held to their header,
+    not to zero)."""
     php = {"src/A.php": "<?php\n", "phpunit.xml.dist": "<phpunit/>\n"}
     rc, _, err = entry({**php, "tools/build.py": "x = 1\n"})
     check("php + python, phpunit only: exit", rc, 1)
@@ -328,6 +329,13 @@ def test_a_mixed_repo_tests_every_language() -> None:
     check("php + tools/lab scripts, phpunit only: lab is exempt", (rc, out), (0, {"phpunit": "yes", "run": "no"}))
     rc, out, _ = entry({"tools/lab/probe.py": "x = 1\n"})
     check("only tools/lab code: no code to test", (rc, out), (0, {"phpunit": "no", "run": "no"}))
+    for where in ("lab/probe.py", "pb/lab/probe.py"):
+        rc, out, _ = entry({**php, where: "x = 1\n"})
+        check(f"php + {where}, phpunit only: a lab/ anywhere is exempt",
+              (rc, out), (0, {"phpunit": "yes", "run": "no"}))
+    for where in ("labs/probe.py", "mylab/probe.py"):
+        rc, _, err = entry({**php, where: "x = 1\n"})
+        check(f"php + {where}, phpunit only: only a directory named lab is exempt", rc, 1)
 
 
 def test_the_template_runs_tests() -> None:
