@@ -22,6 +22,11 @@ measured by seeking to its end, since stat() reports its size as 0.
 With --output, the ROM hits are saved to rom_scan_results.json (the first
 10,000, with `results_truncated` saying whether there were more).
 
+Exit codes (jpexit): 0 OK, every scan asked for read the source to the end;
+2 NOT_RUN, one did not (binwalk not installed or exiting non-zero, or a read
+that failed), said on stderr. Hits found before a failed read are still
+reported and saved.
+
 Examples:
     python scan-image.py disk.img --signatures all
     python scan-image.py disk.img --extract --output ./extracted
@@ -42,6 +47,7 @@ from typing import BinaryIO, NamedTuple
 # The packages beside this file import when another program loads it by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import jpexit
 from platformtools.tools import find_tool
 from platformtools.windows import wsl_path
 
@@ -136,13 +142,16 @@ def _save(output_dir: str, source: str, found: list[Hit], counts: Counter[str]) 
     return path
 
 
-def scan_for_roms(source: str, output_dir: str | None = None, chunk_size: int = CHUNK) -> list[Hit]:
-    """Scan an image or device for ROM signatures; report, and save them with OUTPUT_DIR.
+def scan_for_roms(source: str, output_dir: str | None = None, chunk_size: int = CHUNK) -> bool:
+    """Scan an image or device for ROM signatures; report, and save them with
+    OUTPUT_DIR. Whether the scan read SOURCE to the end.
 
-    A read error part-way (a failing drive) ends the scan: what was found
-    before it is kept, reported and saved, and the error is said.
+    A read error (a failing drive, a source that will not open) ends the scan:
+    what was found before it is kept, reported and saved, the error is said,
+    and the report says the scan stopped short rather than that it completed.
     """
     found: list[Hit] = []
+    stopped = None
     try:
         with open(source, "rb") as f:
             size = device_size(f)
@@ -150,22 +159,26 @@ def scan_for_roms(source: str, output_dir: str | None = None, chunk_size: int = 
             for hit in hits_in(f, size, chunk_size):
                 found.append(hit)
     except OSError as exc:
-        print(f"Error: reading {source} stopped: {exc}; {len(found)} signatures found before it")
+        stopped = exc
+        print(f"Error: reading {source} stopped: {exc}; {len(found)} signatures found before it",
+              file=sys.stderr)
     counts = Counter(h.type for h in found)
-    print(f"\nScan complete: {len(found)} signatures found")
+    verdict = "Scan complete" if stopped is None else "Scan stopped short"
+    print(f"\n{verdict}: {len(found)} signatures found")
     for sig_type, count in counts.most_common():
         print(f"  {sig_type}: {count}")
     if output_dir:
         print(f"\nResults saved to {_save(output_dir, source, found, counts)}")
-    return found
+    return stopped is None
 
 
-def run_binwalk(source: str, output_dir: str | None = None, extract: bool = False) -> str:
-    """binwalk's signature scan of SOURCE (and extraction into OUTPUT_DIR). Returns its output."""
+def run_binwalk(source: str, output_dir: str | None = None, extract: bool = False) -> bool:
+    """binwalk's signature scan of SOURCE (and extraction into OUTPUT_DIR),
+    its output printed. Whether binwalk ran and exited 0."""
     binwalk = find_tool("binwalk")
     if binwalk is None:
-        print("Warning: binwalk not found; skipping the standard signature scan")
-        return ""
+        print("binwalk is not installed: the standard signature scan did not run", file=sys.stderr)
+        return False
     as_seen = wsl_path if binwalk[0] == "wsl" else str
     cmd = list(binwalk)
     if extract and output_dir:
@@ -176,7 +189,10 @@ def run_binwalk(source: str, output_dir: str | None = None, extract: bool = Fals
     print(result.stdout)
     if result.stderr:
         print(result.stderr, file=sys.stderr)
-    return result.stdout
+    if result.returncode != 0:
+        print(f"binwalk exited {result.returncode}: the standard signature scan did not finish",
+              file=sys.stderr)
+    return result.returncode == 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -188,14 +204,19 @@ def main(argv: list[str] | None = None) -> int:
                         help="Which signatures to scan for (default: default)")
     args = parser.parse_args(argv)
     start = time.monotonic()
+    finished = []
     if args.signatures in ("default", "all"):
         print("=== Standard signature scan (binwalk) ===\n")
-        run_binwalk(args.source, args.output, args.extract)
+        finished.append(run_binwalk(args.source, args.output, args.extract))
     if args.signatures in ("roms", "all"):
         print("\n=== ROM signature scan ===\n")
-        scan_for_roms(args.source, args.output)
+        finished.append(scan_for_roms(args.source, args.output))
     print(f"\nTotal elapsed: {time.monotonic() - start:.1f}s")
-    return 0
+    if not all(finished):
+        print(f"scan-image: exit {jpexit.NOT_RUN} -- a scan that did not finish is not a pass.",
+              file=sys.stderr)
+        return jpexit.NOT_RUN
+    return jpexit.OK
 
 
 if __name__ == "__main__":
