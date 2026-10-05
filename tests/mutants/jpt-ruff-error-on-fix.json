@@ -1,0 +1,25 @@
+{
+  "about": "A ruff that cannot run is an error in fix.py, never fixed 0. Run: mutate-on-target.py TREE fix.py tests/test_fix.py tests/mutants/jpt-ruff-error-on-fix.json",
+  "mutants": [
+    {
+      "name": "a ruff that stopped short reads as a verdict",
+      "edits": [["    if result[\"status\"] == \"error\":\n        raise _RuffError(result[\"note\"])", "    if False:\n        raise _RuffError(result[\"note\"])"]],
+      "target": "fix: status"
+    },
+    {
+      "name": "an error still carries a fixed count",
+      "edits": [["        return {\"tool\": \"ruff\", \"status\": \"error\", \"unsafe\": unsafe, \"note\": str(e)}", "        return {\"tool\": \"ruff\", \"status\": \"error\", \"unsafe\": unsafe, \"note\": str(e), \"fixed\": 0}"]],
+      "target": "fix: no fixed count"
+    },
+    {
+      "name": "the error drops ruff's reason",
+      "edits": [["        return {\"tool\": \"ruff\", \"status\": \"error\", \"unsafe\": unsafe, \"note\": str(e)}", "        return {\"tool\": \"ruff\", \"status\": \"error\", \"unsafe\": unsafe, \"note\": \"\"}"]],
+      "target": "fix: the note says ruff exited 2"
+    },
+    {
+      "name": "dry run never checks ruff's exit",
+      "edits": [["    try:\n        before = _ruff_findings(target)", "    if dry_run:\n        return {\"tool\": \"ruff\", \"status\": \"dry-run\", \"fixed\": 0, \"remaining\": []}\n    try:\n        before = _ruff_findings(target)"]],
+      "target": "--dry-run: status"
+    }
+  ]
+}

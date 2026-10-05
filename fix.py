@@ -8,7 +8,8 @@ Prints one JSON object: the target, the language, and one result per fixer
 (ruff for Python; prettier for JS and CSS; phpcbf then rector for PHP). A
 fixer that is not installed reports "unavailable" rather than being skipped.
 ruff's result counts what it fixed from its findings before and after; a
-count that could not be taken is null, never 0.
+count that could not be taken is null, never 0, and a ruff that could not run
+at all reports "error" with its reason, as check.py does.
 """
 
 import argparse
@@ -24,7 +25,7 @@ from typing import Any
 # The packages beside this file import when another program loads it by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from jpcheck.common import _node_bin, _php_bin, _php_cmd
+from jpcheck.common import _node_bin, _php_bin, _php_cmd, _tool_result
 from jpcheck.python_tools import _ruff_config_args, ruff_env
 
 TOOLS_ROOT = Path(__file__).resolve().parent
@@ -44,12 +45,25 @@ def _extend_path() -> None:
         [str(p) for p in _EXTRA_PATHS if p.exists()] + [os.environ.get("PATH", "")])
 
 
+class _RuffError(Exception):
+    """ruff stopped short of a verdict; the message says why, as check.py does."""
+
+
+def _ruff(target: str, *args: str) -> "subprocess.CompletedProcess[str]":
+    """`ruff check ARGS TARGET` under the project's config. Exit 0 or 1 is a
+    verdict; anything else (2: a config it cannot load, say) raises
+    _RuffError, since its stdout is then empty and would read as clean."""
+    proc = subprocess.run(["ruff", "check", *_ruff_config_args(target), *args, target],
+                          capture_output=True, text=True, check=False, env=ruff_env())
+    result = _tool_result("ruff", [], proc)
+    if result["status"] == "error":
+        raise _RuffError(result["note"])
+    return proc
+
+
 def _ruff_findings(target: str) -> list[dict[str, Any]] | None:
     """ruff's findings on TARGET now, or None when its output is not JSON."""
-    out = subprocess.run(
-        ["ruff", "check", *_ruff_config_args(target), "--output-format", "json", target],
-        capture_output=True, text=True, check=False, env=ruff_env(),
-    ).stdout
+    out = _ruff(target, "--output-format", "json").stdout
     try:
         findings: list[dict[str, Any]] = json.loads(out) if out.strip() else []
     except json.JSONDecodeError as e:
@@ -66,17 +80,22 @@ def fix_ruff(target: str, dry_run: bool, unsafe: bool = False, **_: object) -> R
     percent-format to f-string) or displayonly (never auto-applied). Without
     --unsafe this reports 0 fixed on files check.py describes as fixable, which
     is the tool disagreeing with its own report rather than a no-op.
+
+    A ruff that cannot run reports "error" with its reason and no fixed count.
     """
     if not shutil.which("ruff"):
         return {"tool": "ruff", "status": "unavailable", "fixed": 0, "remaining": []}
-    before = _ruff_findings(target)
-    args = ["ruff", "check", *_ruff_config_args(target), "--fix"]
+    args = ["--fix"]
     if unsafe:
         args.append("--unsafe-fixes")
     if dry_run:
         args.append("--diff")
-    subprocess.run([*args, target], capture_output=True, text=True, check=False, env=ruff_env())
-    after = _ruff_findings(target)
+    try:
+        before = _ruff_findings(target)
+        _ruff(target, *args)
+        after = _ruff_findings(target)
+    except _RuffError as e:
+        return {"tool": "ruff", "status": "error", "unsafe": unsafe, "note": str(e)}
     fixed = None if before is None or after is None else max(0, len(before) - len(after))
     return {
         "tool":      "ruff",

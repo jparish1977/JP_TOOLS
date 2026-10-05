@@ -73,6 +73,27 @@ def ruff_test_extend_through_jp_tools_root() -> None:
         check("one fixed through the extended config", json.loads(out)["results"][0]["fixed"], 1)
 
 
+def ruff_test_ruff_that_cannot_run_is_an_error() -> None:
+    """ruff that cannot load its config exits 2 with nothing on stdout. That is
+    an error with ruff's reason, never "fixed" with a count of 0, and the file
+    is left as it was. The control is ruff_test_fixed_is_measured: the same
+    source with no project config fixes one."""
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "ruff.toml").write_text('extend = "no-such-dir/ruff.toml"\n')
+        f = Path(tmp) / "m.py"
+        src = "import os\nimport sys\n\nprint(sys.argv)\n"
+        f.write_text(src)
+        for mode in ((), ("--dry-run",)):
+            _, out = run_main(FIX.main, str(f), *mode)
+            result = json.loads(out)["results"][0]
+            label = " ".join(mode) or "fix"
+            check(f"{label}: status", result["status"], "error")
+            check_true(f"{label}: no fixed count", "fixed" not in result)
+            check_true(f"{label}: the note says ruff exited 2",
+                       result.get("note", "").startswith("exit 2: "))
+            check(f"{label}: the file is untouched", f.read_text(), src)
+
+
 if __name__ == "__main__":
     tests = dict(globals())
     if shutil.which("ruff") is None:
