@@ -7,8 +7,12 @@ directory seeks rather than a full transfer, which matters when the drive is
 failing and every read is borrowed.
 
 Written incrementally and flushed per directory, and resumable per top-level
-entry (inventory/resume.py): an entry cut off by a disconnect is re-read
-whole on the next run, never left half-recorded.
+entry (inventory/resume.py): an entry cut off by a disconnect, or one holding
+a file that cannot be stat'd or a directory that cannot be read, is not
+marked done, so the next run re-reads it whole.
+
+Exit codes (jpexit): 0 OK, every entry recorded whole; 2 NOT_RUN, the
+mountpoint cannot be read, or something was not inventoried, each named.
 
 Entries whose names start with `$`, and "System Volume Information", are
 Windows system areas and are skipped at every depth.
@@ -41,6 +45,7 @@ from typing import TextIO
 # The packages beside this file import when another program loads it by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import jpexit
 from inventory.resume import mark_done, resume_state
 from platformtools.windows import is_system_area, wsl_path
 
@@ -58,25 +63,32 @@ def _row(rel: str, st: os.stat_result) -> str:
     return f"{rel}\t{st.st_size}\t{int(st.st_mtime)}\n"
 
 
-def record_tree(root: str, top: str, out: TextIO) -> tuple[int, int]:
-    """Walk one top-level entry, writing a row per file. Returns (files, bytes)."""
+def _miss(missed: list[str], path: str, why: object) -> None:
+    """An inventory that quietly leaves something out is short and nobody
+    knows it: name it, and keep it for the run's verdict."""
+    print(f"  ! not inventoried: {path} ({why})", file=sys.stderr)
+    missed.append(path)
+
+
+def record_tree(root: str, top: str, out: TextIO, missed: list[str]) -> tuple[int, int]:
+    """Walk one top-level entry, writing a row per file. A file that cannot
+    be stat'd, or a directory that cannot be read, is added to MISSED.
+    Returns (files, bytes)."""
     base = os.path.join(root, top)
     if os.path.isfile(base):
         st = os.stat(base)
         out.write(_row(top, st))
         return 1, st.st_size
     count = total = 0
-    for dirpath, dirnames, filenames in os.walk(base):
+    for dirpath, dirnames, filenames in os.walk(base, onerror=lambda e: _miss(missed, e.filename, e)):
         dirnames[:] = [d for d in dirnames if not is_system_area(d)]
         for name in filenames:
             full = os.path.join(dirpath, name)
             try:
                 st = os.stat(full)
             except OSError as e:
-                # reason: named rather than skipped silently; an inventory
-                # that quietly leaves a file out is short and nobody knows it
-                print(f"inventory-drive: {full} cannot be stat'd ({e}); NOT inventoried",
-                      file=sys.stderr)
+                # reason: recorded in MISSED, which leaves the entry unfinished
+                _miss(missed, full, e)
                 continue
             out.write(_row(os.path.relpath(full, root), st))
             count += 1
@@ -91,18 +103,22 @@ def _entries(root: str, only: list[str]) -> list[str]:
     return [e for e in entries if e in only] if only else entries
 
 
-def _record(root: str, entries: list[str], done: set[str], out: TextIO) -> tuple[int, int]:
-    """Record every unfinished entry. Returns (files, bytes) recorded this run."""
+def _record(root: str, entries: list[str], done: set[str], out: TextIO,
+            missed: list[str]) -> tuple[int, int]:
+    """Record every unfinished entry, marking it done only when nothing under
+    it went into MISSED. Returns (files, bytes) recorded this run."""
     files = size = 0
     for top in (e for e in entries if e not in done):
         started = time.time()
+        before = len(missed)
         try:
-            count, total = record_tree(root, top, out)
+            count, total = record_tree(root, top, out, missed)
         except OSError as exc:
-            print(f"  ! {top:<18} aborted: {exc}")
+            _miss(missed, top, f"aborted: {exc}")
             out.flush()
             continue
-        mark_done(out, top)
+        if len(missed) == before:
+            mark_done(out, top)
         files += count
         size += total
         print(f"  {top:<18} {count:7d} files  {total / 1e9:8.1f} GB  {time.time() - started:5.0f}s")
@@ -122,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     root = mount_root(args.mountpoint)
     if not os.path.isdir(root):
         print(f"not a directory: {root}", file=sys.stderr)
-        return 1
+        return jpexit.NOT_RUN
     if args.rescan and os.path.exists(args.output):
         os.unlink(args.output)
     fresh = not os.path.exists(args.output)
@@ -133,13 +149,19 @@ def main(argv: list[str] | None = None) -> int:
         entries = _entries(root, args.subdirs)
     except OSError as exc:
         print(f"cannot read {root}: {exc}", file=sys.stderr)
-        return 1
+        return jpexit.NOT_RUN
+    missed: list[str] = []
     with open(args.output, "a", encoding="utf-8", errors="surrogateescape") as out:
         if fresh:
             out.write(HEADER)
-        files, size = _record(root, entries, done, out)
+        files, size = _record(root, entries, done, out, missed)
     print(f"wrote {args.output} -- {files} files, {size / 1e9:.1f} GB this run")
-    return 0
+    if missed:
+        print(f"incomplete: {len(missed)} not inventoried; their entries are not marked done, "
+              "so the next run re-reads them:")
+        print("\n".join(f"  not inventoried: {path}" for path in missed))
+        return jpexit.NOT_RUN
+    return jpexit.OK
 
 
 if __name__ == "__main__":

@@ -1,0 +1,30 @@
+{
+  "about": "inventory-drive leaves an entry unfinished, and the run NOT_RUN, when something under it was not inventoried. Run: mutate-on-target.py TREE inventory-drive.py tests/test_inventory_drive.py tests/mutants/jpt-missed-on-inventory-drive.json",
+  "mutants": [
+    {
+      "name": "an unreadable directory skipped silently",
+      "edits": [["    for dirpath, dirnames, filenames in os.walk(base, onerror=lambda e: _miss(missed, e.filename, e)):", "    for dirpath, dirnames, filenames in os.walk(base):"]],
+      "target": "unreadable dir: exit"
+    },
+    {
+      "name": "a file that cannot be stat'd not recorded",
+      "edits": [["                _miss(missed, full, e)\n", ""]],
+      "target": "stat failure: exit"
+    },
+    {
+      "name": "an entry with misses marked done",
+      "edits": [["        if len(missed) == before:\n            mark_done(out, top)", "        if True:\n            mark_done(out, top)"]],
+      "target": "stat failure: A left unfinished"
+    },
+    {
+      "name": "a whole entry never marked done",
+      "edits": [["        if len(missed) == before:\n            mark_done(out, top)", "        if False:\n            mark_done(out, top)"]],
+      "target": "each entry finished"
+    },
+    {
+      "name": "the run exits OK with misses",
+      "edits": [["        return jpexit.NOT_RUN\n    return jpexit.OK", "        return jpexit.OK\n    return jpexit.OK"]],
+      "target": "stat failure: exit"
+    }
+  ]
+}
