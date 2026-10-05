@@ -30,7 +30,8 @@
 #   listed after the summary with their rc, the failing one's last 3 lines
 #   shown, exit 1; control, the passing suite alone, no section, exit 0.
 #
-# NOT TESTED AGAINST: Windows; suites that need root (ntfs skips its
+# NOT TESTED AGAINST: bash before 4.4, such as macOS's 3.2 (the empty-array
+#   guard is written for it, unrun there); Windows; suites that need root (ntfs skips its
 #   directory cases itself). The last line is a summary only when the suite
 #   prints one last.
 #
@@ -76,7 +77,8 @@ for i in "${!suites[@]}"; do
   printf 'rc=%s %s :: %s\n' "$rc" "${suites[$i]}" "$(tail -n 1 "$out/$n.out" | cut -c1-110)"
 done
 echo "suites: $passed/${#suites[@]} passed in $(($(date +%s) - start))s"
-for n in "${failed[@]}"; do
+# ${failed[@]+...}: an empty array under set -u is an error before bash 4.4.
+for n in ${failed[@]+"${failed[@]}"}; do
   printf '\n---- FAILED rc=%s %s, its last %s lines:\n' "$(cat "$out/$n.rc")" "${suites[$((n - 1))]}" "$fail_lines"
   tail -n "$fail_lines" "$out/$n.out"
 done
