@@ -1,10 +1,30 @@
 {
-  "about": "The CI template's tests job: finds PHPUnit or tests/run, fails code with neither, gates PHP coverage. Run: mutate-on-target.py TREE templates/ci-check.yml tests/test_ci_template.py tests/mutants/jpt-tests-job-on-template.json",
+  "about": "The CI template's tests job: finds PHPUnit or tests/run, fails code that has neither, per language (tools/lab/ exempt), gates PHP coverage. Run: mutate-on-target.py TREE templates/ci-check.yml tests/test_ci_template.py tests/mutants/jpt-tests-job-on-template.json",
   "mutants": [
     {
-      "name": "code with no entry point goes green",
-      "edits": [["              echo \"(PHP), or an executable tests/run. A test that did not run is not a pass.\" >&2\n              exit 1", "              echo \"(PHP), or an executable tests/run. A test that did not run is not a pass.\" >&2\n              exit 0"]],
+      "name": "non-PHP code with no tests/run goes green",
+      "edits": [["            echo \"phpunit.xml covers PHP only. A test that did not run is not a pass.\" >&2\n            exit 1", "            echo \"phpunit.xml covers PHP only. A test that did not run is not a pass.\" >&2\n            exit 0"]],
       "target": "python code, no entry: exit"
+    },
+    {
+      "name": "PHP code with no entry goes green",
+      "edits": [["            echo \"or an executable tests/run. A test that did not run is not a pass.\" >&2\n            exit 1", "            echo \"or an executable tests/run. A test that did not run is not a pass.\" >&2\n            exit 0"]],
+      "target": "php code, no entry: exit"
+    },
+    {
+      "name": "phpunit.xml counted as covering every language (the mixed-repo gap)",
+      "edits": [["          if [ \"${#other[@]}\" -gt 0 ] && [ \"$run\" = no ]; then", "          if [ \"${#other[@]}\" -gt 0 ] && [ \"$run\" = no ] && [ \"$phpunit\" = no ]; then"]],
+      "target": "php + python, phpunit only: exit"
+    },
+    {
+      "name": "tools/lab/ is not exempt",
+      "edits": [["          has() { [ -n \"$(git ls-files -- \"$@\" ':(exclude)tools/lab/' | head -n 1)\" ]; }", "          has() { [ -n \"$(git ls-files -- \"$@\" | head -n 1)\" ]; }"]],
+      "target": "php + tools/lab scripts, phpunit only: lab is exempt"
+    },
+    {
+      "name": "a docs-only repo fails for want of tests",
+      "edits": [["          has() { [ -n \"$(git ls-files -- \"$@\" ':(exclude)tools/lab/' | head -n 1)\" ]; }", "          has() { true; }"]],
+      "target": "no code: nothing to run, and green"
     },
     {
       "name": "a tests/run that is not executable is accepted",
@@ -15,11 +35,6 @@
       "name": "phpunit.xml.dist is not looked for",
       "edits": [["          if [ -f phpunit.xml ] || [ -f phpunit.xml.dist ]; then phpunit=yes; fi", "          if [ -f phpunit.xml ]; then phpunit=yes; fi"]],
       "target": "phpunit.xml.dist: phpunit, no tests/run"
-    },
-    {
-      "name": "a docs-only repo fails for want of tests",
-      "edits": [["            if [ -n \"$(git ls-files -- \"${code[@]}\" | head -n 1)\" ]; then", "            if true; then"]],
-      "target": "no code: nothing to run, and green"
     },
     {
       "name": "the coverage threshold is fixed, not the repository's",

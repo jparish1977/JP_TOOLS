@@ -292,17 +292,42 @@ def test_code_with_no_way_to_run_its_tests_fails() -> None:
     """A test that did not run is not a pass (METHODOLOGY 8): code and no
     entry point stops the job, saying what to add. A repo with no code at
     all has nothing to test, and says so."""
-    for name, files in (("python", {"a.py": "x = 1\n"}), ("php", {"src/A.php": "<?php\n"}),
-                        ("js", {"a.js": "1\n"}), ("shell", {"a.sh": "true\n"})):
+    for name, files in (("python", {"a.py": "x = 1\n"}), ("js", {"a.js": "1\n"}),
+                        ("shell", {"a.sh": "true\n"})):
         rc, _, err = entry(files)
         check(f"{name} code, no entry: exit", rc, 1)
-        check_true(f"{name} code, no entry: says what to add",
-                   "phpunit.xml" in err and "tests/run" in err)
+        check_true(f"{name} code, no entry: names the language and tests/run",
+                   name in err and "tests/run" in err)
+    rc, _, err = entry({"src/A.php": "<?php\n"})
+    check("php code, no entry: exit", rc, 1)
+    check_true("php code, no entry: says what to add", "phpunit.xml" in err and "tests/run" in err)
     rc, _, err = entry({"a.py": "x = 1\n", "tests/run": "#!/bin/sh\n"})
     check("a tests/run that is not executable: exit", rc, 1)
     check_true("a tests/run that is not executable: says how to fix it", "chmod=+x" in err)
     rc, out, _ = entry({"README.md": "# docs only\n"})
     check("no code: nothing to run, and green", (rc, out), (0, {"phpunit": "no", "run": "no"}))
+
+
+def test_a_mixed_repo_tests_every_language() -> None:
+    """PHPUnit tests PHP only: a mixed repo whose other code has no tests/run
+    fails, naming that language, rather than going green with it untested. A
+    tests/run covers the whole repo. tools/lab/ is exempt (METHODOLOGY 2.9:
+    lab files are held to their header, not to zero)."""
+    php = {"src/A.php": "<?php\n", "phpunit.xml.dist": "<phpunit/>\n"}
+    rc, _, err = entry({**php, "tools/build.py": "x = 1\n"})
+    check("php + python, phpunit only: exit", rc, 1)
+    check_true("php + python, phpunit only: names python, says PHPUnit covers PHP only",
+               "python" in err and "tests/run" in err and "PHP only" in err)
+    rc, out, _ = entry({**php, "tools/build.py": "x = 1\n", "tests/run": "#!/bin/sh\n"},
+                       executable=("tests/run",))
+    check("php + python, phpunit and tests/run: both run", (rc, out), (0, {"phpunit": "yes", "run": "yes"}))
+    rc, out, _ = entry({"src/A.php": "<?php\n", "tools/build.py": "x = 1\n", "tests/run": "#!/bin/sh\n"},
+                       executable=("tests/run",))
+    check("php + python, tests/run alone covers both", (rc, out), (0, {"phpunit": "no", "run": "yes"}))
+    rc, out, _ = entry({**php, "tools/lab/probe.py": "x = 1\n", "tools/lab/run.sh": "true\n"})
+    check("php + tools/lab scripts, phpunit only: lab is exempt", (rc, out), (0, {"phpunit": "yes", "run": "no"}))
+    rc, out, _ = entry({"tools/lab/probe.py": "x = 1\n"})
+    check("only tools/lab code: no code to test", (rc, out), (0, {"phpunit": "no", "run": "no"}))
 
 
 def test_the_template_runs_tests() -> None:

@@ -5,14 +5,17 @@
 # Install: python JP_TOOLS/init-ci.py  (copies this into your repo)
 #
 # --- Tests ---
-# The tests job runs whichever of these the repo has, and FAILS when the repo
-# has code and neither, since a test that did not run is not a pass:
+# The tests job runs whichever of these the repo has, and FAILS when some of
+# the repo's code has none, since a test that did not run is not a pass:
 #   phpunit.xml or phpunit.xml.dist  PHPUnit with pcov, then JP_TOOLS'
 #       coverage-gate.py on its Clover report, at the repository variable
-#       COVERAGE_FAIL_UNDER (default 95, METHODOLOGY 2.5).
-#   tests/run  an executable the project provides, for anything else. It owns
-#       its dependencies and its own coverage threshold (for Python,
+#       COVERAGE_FAIL_UNDER (default 95, METHODOLOGY 2.5). PHP only.
+#   tests/run  an executable the project provides. It owns its dependencies
+#       and its own coverage threshold (for Python,
 #       `coverage report --fail-under=N`), and its exit code is the verdict.
+# Per language: PHP code needs either; Python, JS or shell code needs
+# tests/run (a mixed repo with only phpunit.xml fails, naming the rest).
+# Code under tools/lab/ is exempt (METHODOLOGY 2.9).
 #
 # --- Where JP_TOOLS comes from ---
 # On GitHub, the public copy, unless the repository variable
@@ -225,9 +228,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # A test that did not run is not a pass (METHODOLOGY 8): a repo with code
-      # and no way to run its tests stops here, saying what to add, rather than
-      # going green with nothing tested.
+      # A test that did not run is not a pass (METHODOLOGY 8), checked PER
+      # LANGUAGE: PHPUnit tests PHP only, so a mixed repo's other code needs a
+      # tests/run, or it would go green with that language untested.
+      # tools/lab/ is exempt: lab files are held to their header, not to zero
+      # (METHODOLOGY 2.9).
       - name: How are this repo's tests run?
         id: entry
         shell: bash
@@ -244,14 +249,24 @@ jobs:
           fi
           echo "phpunit=$phpunit" >> "$GITHUB_OUTPUT"
           echo "run=$run" >> "$GITHUB_OUTPUT"
+          # Whether any tracked file outside tools/lab/ matches these patterns.
+          has() { [ -n "$(git ls-files -- "$@" ':(exclude)tools/lab/' | head -n 1)" ]; }
+          other=()
+          if has '*.py'; then other+=(python); fi
+          if has '*.js' '*.mjs' '*.cjs' '*.jsx' '*.ts' '*.tsx'; then other+=(js); fi
+          if has '*.sh' '*.bash'; then other+=(shell); fi
+          if [ "${#other[@]}" -gt 0 ] && [ "$run" = no ]; then
+            echo "This repo has ${other[*]} code and no tests/run: add an executable tests/run." >&2
+            echo "phpunit.xml covers PHP only. A test that did not run is not a pass." >&2
+            exit 1
+          fi
+          if has '*.php' && [ "$phpunit" = no ] && [ "$run" = no ]; then
+            echo "This repo has php code and no way to run its tests: add phpunit.xml(.dist)," >&2
+            echo "or an executable tests/run. A test that did not run is not a pass." >&2
+            exit 1
+          fi
           if [ "$phpunit" = no ] && [ "$run" = no ]; then
-            code=('*.py' '*.php' '*.js' '*.mjs' '*.cjs' '*.jsx' '*.ts' '*.tsx' '*.sh' '*.bash')
-            if [ -n "$(git ls-files -- "${code[@]}" | head -n 1)" ]; then
-              echo "This repo has code and no way to run its tests: add phpunit.xml(.dist)" >&2
-              echo "(PHP), or an executable tests/run. A test that did not run is not a pass." >&2
-              exit 1
-            fi
-            echo "No code in this repo: no tests to run."
+            echo "No code in this repo outside tools/lab/: no tests to run."
           fi
 
       # PHPUnit, with pcov as the coverage driver, writing Clover for the gate.
