@@ -36,6 +36,7 @@ from jpcheck.directives import directives
 from jpcheck.files import _detect_lang
 from platformtools.procname import name_process
 
+
 def tracked(repo: Path) -> list[str]:
     """Tracked files, NUL-separated so a name with a space stays whole."""
     r = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"],

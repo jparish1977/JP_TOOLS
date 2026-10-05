@@ -17,6 +17,7 @@ WHY
 import ctypes
 import subprocess
 import sys
+from unittest.mock import patch
 
 from _harness import ROOT, check, check_true, run
 from platformtools import procname
@@ -36,15 +37,12 @@ class _Exploding:
 
 def _with(platform: str, cdll: _Exploding) -> tuple[bool, int]:
     """(whether name_process raised, how often it called CDLL) on PLATFORM."""
-    saved_platform, saved_cdll = sys.platform, ctypes.CDLL
-    sys.platform, ctypes.CDLL = platform, cdll  # type: ignore[assignment, misc]  # reason: simulating another platform's libc for the test
-    try:
-        procname.name_process("jp-test")
-        raised = False
-    except Exception:  # noqa: BLE001  # reason: the property under test is that nothing escapes
-        raised = True
-    finally:
-        sys.platform, ctypes.CDLL = saved_platform, saved_cdll  # type: ignore[misc]  # reason: restoring the real ones
+    with patch.object(sys, "platform", platform), patch.object(ctypes, "CDLL", cdll):
+        try:
+            procname.name_process("jp-test")
+            raised = False
+        except Exception:  # noqa: BLE001  # reason: the property under test is that nothing escapes
+            raised = True
     return raised, cdll.calls
 
 
