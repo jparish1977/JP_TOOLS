@@ -126,13 +126,16 @@ def test_the_real_tool() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp)
         results = {}
-        for name, body in (("bare.ps1", BARE), ("justified.ps1", JUSTIFIED), ("unjustified.ps1", UNJUSTIFIED)):
+        for name, body in (("bare.ps1", BARE), ("justified.ps1", JUSTIFIED), ("unjustified.ps1", UNJUSTIFIED),
+                           ("bare[1].ps1", BARE)):
             (d / name).write_text(body, encoding="utf-8")
             code, doc = check_py(str(d / name))
             results[name] = (code, checks(doc))
     check("a bare Write-Host: exit 1, PSAvoidUsingWriteHost",
           results["bare.ps1"], (1, [("psscriptanalyzer", "fail", ["PSAvoidUsingWriteHost"]),
                                     ("directive-reason", "pass", [])]))
+    check("a name with wildcard characters is analysed, not matched as a pattern: exit 1",
+          results["bare[1].ps1"], results["bare.ps1"])
     check("suppressed with a Justification: exit 0, clean",
           results["justified.ps1"], (0, [("psscriptanalyzer", "pass", []), ("directive-reason", "pass", [])]))
     check_true("suppressed with no Justification: PSScriptAnalyzer passes it, directive-reason refuses it",

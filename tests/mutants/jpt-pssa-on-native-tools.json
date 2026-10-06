@@ -20,6 +20,11 @@
       "name": "a missing pwsh reported under the tool's name, not the check's",
       "edits": [["    return {\"tool\": \"psscriptanalyzer\", \"status\": \"unavailable\", \"issues\": [],", "    return {\"tool\": what, \"status\": \"unavailable\", \"issues\": [],"]],
       "target": "no pwsh: exit 2, psscriptanalyzer unavailable, naming pwsh"
+    },
+    {
+      "name": "the path is not wildcard-escaped",
+      "edits": [["\"$path = [System.Management.Automation.WildcardPattern]::Escape($env:JP_PSA_TARGET); \"", "\"$path = $env:JP_PSA_TARGET; \""]],
+      "target": "a name with wildcard characters is analysed, not matched as a pattern: exit 1"
     }
   ]
 }

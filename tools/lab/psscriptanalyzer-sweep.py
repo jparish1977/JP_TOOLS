@@ -39,11 +39,14 @@ from platformtools.procname import name_process
 SUFFIXES = (".ps1", ".psm1", ".psd1")
 
 # Reads the file list from SWEEP_LIST, one path a line; prints every finding
-# as {"path", "severity", "rule"}, an empty array when there are none.
+# as {"path", "severity", "rule"}, an empty array when there are none. Each
+# path is wildcard-escaped: -Path expands [ ] * ?, and an unescaped a[1].ps1
+# would be analysed as nothing and counted clean.
 ANALYSE = (
     "Import-Module PSScriptAnalyzer -ErrorAction Stop; "
     "$found = foreach ($f in Get-Content -LiteralPath $env:SWEEP_LIST) { "
-    "Invoke-ScriptAnalyzer -Path $f | ForEach-Object { "
+    "Invoke-ScriptAnalyzer -Path ([System.Management.Automation.WildcardPattern]::Escape($f)) "
+    "| ForEach-Object { "
     "[pscustomobject]@{ path = $f; severity = [string]$_.Severity; rule = $_.RuleName } } }; "
     "ConvertTo-Json -InputObject @($found) -Depth 3 -Compress"
 )

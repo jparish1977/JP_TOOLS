@@ -121,10 +121,14 @@ _NO_MODULE = 3
 # than failing Import-Module, so it reads as "not installed", not as a crash.
 # The findings go out as one JSON array, `[]` when there are none, built with
 # -InputObject so Windows PowerShell 5.1 (no -AsArray) prints an array too.
+# -Path expands wildcards, and Invoke-ScriptAnalyzer has no -LiteralPath, so
+# the path is escaped first: a script named a[1].ps1 otherwise matches no
+# file, is analysed as nothing, and would report a pass.
 _PSSA_SCRIPT = (
     "if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) { exit 3 }; "
     "Import-Module PSScriptAnalyzer -ErrorAction Stop; "
-    "$found = @(Invoke-ScriptAnalyzer -Path $env:JP_PSA_TARGET | ForEach-Object { "
+    "$path = [System.Management.Automation.WildcardPattern]::Escape($env:JP_PSA_TARGET); "
+    "$found = @(Invoke-ScriptAnalyzer -Path $path | ForEach-Object { "
     "[pscustomobject]@{ line = $_.Line; col = $_.Column; severity = [string]$_.Severity; "
     "rule = $_.RuleName; message = $_.Message } }); "
     "ConvertTo-Json -InputObject $found -Depth 3 -Compress"
