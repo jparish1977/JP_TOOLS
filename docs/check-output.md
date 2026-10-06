@@ -48,8 +48,12 @@ measured anything should test for the verdicts, and must treat every other
 status, including one not in this table, as "did not run". Reading only `pass`
 and `fail` as measured is the mistake to avoid: `warn` is a measurement too.
 
-A check that did not run carries a `note` saying why (the install command, the
-tool's exit code and the line that explains it).
+Every check carries `tool`, `status` and `issues`. `tool` is the check's own
+name (`ruff`, `smells`, `directive-reason`), whether or not it ran, so a reader
+can look a check up by it. In a directory run one tool can appear once per
+language it serves (`smells` for Python and again for shell). A check that did
+not run also carries a `note` saying why (the install command, the tool's exit
+code and the line that explains it).
 
 ## The documents
 

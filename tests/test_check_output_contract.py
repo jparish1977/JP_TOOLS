@@ -17,6 +17,8 @@ WHAT IS CHECKED
       a README with --skip-unsupported ({"target", "skipped"}, exit 0), and a
       file with findings, whose every issue carries a severity.
       The last needs ruff; SKIP, said, without it.
+    - Every check carries tool, status and issues, a check that did not run
+      included, and a directory run lists a tool once per language.
 
     python3 tests/test_check_output_contract.py
 """
@@ -115,6 +117,25 @@ def test_the_documents() -> None:
         check_true("a file with findings: it has issues to look at", bool(issues))
         check("a file with findings: every issue's severity is error or warning",
               sorted({i.get("severity", "(none)") for i in issues} - {"error", "warning"}), [])
+
+
+def test_every_check_names_its_tool() -> None:
+    """tool, status and issues on every check, whether or not it ran; a
+    directory run lists a tool once per language it serves."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        (d / "a.py").write_text("x = 1\n", encoding="utf-8")
+        (d / "b.sh").write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+        _, out = check_py(str(d))
+        doc = json.loads(out)
+        missing = [c.get("tool", "?") for c in doc["checks"] if not {"tool", "status", "issues"} <= set(c)]
+        check("a directory run: every check has tool, status and issues", missing, [])
+        check("a directory run: smells once per language it serves (python, shell)",
+              [c["tool"] for c in doc["checks"]].count("smells"), 2)
+        _, out = check_py(str(d / "a.py"), "--tools", "no-such-tool")
+        only = json.loads(out)["checks"]
+        check("a check that did not run still names its tool, with a note",
+              [(c["tool"], c["status"], "note" in c) for c in only], [("no-such-tool", "unknown", True)])
 
 
 if __name__ == "__main__":
