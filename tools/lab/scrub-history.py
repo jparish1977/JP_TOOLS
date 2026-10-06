@@ -28,7 +28,8 @@ SOURCE is a path or URL git can clone. RULES is JSON:
                                             them at the tip first, or the tip
                                             check fails
       "absent":  ["old", ...]               must appear nowhere afterwards (keep
-                                            tokens masked first); whole-word,
+                                            tokens masked first); not inside a
+                                            longer run of letters and digits,
                                             or a plain substring when the name
                                             holds / : ~ or .
     }
@@ -62,7 +63,11 @@ TESTED AGAINST: a throwaway three-commit repo with a name in a message, an
   clean history with a clean tip exits 0; a file named after it, untracked
   at the tip and listed in drop_paths, exits 0. Positive controls, each
   exit 1: a binary file holding the name (BINARY), a tip still naming it
-  (CHANGED), the same named file without drop_paths (PATH). And a real
+  (CHANGED), the same named file without drop_paths (PATH), a named file
+  whose bytes match an unnamed one that sorts first (PATH; the version that
+  took paths from rev-list --objects passed it), and a name beside a hyphen
+  (zeta-NAME.txt, PATH; a boundary counting - as a word character passed
+  it). And a real
   409-commit branch: every name gone except what was listed (identities the
   mailmap missed, one prose use, one file name, and the tip files still to
   clean), and a first draft's blind replacements inside working code listed
@@ -86,7 +91,9 @@ import shutil
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -95,23 +102,29 @@ from platformtools.procname import name_process
 PLACEHOLDER = "@@SCRUB_KEEP_{}@@"
 BINARY_PROBE = 8192   # filter-repo's own test: a NUL in the first 8 KB is binary
 
+Rules = dict[str, Any]
+Patterns = dict[str, re.Pattern[str]]
+
 
 class RunError(Exception):
     """The scrub could not run; the message says why."""
 
 
 def git(repo: Path, *args: str, check: bool = True) -> str:
-    r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, errors="replace")
+    r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
+                       errors="replace", check=False)
     if check and r.returncode != 0:
         raise RunError(f"git {' '.join(args[:2])} failed: {r.stderr.strip()[:300]}")
     return r.stdout
 
 
-def load_rules(path: Path) -> dict:
+def load_rules(path: Path) -> Rules:
     try:
         rules = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         raise RunError(f"cannot read rules {path}: {e}") from e
+    if not isinstance(rules, dict):
+        raise RunError(f"rules {path} must be a JSON object")
     for key in ("keep", "replace", "message_regex", "mailmap", "drop_paths", "absent"):
         rules.setdefault(key, [])
     for old, new in rules["replace"] + rules["message_regex"]:
@@ -127,7 +140,7 @@ def load_rules(path: Path) -> dict:
     return rules
 
 
-def expressions(rules: dict, messages: bool) -> str:
+def expressions(rules: Rules, messages: bool) -> str:
     """filter-repo's expressions file: keep tokens to placeholders, the
     replacements in order, placeholders back; message regexes last."""
     lines = [f"literal:{tok}==>{PLACEHOLDER.format(i)}" for i, tok in enumerate(rules["keep"])]
@@ -138,14 +151,67 @@ def expressions(rules: dict, messages: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
-def matcher(names: list[str]) -> dict[str, re.Pattern[str]]:
+def matcher(names: list[str]) -> Patterns:
+    """A name not inside a longer run of letters and digits: found beside -,
+    _ or . (zeta-name.txt, name_x), not inside a hash or a longer word."""
     return {n: re.compile(re.escape(n) if re.search(r"[/:~.]", n)
-                          else r"(?<![\w-])" + re.escape(n) + r"(?![\w-])") for n in names}
+                          else r"(?<![A-Za-z0-9])" + re.escape(n) + r"(?![A-Za-z0-9])") for n in names}
 
 
-def survivors(repo: Path, ref: str, rules: dict) -> list[str]:
+def _log_hits(repo: Path, ref: str, pats: Patterns, masked: Callable[[str], str]) -> list[str]:
+    """MESSAGE and IDENTITY hits, per commit."""
+    found = []
+    log = git(repo, "log", ref, "--format=%H%x00%an <%ae>%x00%cn <%ce>%x00%B%x01")
+    for rec in log.split("\x01"):
+        parts = rec.strip("\n").split("\x00")
+        if len(parts) < 4:
+            continue
+        sha, author, committer, message = parts
+        for n, p in pats.items():
+            if p.search(masked(message)):
+                found.append(f"MESSAGE {sha[:10]} {n}")
+            if p.search(author) or p.search(committer):
+                found.append(f"IDENTITY {sha[:10]} {n}")
+    return found
+
+
+def _path_hits(repo: Path, ref: str, pats: Patterns, masked: Callable[[str], str]) -> list[str]:
+    """PATH hits, from every commit's own changes, merges included: rev-list
+    --objects names each object once, under ONE path, so a named file whose
+    bytes match another file's would never be looked at. A directory's name is
+    checked as part of every path under it."""
+    every_path = set(git(repo, "log", "--format=", "--name-only", "--no-renames", "-m", ref).splitlines())
+    return [f"PATH {path} {n}" for path in sorted(every_path - {""})
+            for n, p in pats.items() if p.search(masked(path))]
+
+
+def _content_hits(repo: Path, ref: str, pats: Patterns, masked: Callable[[str], str]) -> list[str]:
+    """TEXT and BINARY hits, once per blob: identical bytes get one verdict, so
+    the paths it was seen under are only there to say where."""
+    paths: dict[str, set[str]] = {}
+    for line in git(repo, "rev-list", "--objects", ref).splitlines():
+        sha, _, path = line.partition(" ")
+        if path:
+            paths.setdefault(sha, set()).add(path)
+    data = subprocess.run(["git", "-C", str(repo), "cat-file", "--batch"],
+                          input="\n".join(paths).encode(), capture_output=True, check=True).stdout
+    found, i = [], 0
+    while i < len(data):
+        nl = data.index(b"\n", i)
+        sha, typ, size = data[i:nl].decode().split()
+        blob = data[nl + 1:nl + 1 + int(size)]
+        i = nl + 1 + int(size) + 1
+        if typ != "blob":
+            continue
+        kind = "BINARY" if b"\0" in blob[:BINARY_PROBE] else "TEXT"
+        text = masked(blob.decode("utf-8", "replace"))
+        found += [f"{kind} {', '.join(sorted(paths[sha]))} {n}" for n, p in pats.items() if p.search(text)]
+    return found
+
+
+def survivors(repo: Path, ref: str, rules: Rules) -> list[str]:
     """Every place an absent name is still found on REF: MESSAGE, IDENTITY,
-    TEXT and BINARY file contents, and PATH."""
+    PATH, and TEXT or BINARY file contents. Keep tokens are masked first."""
     pats = matcher(rules["absent"])
 
     def masked(text: str) -> str:
@@ -153,42 +219,8 @@ def survivors(repo: Path, ref: str, rules: dict) -> list[str]:
             text = text.replace(tok, "")
         return text
 
-    found = []
-    log = git(repo, "log", ref, "--format=%H%x00%an <%ae>%x00%cn <%ce>%x00%B%x01")
-    for rec in log.split("\x01"):
-        parts = rec.strip("\n").split("\x00")
-        if len(parts) < 4:
-            continue
-        sha, author, committer, body = parts
-        for n, p in pats.items():
-            if p.search(masked(body)):
-                found.append(f"MESSAGE {sha[:10]} {n}")
-            if p.search(author) or p.search(committer):
-                found.append(f"IDENTITY {sha[:10]} {n}")
-    paths: dict[str, set[str]] = {}
-    for line in git(repo, "rev-list", "--objects", ref).splitlines():
-        sha, _, path = line.partition(" ")
-        if path:
-            paths.setdefault(sha, set()).add(path)
-            for n, p in pats.items():
-                if p.search(masked(path)):
-                    found.append(f"PATH {path} {n}")
-    data = subprocess.run(["git", "-C", str(repo), "cat-file", "--batch"],
-                          input="\n".join(paths).encode(), capture_output=True, check=True).stdout
-    i = 0
-    while i < len(data):
-        nl = data.index(b"\n", i)
-        sha, typ, size = data[i:nl].decode().split()
-        body = data[nl + 1:nl + 1 + int(size)]
-        i = nl + 1 + int(size) + 1
-        if typ != "blob":
-            continue
-        kind = "BINARY" if b"\0" in body[:BINARY_PROBE] else "TEXT"
-        text = masked(body.decode("utf-8", "replace"))
-        for n, p in pats.items():
-            if p.search(text):
-                found.append(f"{kind} {', '.join(sorted(paths[sha]))} {n}")
-    return sorted(set(found))
+    found = _log_hits(repo, ref, pats, masked) + _path_hits(repo, ref, pats, masked)
+    return sorted(set(found + _content_hits(repo, ref, pats, masked)))
 
 
 def keep_counts(repo: Path, ref: str, keep: list[str]) -> Counter[str]:
@@ -200,20 +232,9 @@ def keep_counts(repo: Path, ref: str, keep: list[str]) -> Counter[str]:
     return counts
 
 
-def scrub(source: str, rules: dict, work: Path, branch: str) -> int:
-    if work.exists() and any(work.iterdir()):
-        raise RunError(f"{work} is not empty: give a new directory")
-    if shutil.which("git-filter-repo") is None:
-        raise RunError("git-filter-repo is not installed (apt git-filter-repo)")
-    clone = work / "repo"
-    r = subprocess.run(["git", "clone", "-q", "--no-local", "--single-branch", "--branch", branch,
-                        source, str(clone)], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RunError(f"clone failed: {r.stderr.strip()[:300]}")
-    old_tip = git(clone, "rev-parse", "HEAD").strip()
-    # Listed before filter-repo runs: it prunes the old commits and trees.
-    old_files = git(clone, "ls-tree", "-r", "--full-tree", "HEAD").splitlines()
-    keep_before = keep_counts(clone, "HEAD", rules["keep"])
+def filter_repo(clone: Path, work: Path, rules: Rules) -> None:
+    """git filter-repo over CLONE with RULES' expressions, mailmap and drops,
+    their files written into WORK."""
     (work / "replace-text").write_text(expressions(rules, messages=False), encoding="utf-8")
     (work / "replace-message").write_text(expressions(rules, messages=True), encoding="utf-8")
     (work / "mailmap").write_text("\n".join(rules["mailmap"]) + "\n", encoding="utf-8")
@@ -224,30 +245,52 @@ def scrub(source: str, rules: dict, work: Path, branch: str) -> int:
         args += ["--mailmap", str(work / "mailmap")]
     if rules["drop_paths"]:
         args += ["--invert-paths"] + [arg for p in rules["drop_paths"] for arg in ("--path", p)]
-    r = subprocess.run(args, capture_output=True, text=True)
+    r = subprocess.run(args, capture_output=True, text=True, check=False)
     if r.returncode != 0:
         raise RunError(f"git filter-repo failed: {r.stderr.strip()[-500:]}")
-    new_tip = git(clone, "rev-parse", "HEAD").strip()
-    new_files = git(clone, "ls-tree", "-r", "--full-tree", "HEAD").splitlines()
-    tip_changes = [f"TIP {path}" for path in
-                   sorted({line.split("\t", 1)[1] for line in set(old_files) ^ set(new_files)})]
     commit_map = clone / ".git" / "filter-repo" / "commit-map"
     if commit_map.is_file():
         shutil.copy(commit_map, work / "commit-map")
-    left = survivors(clone, "HEAD", rules)
+
+
+def scrub(source: str, rules: Rules, work: Path, branch: str) -> int:
+    if work.exists() and any(work.iterdir()):
+        raise RunError(f"{work} is not empty: give a new directory")
+    if shutil.which("git-filter-repo") is None:
+        raise RunError("git-filter-repo is not installed (apt git-filter-repo)")
+    clone = work / "repo"
+    r = subprocess.run(["git", "clone", "-q", "--no-local", "--single-branch", "--branch", branch,
+                        source, str(clone)], capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        raise RunError(f"clone failed: {r.stderr.strip()[:300]}")
+    old_tip = git(clone, "rev-parse", "HEAD").strip()
+    # Listed before filter-repo runs: it prunes the old commits and trees.
+    old_files = git(clone, "ls-tree", "-r", "--full-tree", "HEAD").splitlines()
+    keep_before = keep_counts(clone, "HEAD", rules["keep"])
+    filter_repo(clone, work, rules)
+    new_files = git(clone, "ls-tree", "-r", "--full-tree", "HEAD").splitlines()
+    tip_changes = [f"TIP {path}" for path in
+                   sorted({line.split("\t", 1)[1] for line in set(old_files) ^ set(new_files)})]
     keep_after = keep_counts(clone, "HEAD", rules["keep"])
-    moved = [f"KEEP {tok}: {keep_before[tok]} at the old tip, {keep_after[tok]} now"
-             for tok in rules["keep"] if keep_before[tok] != keep_after[tok]]
-    commits = git(clone, "rev-list", "--count", "HEAD").strip()
-    print(f"scrub-history: {branch} {old_tip[:10]} -> {new_tip[:10]}, {commits} commits, in {clone}")
+    left = survivors(clone, "HEAD", rules) + [
+        f"KEEP {tok}: {keep_before[tok]} at the old tip, {keep_after[tok]} now"
+        for tok in rules["keep"] if keep_before[tok] != keep_after[tok]]
+    print(f"scrub-history: {branch} {old_tip[:10]} -> {git(clone, 'rev-parse', 'HEAD').strip()[:10]}, "
+          f"{git(clone, 'rev-list', '--count', 'HEAD').strip()} commits, in {clone}")
     print(f"scrub-history: old-to-new commit map: {work / 'commit-map'}")
-    for line in left + moved:
+    return report(left, tip_changes, branch, old_tip)
+
+
+def report(left: list[str], tip_changes: list[str], branch: str, old_tip: str) -> int:
+    """Print what is left and what changed at the tip; 1 if either, else 0
+    with the push a person would run."""
+    for line in left:
         print(f"scrub-history: LEFT {line}")
     for line in tip_changes:
         print(f"scrub-history: CHANGED {line}")
-    if left or moved or tip_changes:
-        print(f"scrub-history: {len(left)} place(s) still name something, {len(moved)} keep token(s) "
-              f"moved, {len(tip_changes)} file(s) at the tip changed")
+    if left or tip_changes:
+        print(f"scrub-history: {len(left)} place(s) still name something or moved a keep token, "
+              f"{len(tip_changes)} file(s) at the tip changed")
         return 1
     print("scrub-history: nothing named survives in messages, identities, paths or file contents,")
     print("scrub-history: and the tip's files are byte-identical to the source's: only history changed")
