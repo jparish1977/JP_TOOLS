@@ -8,13 +8,13 @@ ANSWERS: before moving or splitting a root script, who outside this repo
   repo's root scripts AND uses a by-path loader, with the attributes read off
   a module variable.
 
-TESTED AGAINST: the 49 other git repos under ~/projects on a laptop: nine
-  files named a script; two really loaded JP_TOOLS' check.py (another repo's
-  tests/gate-baseline.py, reading is_project_file and lab_claim, and
-  a consuming repo's tools/lab/gate/checkmeasure.py, reading _smell_measure),
-  the other seven named another repo's own check.py or fix.py; 0 unread.
-  Positive control: checkmeasure.py found with `_smell_measure` among its
-  reads. Its first run reported four a consuming repo files UNREAD: they were
+TESTED AGAINST: 49 other cloned git repos on a laptop: nine files named a
+  script; two really loaded JP_TOOLS' check.py (one repo's
+  tests/gate-baseline.py, reading is_project_file and lab_claim, and another's
+  tools/lab/gate/checkmeasure.py, reading _smell_measure), the other seven
+  named another repo's own check.py or fix.py; 0 unread. Positive control:
+  checkmeasure.py found with `_smell_measure` among its reads. Its first run
+  reported four files in one repo UNREAD: they were
   names with spaces that a whitespace split had broken, the tool's own bug,
   fixed by reading `ls-files -z`; that is why unread files are counted.
 

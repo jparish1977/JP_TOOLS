@@ -14,13 +14,13 @@ ANSWERS: before those rules are switched on in configs/ (METHODOLOGY 2.14:
     js      eslint      complexity, max-depth, max-lines-per-function
     shell, cpp          no standard rule measured: counted as files only
 
-TESTED AGAINST: the 40 git repos under ~/projects on a 32-core box,
+TESTED AGAINST: 40 cloned git repos on a 32-core box,
   2026-09-29, 2s, every cell measured. python 22 repos, 17 with findings:
   C901>10 289, C901>15 132, PLR0912 179, PLR0915 186. php 8 repos, 4 with
   findings: CyclomaticComplexity 5 errors (>20) and 7 warnings (>10). js 6
   repos, 4 with findings: complexity>10 40, >15 22, max-lines-per-function
   16, max-depth 5. The positive controls are those findings, e.g. phpcs's
-  errors in a consuming repo. A first run counted every eslint message with no
+  5 errors. A first run counted every eslint message with no
   rule id as a parse error (162); they were the repos' own eslint-disable
   comments reported unused, now switched off, and only a fatal message
   counts as unparsed.
