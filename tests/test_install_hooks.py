@@ -401,6 +401,27 @@ def commit_msg_cases(tmp: Path) -> None:
     count = git(repo, "rev-list", "--count", "HEAD").stdout.strip()
     check("... and none of those commits was made", count == "2", count)
 
+    # `git commit -v` puts the staged diff below the scissors line, and git
+    # cuts it off before saving: a link there is in a FILE, not the message.
+    # The editor stands in for a person typing SUBJECT above what git wrote.
+    def commit_verbose(subject: str) -> subprocess.CompletedProcess[str]:
+        # The subject in the file too, so each call stages a change.
+        (repo / "c.md").write_text(f"{SESSION_LINK} {subject}\n", encoding="utf-8")
+        git(repo, "add", "--", "c.md")
+        editor = f"sh -c 'printf \"%s\\n\" \"{subject}\" | cat - \"$1\" > \"$1.t\" && mv \"$1.t\" \"$1\"' -"
+        return subprocess.run(
+            ["git", "-c", "user.email=test@example.invalid", "-c", "user.name=JP_TOOLS test",
+             "-c", "commit.gpgsign=false", "commit", "-v"],
+            cwd=repo, capture_output=True, text=True, check=False,
+            env=dict(os.environ, GIT_EDITOR=editor))
+
+    r = commit_verbose("edit notes")
+    check("git commit -v: a link only in the staged diff, below the scissors line, commits",
+          r.returncode == 0, r.stdout + r.stderr)
+    r = commit_verbose(f"edit notes {SESSION_LINK}")
+    check("git commit -v: a link in the message above the scissors line is still refused",
+          r.returncode != 0 and "commit REFUSED" in r.stdout + r.stderr, r.stdout + r.stderr)
+
 
 def fake_jp_tools(at: Path, with_template: bool = True, git_repo: bool = True) -> Path:
     """A JP_TOOLS tree from this checkout's working files: a git repo on master

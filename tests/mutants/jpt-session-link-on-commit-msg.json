@@ -3,7 +3,7 @@
   "mutants": [
     {
       "name": "the link is never found",
-      "edits": [["found=$(grep -n -i -E 'claude\\.ai/code/session_' \"$msg_file\")", "found="]],
+      "edits": [["| grep -n -i -E 'claude\\.ai/code/session_')", "| grep -n -i -E 'claude\\.ai/code/session_' | grep -v .)"]],
       "target": "a session link in the subject is refused, naming the line"
     },
     {
@@ -15,6 +15,11 @@
       "name": "a found link is let through",
       "edits": [["    echo \"=====================================\"\n    exit 1\nfi\nexit 0", "    echo \"=====================================\"\nfi\nexit 0"]],
       "target": "... and none of those commits was made"
+    },
+    {
+      "name": "the staged diff below the scissors line is read as message",
+      "edits": [["found=$(sed '/^. -\\{24\\} >8 -\\{24\\}$/,$d' \"$msg_file\" |", "found=$(cat \"$msg_file\" |"]],
+      "target": "git commit -v: a link only in the staged diff, below the scissors line, commits"
     }
   ]
 }

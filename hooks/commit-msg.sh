@@ -11,7 +11,10 @@
 # (claude.ai/code/session_...). Claude Code run from claude.ai appends one to
 # its commits; it points at a private session, and a commit message is
 # published with the repository and kept in its history for good. Every line
-# is read, comments included: a link is refused wherever it is.
+# of the message is read, comments included, down to git's scissors line:
+# below it `git commit -v` puts the staged diff, which git cuts off before
+# the message is saved, so a change to a file that mentions such a link is
+# not refused for it.
 
 TEMPLATE_API=1
 
@@ -36,7 +39,9 @@ if [ -z "$msg_file" ] || [ ! -f "$msg_file" ]; then
         "reinstall the hook so its shim passes git's argument on."
 fi
 
-found=$(grep -n -i -E 'claude\.ai/code/session_' "$msg_file")
+# The scissors line is the comment character, a space, 24 dashes, " >8 " and
+# 24 dashes; any comment character is allowed. Lines keep their numbers.
+found=$(sed '/^. -\{24\} >8 -\{24\}$/,$d' "$msg_file" | grep -n -i -E 'claude\.ai/code/session_')
 if [ -n "$found" ]; then
     echo ""
     echo "====================================="
