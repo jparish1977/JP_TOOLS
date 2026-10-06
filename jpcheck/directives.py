@@ -10,6 +10,8 @@ reason required:
     // phpcs:ignore Generic.Files.LineLength             phpcs
     // eslint-disable-next-line no-eval                  eslint
     /* stylelint-disable color-no-hex */                 stylelint
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '')]
+                                                         PSScriptAnalyzer
 
 A C out-of-bounds write that fails the gate passes with the cppcheck line above
 it, and a PHP type error the same with the phpstan one. So each of these fails
@@ -29,6 +31,7 @@ explained. tests/test_directive_forms_real_tools.py re-runs every form.
     // phpcs:ignore Sniff.Name -- why                    (and disable)
     // eslint-disable-next-line rule -- why              (every eslint-disable)
     /* stylelint-disable rule -- why */                  (every stylelint-disable)
+    [...SuppressMessageAttribute('Rule', '', Justification = 'why')]
 
 A reason does not have to be long; it has to be there, in letters.
 
@@ -93,8 +96,18 @@ _STYLELINT = Directive("stylelint-disable",
                        _C_OPEN + r"stylelint-disable(?:-next-line|-line)?\b(?P<rest>.*)$",
                        _DASHES)
 
+# PSScriptAnalyzer's suppression is an attribute, and it silences the rule
+# whether or not it carries a Justification (measured, 1.25.0), so the
+# Justification is the reason this requires. Matched on one line; an
+# attribute split over several lines reads as unreasoned, failing closed.
+_PSSA = Directive("SuppressMessageAttribute",
+                  r"\[\s*(?:System\.)?Diagnostics\.CodeAnalysis\.SuppressMessage(?:Attribute)?"
+                  r"\s*\((?P<rest>.*)$",
+                  r"Justification\s*=\s*(?P<q>['\"])(?P<why>.*?)(?P=q)")
+
 _DIRECTIVES: dict[str, list[Directive]] = {
     "shell": [_SHELLCHECK],
+    "powershell": [_PSSA],
     "cpp":   [_CPPCHECK],
     "php":   [_PHPSTAN_LINE, _PHPSTAN_ID, _PHPCS],
     "js":    [_ESLINT],
@@ -139,6 +152,8 @@ _FORM = {
     "phpcs": "'// phpcs:ignore Sniff.Name -- why'",
     "eslint-disable": "'// eslint-disable-next-line rule -- why'",
     "stylelint-disable": "'/* stylelint-disable rule -- why */'",
+    "SuppressMessageAttribute": ("[Diagnostics.CodeAnalysis.SuppressMessageAttribute('Rule', '', "
+                                 "Justification = 'why')] on one line"),
 }
 
 

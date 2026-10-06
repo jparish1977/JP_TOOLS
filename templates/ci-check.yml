@@ -62,7 +62,7 @@ jobs:
         # is detected and skipped, with a message, so nothing needs deleting.
         # That matters because check.py exits 2 when a check could not run:
         # an entry left running over a language with no files would go red.
-        lang: [python, js, php, shell]
+        lang: [python, js, php, shell, powershell]
 
     steps:
       # Full history: the smells arm reads the PR's base commit, and a shallow
@@ -84,6 +84,7 @@ jobs:
             # By suffix only: an extensionless shell script is found by its #!
             # when check.py is handed it, but a glob cannot see a shebang.
             shell)  pats=('*.sh' '*.bash') ;;
+            powershell) pats=('*.ps1' '*.psm1' '*.psd1') ;;
           esac
           if [ -n "$(git ls-files -- "${pats[@]}" | head -n 1)" ]; then
             echo "found=yes" >> "$GITHUB_OUTPUT"
@@ -201,6 +202,9 @@ jobs:
               pip install "$shfmt_pin"
               shellcheck --version
               shfmt --version ;;
+            # PowerShell 7 and PSScriptAnalyzer at requirements-system.txt's
+            # versions, by JP_TOOLS' own script, which says how.
+            powershell) bash ../JP_TOOLS/install-pwsh.sh ;;
           esac
 
       # The install above, read back against the manifest it came from: a pin

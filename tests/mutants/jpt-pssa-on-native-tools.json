@@ -1,0 +1,25 @@
+{
+  "about": "The PowerShell arm: severities, a missing pwsh or module, and a report it cannot read. Run: mutate-on-target.py TREE jpcheck/native_tools.py tests/test_check_powershell.py tests/mutants/jpt-pssa-on-native-tools.json",
+  "mutants": [
+    {
+      "name": "Information blocks too",
+      "edits": [["        \"severity\": \"warning\" if f.get(\"severity\") == \"Information\" else \"error\",", "        \"severity\": \"error\","]],
+      "target": "findings: Warning and ParseError block, Information warns"
+    },
+    {
+      "name": "a missing module not recognised",
+      "edits": [["    if result.returncode == _NO_MODULE:\n        return _pssa_missing(\"PSScriptAnalyzer\", PSSA_INSTALL)\n", ""]],
+      "target": "no module: unavailable, naming the Install-Module command"
+    },
+    {
+      "name": "a report that is not JSON read as a pass",
+      "edits": [["        return {\"tool\": \"psscriptanalyzer\", \"status\": \"error\", \"issues\": [],", "        return {\"tool\": \"psscriptanalyzer\", \"status\": \"pass\", \"issues\": [],"]],
+      "target": "a report that is not JSON: error, never a pass"
+    },
+    {
+      "name": "a missing pwsh reported under the tool's name, not the check's",
+      "edits": [["    return {\"tool\": \"psscriptanalyzer\", \"status\": \"unavailable\", \"issues\": [],", "    return {\"tool\": what, \"status\": \"unavailable\", \"issues\": [],"]],
+      "target": "no pwsh: exit 2, psscriptanalyzer unavailable, naming pwsh"
+    }
+  ]
+}

@@ -47,13 +47,44 @@ def node_modules(d: Path, versions: dict[str, str]) -> None:
 
 
 def pins(root: Path, *arms: str, python: dict[str, str] | None = None,
-         installs: Path | None = None) -> tuple[int, str]:
-    """(exit, everything printed) for check-pins over ROOT's manifests."""
+         installs: Path | None = None,
+         ps: tuple[str | None, dict[str, str]] = (None, {})) -> tuple[int, str]:
+    """(exit, everything printed) for check-pins over ROOT's manifests. PS is
+    what pwsh reports: its version (None, not installed) and its modules."""
     out = io.StringIO()
     have = python or {}
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-        code = PINS.main(list(arms), root=root, roots=(installs or root,), installed=have.get)
+        code = PINS.main(list(arms), root=root, roots=(installs or root,), installed=have.get,
+                         powershell=lambda _modules: ps)
     return code, out.getvalue()
+
+
+SYSTEM = ("shellcheck 0.9.0 shellcheck koalaman.shellcheck\n"
+          "pwsh 7.6.5 powershell Microsoft.PowerShell\n"
+          "pwsh:PSScriptAnalyzer 1.25.0 - -  # the linter\n")
+
+
+def test_powershell() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        (d / "requirements-system.txt").write_text(SYSTEM, encoding="utf-8")
+        check("powershell, pwsh newer than tested and the module at its pin: exit",
+              pins(d, "powershell", ps=("7.6.6", {"PSScriptAnalyzer": "1.25.0"}))[0], OK)
+        code, out = pins(d, "powershell", ps=("7.6.5", {"PSScriptAnalyzer": "1.24.0"}))
+        check("powershell, the module at another version: exit", code, FINDINGS)
+        check_true("powershell, another version: names both",
+                   "PSScriptAnalyzer is pinned 1.25.0, installed 1.24.0" in out)
+        code, out = pins(d, "powershell", ps=("7.6.5", {}))
+        check("powershell, the module not installed: exit", code, FINDINGS)
+        check_true("powershell, not installed: says so", "PSScriptAnalyzer 1.25.0 is not installed" in out)
+        code, out = pins(d, "powershell", ps=("7.4.1", {"PSScriptAnalyzer": "1.25.0"}))
+        check("powershell, pwsh older than tested: exit", code, FINDINGS)
+        check_true("powershell, older: says so", "pwsh 7.4.1 is older than the tested 7.6.5" in out)
+        check("powershell, no pwsh at all: exit", pins(d, "powershell")[0], NOT_RUN)
+        (d / "requirements-system.txt").write_text(SYSTEM.replace("1.25.0", ">=1.20"), encoding="utf-8")
+        code, out = pins(d, "powershell", ps=("7.6.5", {"PSScriptAnalyzer": "1.25.0"}))
+        check("powershell, a module 'pin' that is a range: exit", code, FINDINGS)
+        check_true("powershell, a range: not pinned", "is not pinned to one version" in out)
 
 
 def test_python() -> None:
@@ -147,11 +178,14 @@ def test_jp_tools_own_manifests_are_pinned() -> None:
     composer = json.loads((ROOT / "composer.json").read_text(encoding="utf-8"))["require-dev"]
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["dependencies"]
     requirements = {name: spec.removeprefix("==") for name, spec in PINS.python_pins(ROOT)}
+    system = PINS.system_pins(ROOT, "pwsh")
+    pwsh = next(pin for tool, pin in system if tool == "pwsh")
+    modules = {tool.split(":", 1)[1]: pin for tool, pin in system if ":" in tool}
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp)
         vendor(d, composer)
         node_modules(d, package)
-        code, out = pins(ROOT, python=requirements, installs=d)
+        code, out = pins(ROOT, python=requirements, installs=d, ps=(pwsh, modules))
         check("JP_TOOLS' own manifests, each pinned to one version: exit", code, OK)
         if code != OK:
             print(out)

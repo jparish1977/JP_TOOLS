@@ -1,4 +1,7 @@
 # JP_TOOLS install -- Windows PowerShell
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'an installer run by a person at a console: its progress lines are for them')]
+param()
+
 Write-Host "==> Python tools (pinned in requirements-dev.txt)"
 pip install -r "$PSScriptRoot\requirements-dev.txt"
 

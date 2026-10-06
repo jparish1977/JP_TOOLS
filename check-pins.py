@@ -10,8 +10,11 @@ per arm, each read against where its own installer puts things:
             ~/.local/share/jp-tools-venv/bin/python check-pins.py python)
     php     composer.json require-dev, against vendor/composer/installed.json
     js      package.json dependencies, against node_modules/NAME/package.json
+    powershell  requirements-system.txt's pwsh and pwsh:MODULE lines, against
+            pwsh itself: pwsh at least its tested version, each module at
+            exactly its pin
 
-    python3 check-pins.py [python] [php] [js]      (default: every arm)
+    python3 check-pins.py [python] [php] [js] [powershell]      (default: every arm)
 
 vendor/ and node_modules/ are looked for here, then in the main checkout when
 this is a worktree, as check.py looks for the tools themselves.
@@ -29,7 +32,10 @@ altogether (no vendor/, no node_modules/), so that arm was not looked at.
 import argparse
 import importlib.metadata
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -155,7 +161,78 @@ def check_js(root: Path, roots: tuple[Path, ...]) -> list[str]:
     return findings
 
 
-ARMS = ("python", "php", "js")
+def system_pins(root: Path, prefix: str) -> list[tuple[str, str]]:
+    """(TOOL, VERSION) for each requirements-system.txt line whose TOOL is PREFIX
+    or starts with PREFIX:, in file order."""
+    path = root / "requirements-system.txt"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as e:
+        raise NotRunError(f"cannot read {path}: {e}") from e
+    out = []
+    for line in lines:
+        words = line.split("#", 1)[0].split()
+        if len(words) >= 2 and (words[0] == prefix or words[0].startswith(prefix + ":")):
+            out.append((words[0], words[1]))
+    return out
+
+
+# PowerShell's own version, then "NAME VERSION" for the highest installed
+# version of each module named in JP_PINS_MODULES: the one Import-Module loads.
+_PS_QUERY = (
+    "$PSVersionTable.PSVersion.ToString(); "
+    "foreach ($m in $env:JP_PINS_MODULES -split ',') { if ($m) { "
+    "Get-Module -ListAvailable $m | Sort-Object Version -Descending | Select-Object -First 1 | "
+    "ForEach-Object { $_.Name + ' ' + $_.Version.ToString() } } }"
+)
+
+
+def powershell_installed(modules: list[str]) -> tuple[str | None, dict[str, str]]:
+    """(pwsh's version, {module: highest installed version}); (None, {}) without pwsh."""
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if pwsh is None:
+        return None, {}
+    r = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", _PS_QUERY],
+                       capture_output=True, text=True, check=False,
+                       env={**os.environ, "JP_PINS_MODULES": ",".join(modules)})
+    lines = r.stdout.splitlines()
+    have = dict(ln.split(" ", 1) for ln in lines[1:] if " " in ln)
+    return (lines[0].strip() if lines else None), have
+
+
+def _at_least(have: str, least: str) -> bool:
+    def parts(v: str) -> tuple[int, ...]:
+        return tuple(int(p) for p in re.findall(r"\d+", v)[:3])
+    return parts(have) >= parts(least)
+
+
+def check_powershell(root: Path, query: Callable[[list[str]], tuple[str | None, dict[str, str]]]
+                     = powershell_installed) -> list[str]:
+    """pwsh at least requirements-system.txt's tested version (apt and snap
+    ship one release, so it is a minimum), and each pwsh:MODULE at exactly its
+    pin, the Gallery serving every release. The highest installed version is
+    the one compared: it is the one Import-Module loads."""
+    pins = system_pins(root, "pwsh")
+    modules = {tool.split(":", 1)[1]: pin for tool, pin in pins if ":" in tool}
+    least = next((pin for tool, pin in pins if tool == "pwsh"), None)
+    version, have = query(list(modules))
+    if version is None:
+        raise NotRunError("pwsh is not installed (requirements-system.txt): install PowerShell 7")
+    print(f"powershell: requirements-system.txt against pwsh {version}")
+    findings = []
+    if least and not _at_least(version, least):
+        findings.append(f"powershell: pwsh {version} is older than the tested {least}")
+    for name, pin in modules.items():
+        if not EXACT.fullmatch(pin):
+            findings.append(f"powershell: {name} {pin} is not pinned to one version")
+        elif name not in have:
+            findings.append(f"powershell: {name} {pin} is not installed")
+        elif have[name] != pin:
+            findings.append(f"powershell: {name} is pinned {pin}, installed {have[name]}")
+    return findings
+
+
+ARMS = ("python", "php", "js", "powershell")
 
 
 class _Parser(argparse.ArgumentParser):
@@ -168,7 +245,8 @@ class _Parser(argparse.ArgumentParser):
 
 
 def main(argv: list[str] | None = None, root: Path = ROOT, roots: tuple[Path, ...] | None = None,
-         installed: Callable[[str], str | None] = python_installed) -> int:
+         installed: Callable[[str], str | None] = python_installed,
+         powershell: Callable[[list[str]], tuple[str | None, dict[str, str]]] = powershell_installed) -> int:
     name_process("check-pins")
     parser = _Parser(description="Check that the gate's tools are pinned, and installed at their pins.")
     parser.add_argument("arms", nargs="*", choices=ARMS, metavar="ARM",
@@ -182,6 +260,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT, roots: tuple[Path, ..
         "python": lambda: check_python(root, installed),
         "php": lambda: check_php(root, install_roots),
         "js": lambda: check_js(root, install_roots),
+        "powershell": lambda: check_powershell(root, powershell),
     }
     findings, not_run = [], []
     for arm in args.arms or ARMS:

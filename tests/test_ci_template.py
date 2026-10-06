@@ -262,7 +262,24 @@ def test_the_installs_are_read_back_against_their_pins() -> None:
     own = steps((ROOT / ".github" / "workflows" / "check.yml").read_text(encoding="utf-8"))
     check("JP_TOOLS' own CI reads back every arm",
           sorted(str(s["run"]) for s in own if s.get("name") == PIN_STEP),
-          ["python check-pins.py js", "python check-pins.py python php"])
+          ["python check-pins.py js", "python check-pins.py python php powershell"])
+
+
+def test_the_template_checks_powershell() -> None:
+    """A powershell job: found by its suffixes, PowerShell installed by
+    JP_TOOLS' install-pwsh.sh, and its pins read back like any other arm's."""
+    doc = yaml.safe_load(TEMPLATE.read_text(encoding="utf-8"))
+    check_true("powershell is in the language matrix",
+               "powershell" in doc["jobs"]["check"]["strategy"]["matrix"]["lang"])
+    present = next(s for s in steps(TEMPLATE.read_text(encoding="utf-8")) if s.get("id") == "present")
+    check_true("a powershell job looks for .ps1, .psm1 and .psd1",
+               "powershell) pats=('*.ps1' '*.psm1' '*.psd1')" in str(present["run"]))
+    check_true("the powershell install runs JP_TOOLS' install-pwsh.sh",
+               "powershell) bash ../JP_TOOLS/install-pwsh.sh ;;" in install_script("powershell"))
+    own = steps((ROOT / ".github" / "workflows" / "check.yml").read_text(encoding="utf-8"))
+    check_true("JP_TOOLS' own CI installs PowerShell and checks its .ps1 files",
+               any(s.get("run") == "bash install-pwsh.sh" for s in own)
+               and any("'*.ps1' '*.psm1' '*.psd1'" in str(s.get("run", "")) for s in own))
 
 
 ENTRY_STEP = "How are this repo's tests run?"

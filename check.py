@@ -49,7 +49,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("target", help="File or directory to check")
     parser.add_argument("--lang",  choices=["python", "js", "css", "html", "php", "cpp",
-                                            "shell", "auto"],
+                                            "shell", "powershell", "auto"],
                         default="auto",
                         help="Language override (default: auto-detect)")
     parser.add_argument("--tools", metavar="TOOLS",

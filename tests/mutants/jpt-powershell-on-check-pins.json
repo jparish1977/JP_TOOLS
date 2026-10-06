@@ -1,0 +1,25 @@
+{
+  "about": "check-pins' powershell arm: pwsh at least its tested version, each module at exactly its pin, no pwsh is not run. Run: mutate-on-target.py TREE check-pins.py tests/test_check_pins.py tests/mutants/jpt-powershell-on-check-pins.json",
+  "mutants": [
+    {
+      "name": "an older pwsh accepted",
+      "edits": [["    if least and not _at_least(version, least):", "    if False:"]],
+      "target": "powershell, pwsh older than tested: exit"
+    },
+    {
+      "name": "a module at another version accepted",
+      "edits": [["        elif have[name] != pin:", "        elif False:"]],
+      "target": "powershell, the module at another version: exit"
+    },
+    {
+      "name": "no pwsh read as nothing to check",
+      "edits": [["        raise NotRunError(\"pwsh is not installed (requirements-system.txt): install PowerShell 7\")", "        return []"]],
+      "target": "powershell, no pwsh at all: exit"
+    },
+    {
+      "name": "a module range accepted as a pin",
+      "edits": [["        if not EXACT.fullmatch(pin):\n            findings.append(f\"powershell:", "        if False:\n            findings.append(f\"powershell:"]],
+      "target": "powershell, a range: not pinned"
+    }
+  ]
+}

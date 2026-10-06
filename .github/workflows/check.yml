@@ -54,6 +54,10 @@ jobs:
             $SUDO apt-get install -y -q shellcheck || { $SUDO apt-get update -q && $SUDO apt-get install -y -q shellcheck; }
           fi
           shellcheck --version
+      # PowerShell 7 and PSScriptAnalyzer, at requirements-system.txt's
+      # versions, for the PowerShell arm; the script says how.
+      - name: PowerShell and PSScriptAnalyzer
+        run: bash install-pwsh.sh
       # composer.json requires iteration8/core and iteration8/utilities
       # (find-dupes.php's library), private repositories this forge mirrors
       # under the owner in the variable ITERATION8_LIBRARIES_OWNER, read with
@@ -79,10 +83,11 @@ jobs:
           auth=$(python -c 'import json, os, sys
           print(json.dumps({"http-basic": {sys.argv[1]: {"username": "ci", "password": os.environ["FLEET_READ_TOKEN"]}}}))' "${SERVER#*://}")
           COMPOSER_AUTH=$auth composer install --no-interaction --no-progress
-      # requirements-dev.txt and composer.json read back against what the two
-      # installs above put in place (METHODOLOGY 7.9).
+      # requirements-dev.txt, composer.json and requirements-system.txt's
+      # PowerShell lines read back against what the installs above put in
+      # place (METHODOLOGY 7.9).
       - name: Tools installed at their pins
-        run: python check-pins.py python php
+        run: python check-pins.py python php powershell
       # Every file is checked on its own, by one worker per core, each taking
       # every Nth file in turn. Each file writes its own log, printed
       # afterwards in file order, so the output reads as a serial run's would.
@@ -90,7 +95,7 @@ jobs:
       # crashed here (INTERNAL ERROR on 6 of 149 files). Each runs with
       # `set +e`: this shell has -e, and a worker that inherited it would stop
       # at the first finding without recording its exit code.
-      - name: Check every Python, shell and PHP file
+      - name: Check every Python, shell, PHP and PowerShell file
         shell: bash
         env:
           SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -102,7 +107,7 @@ jobs:
             base=HEAD
           fi
           out=$(mktemp -d)
-          mapfile -t files < <(git ls-files '*.py' '*.sh' '*.bash' '*.php')
+          mapfile -t files < <(git ls-files '*.py' '*.sh' '*.bash' '*.php' '*.ps1' '*.psm1' '*.psd1')
           workers=$(nproc)
           for ((w = 0; w < workers; w++)); do
             ( set +e

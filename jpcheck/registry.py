@@ -8,7 +8,7 @@ from jpcheck.common import _RAN
 from jpcheck.coverage import run_no_cover
 from jpcheck.directives import run_directive_reason
 from jpcheck.js_tools import run_eslint, run_npm_audit, run_prettier, run_stylelint
-from jpcheck.native_tools import run_cppcheck, run_shellcheck
+from jpcheck.native_tools import run_cppcheck, run_psscriptanalyzer, run_shellcheck
 from jpcheck.php_tools import run_composer_audit, run_phpcs, run_phpstan, run_rector
 from jpcheck.python_tools import run_mypy, run_pip_audit, run_ruff
 from jpcheck.smells import run_smells
@@ -44,6 +44,7 @@ def _exit_code(summary: dict[str, Any], checks: list[dict[str, Any]]) -> int:
 TOOL_RUNNERS = {
     "cppcheck":       run_cppcheck,
     "shellcheck":     run_shellcheck,
+    "psscriptanalyzer": run_psscriptanalyzer,
     "no-cover":       run_no_cover,
     "suppress-reason": run_suppress_reason,
     "noqa":           run_noqa,
@@ -73,6 +74,8 @@ DEFAULT_TOOLS = {
     "php":    ["phpstan", "phpcs", "rector", "directive-reason", "smells"],
     "cpp":    ["cppcheck", "directive-reason", "smells"],
     "shell":  ["shellcheck", "directive-reason", "smells"],
+    # No smells: jpcheck/measure.py has no PowerShell measure yet.
+    "powershell": ["psscriptanalyzer", "directive-reason"],
 }
 
 AUDIT_TOOLS = {
