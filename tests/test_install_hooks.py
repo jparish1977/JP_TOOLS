@@ -20,7 +20,13 @@ WHAT THIS PINS DOWN
         skipped in silence;
       - a file whose language check.py cannot detect does not block a commit,
         and is not counted as checked: the verdict says how many of the
-        staged files were, and why the others were skipped.
+        staged files were, and why the others were skipped;
+      - the commit-msg hook refuses a message linking a Claude Code session,
+        anywhere in it, in any case, naming the line, and passes one that
+        only mentions the site; install adds it beside an existing
+        pre-commit hook, --remove takes both, --status calls a repo without
+        it STALE, and a symlinked commit-msg hook is refused before anything
+        is written.
 
 Skips rather than fails when the environment cannot support it:
   - no git         -> skip
@@ -157,6 +163,21 @@ def symlinked_hook_cases(tmp: Path) -> None:
           r.returncode == 2, r.stdout + r.stderr)
     check("the dangling link's target is not created",
           not (repo / "hooks" / "missing-hook").exists())
+
+    # A symlinked commit-msg hook beside no pre-commit hook: refused before
+    # the pre-commit shim is written, so a refused repo is left as it was.
+    repo = tmp / "linked-msg"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / "hooks").mkdir()
+    (repo / "hooks" / "commit-msg").write_text("#!/bin/sh\n", encoding="utf-8")
+    msg_link = repo / ".git" / "hooks" / "commit-msg"
+    msg_link.parent.mkdir(exist_ok=True)
+    msg_link.symlink_to(Path("..") / ".." / "hooks" / "commit-msg")
+    r = run_installer(repo)
+    check("a symlinked commit-msg hook is refused, exit 2, and no pre-commit hook written",
+          r.returncode == 2 and not (repo / ".git" / "hooks" / "pre-commit").exists(),
+          r.stdout + r.stderr)
     print()
 
 
@@ -268,6 +289,23 @@ def append_roundtrip_cases(tmp: Path) -> None:
     after = hook.read_text(encoding="utf-8")
     check("[older install] --remove strips the old stray shebang too", after == own,
           repr(after))
+
+    # The repo's own commit-msg hook: appended to, and given back the same way.
+    repo = tmp / "own-msg-hook"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    hook = repo / ".git" / "hooks" / "commit-msg"
+    hook.parent.mkdir(exist_ok=True)
+    own = "#!/bin/sh\necho repo's own message check\n"
+    hook.write_text(own, encoding="utf-8")
+    run_installer(repo)
+    installed = hook.read_text(encoding="utf-8")
+    check("[own commit-msg] install appends after it, one shebang",
+          installed.startswith(own) and installed.count("#!") == 1, installed[:400])
+    run_installer(repo, "--remove")
+    check("[own commit-msg] --remove gives it back byte for byte, and takes the pre-commit hook",
+          hook.read_text(encoding="utf-8") == own
+          and not (repo / ".git" / "hooks" / "pre-commit").exists())
     print()
 
 
@@ -297,6 +335,9 @@ def status_cases(tmp: Path) -> None:
     h.write_text(h.read_text(encoding="utf-8").replace("exec sh", "exec  sh", 1),
                  encoding="utf-8")
     make("none")
+    pre_only = make("pre-only")
+    run_installer(pre_only)
+    (pre_only / ".git" / "hooks" / "commit-msg").unlink()
     linked = make("linked")
     (linked / "hooks").mkdir()
     (linked / "hooks" / "pre-commit").write_text("#!/bin/sh\n", encoding="utf-8")
@@ -317,11 +358,69 @@ def status_cases(tmp: Path) -> None:
     check("no hook reads NONE, a symlinked one SYMLINK",
           states.get("none", "").startswith("NONE")
           and states.get("linked", "").startswith("SYMLINK"), r.stdout)
-    check("the summary counts 5 repos and 2 STALE", "5 repos, 2 STALE" in r.stdout, r.stdout)
+    check("a current pre-commit hook with no commit-msg hook reads STALE, saying so",
+          states.get("pre-only", "").startswith("STALE") and "no commit-msg hook" in states.get("pre-only", ""),
+          r.stdout)
+    check("the summary counts 6 repos and 3 STALE", "6 repos, 3 STALE" in r.stdout, r.stdout)
 
     r = run_installer(root / "current", "--status")
     check("a root holding only a current hook exits 0", r.returncode == 0, r.stdout + r.stderr)
+    run_installer(pre_only)
+    r = run_installer(pre_only, "--status")
+    check("a plain install adds the missing commit-msg hook: CURRENT again",
+          r.returncode == 0 and "CURRENT" in r.stdout, r.stdout + r.stderr)
     print()
+
+
+SESSION_LINK = "https://claude.ai/code/session_01ExampleOnlyNotARealId"
+
+
+def commit_msg_cases(tmp: Path) -> None:
+    """The commit-msg hook refuses a message linking a Claude Code session,
+    wherever it is and in any case, and names the line; a message that only
+    mentions the site passes."""
+    print("\nThe commit-msg hook:")
+    repo, _ = build_repo(tmp)
+
+    def commit(name: str, message: str) -> subprocess.CompletedProcess[str]:
+        (repo / name).write_text("# n\n", encoding="utf-8")
+        git(repo, "add", "--", name)
+        return git(repo, "commit", "-m", message)
+
+    r = commit("a.md", "add notes\n\nsee claude.ai for the docs")
+    check("CONTROL: a message that only mentions the site commits",
+          r.returncode == 0, r.stdout + r.stderr)
+    for label, message in (("in the subject", f"add notes {SESSION_LINK}"),
+                           ("in the body", f"add notes\n\nmore\n\n{SESSION_LINK}"),
+                           ("in another case", "add notes\n\n" + SESSION_LINK.upper())):
+        r = commit("b.md", message)
+        out = r.stdout + r.stderr
+        check(f"a session link {label} is refused, naming the line",
+              r.returncode != 0 and "commit REFUSED" in out and "session_" in out.lower()
+              and "BROKEN" not in out, out)
+    count = git(repo, "rev-list", "--count", "HEAD").stdout.strip()
+    check("... and none of those commits was made", count == "2", count)
+
+    # `git commit -v` puts the staged diff below the scissors line, and git
+    # cuts it off before saving: a link there is in a FILE, not the message.
+    # The editor stands in for a person typing SUBJECT above what git wrote.
+    def commit_verbose(subject: str) -> subprocess.CompletedProcess[str]:
+        # The subject in the file too, so each call stages a change.
+        (repo / "c.md").write_text(f"{SESSION_LINK} {subject}\n", encoding="utf-8")
+        git(repo, "add", "--", "c.md")
+        editor = f"sh -c 'printf \"%s\\n\" \"{subject}\" | cat - \"$1\" > \"$1.t\" && mv \"$1.t\" \"$1\"' -"
+        return subprocess.run(
+            ["git", "-c", "user.email=test@example.invalid", "-c", "user.name=JP_TOOLS test",
+             "-c", "commit.gpgsign=false", "commit", "-v"],
+            cwd=repo, capture_output=True, text=True, check=False,
+            env=dict(os.environ, GIT_EDITOR=editor))
+
+    r = commit_verbose("edit notes")
+    check("git commit -v: a link only in the staged diff, below the scissors line, commits",
+          r.returncode == 0, r.stdout + r.stderr)
+    r = commit_verbose(f"edit notes {SESSION_LINK}")
+    check("git commit -v: a link in the message above the scissors line is still refused",
+          r.returncode != 0 and "commit REFUSED" in r.stdout + r.stderr, r.stdout + r.stderr)
 
 
 def fake_jp_tools(at: Path, with_template: bool = True, git_repo: bool = True) -> Path:
@@ -340,7 +439,8 @@ def fake_jp_tools(at: Path, with_template: bool = True, git_repo: bool = True) -
     shutil.copytree(ROOT / "configs", at / "configs")
     if with_template:
         (at / "hooks").mkdir()
-        shutil.copy2(ROOT / "hooks" / "pre-commit.sh", at / "hooks" / "pre-commit.sh")
+        for name in ("pre-commit.sh", "commit-msg.sh"):
+            shutil.copy2(ROOT / "hooks" / name, at / "hooks" / name)
     if not git_repo:
         return at
     git(at, "init", "-q", "-b", "master")
@@ -561,6 +661,8 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as td:
         skipped_count_cases(Path(td))
+    with tempfile.TemporaryDirectory() as td:
+        commit_msg_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:
         incapable_tools_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:

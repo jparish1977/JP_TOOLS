@@ -1,0 +1,25 @@
+{
+  "about": "install-hooks.py installs, reports and refuses the commit-msg hook beside pre-commit. Run: mutate-on-target.py TREE install-hooks.py tests/test_install_hooks.py tests/mutants/jpt-commit-msg-on-install-hooks.json",
+  "mutants": [
+    {
+      "name": "the shim does not pass git's message file on",
+      "edits": [["f'exec sh \"$TOOLS_DIR/hooks/{hook}.sh\" \"$@\"'", "f'exec sh \"$TOOLS_DIR/hooks/{hook}.sh\"'"]],
+      "target": "a session link in the subject is refused, naming the line"
+    },
+    {
+      "name": "a missing commit-msg hook reads CURRENT",
+      "edits": [["    if msg_state == \"CURRENT\":\n", "    if msg_state in (\"CURRENT\", \"NONE\"):\n"]],
+      "target": "a current pre-commit hook with no commit-msg hook reads STALE, saying so"
+    },
+    {
+      "name": "a symlink is refused only after the earlier hook is written",
+      "edits": [["    for hook in HOOKS:\n        _refuse_symlink(hooks_dir / hook, \"install\")\n    for hook in HOOKS:\n        _install_one(hooks_dir / hook, hook)\n", "    for hook in HOOKS:\n        _refuse_symlink(hooks_dir / hook, \"install\")\n        _install_one(hooks_dir / hook, hook)\n"]],
+      "target": "a symlinked commit-msg hook is refused, exit 2, and no pre-commit hook written"
+    },
+    {
+      "name": "--remove leaves the commit-msg hook",
+      "edits": [["    for hook in HOOKS:\n        _remove_one(hooks_dir / hook, hook)\n", "    _remove_one(hooks_dir / \"pre-commit\", \"pre-commit\")\n"]],
+      "target": "[own commit-msg] --remove gives it back byte for byte, and takes the pre-commit hook"
+    }
+  ]
+}
