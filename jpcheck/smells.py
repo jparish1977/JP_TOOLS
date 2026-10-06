@@ -1,4 +1,4 @@
-"""The smells check: long or complex files and functions, new ones fail and existing ones warn."""
+"""The smells check: long or complex files and functions; new or growing ones fail, existing ones warn."""
 
 from pathlib import Path
 from typing import Any
@@ -20,7 +20,8 @@ from jpcheck.measure import (
 # ── smells ────────────────────────────────────────────────────────────────────
 # Four smells: a long file, a long function, a complex function, a complex
 # file. The base is today: a smell that was not there before this change
-# FAILS; one that was there already WARNS. "Before" is the file at the smells
+# FAILS, and so does one that was there and GREW; one that was there already
+# and did not grow WARNS. "Before" is the file at the smells
 # base: HEAD by default, which is the last commit when the pre-commit hook runs;
 # CI on a pull request passes the PR's base with --smells-base.
 #
@@ -77,25 +78,45 @@ def _renamed_from(root: Path, base: str, rel: str) -> str | None:
     return None
 
 
+def _defines(lang: str, src: str | None, name: str) -> tuple[int, int, int] | None:
+    """NAME's measure in SRC, or None when SRC is absent, does not parse, or has no NAME."""
+    if src is None:
+        return None
+    try:
+        return measure(lang, src)[1].get(name)
+    except (SyntaxError, ValueError):
+        return None   # reason: a file that will not parse defines nothing this can match
+
+
 def _function_elsewhere(root: Path, base: str, name: str, lang: str) -> tuple[int, int, int]:
-    """A function's size and complexity at the base in ANY file of its language,
-    for one that moved: splitting a smelly file moves its smells, it does not
-    add them. The largest measure found wins."""
+    """A function's size and complexity at the base, for one that MOVED here
+    from another file: splitting a smelly file moves its smells, it does not
+    add them.
+
+    Identity is the file and the qualified name (Class.method), so a name
+    alone never carries a measure between files: it moved only when the base
+    tree defines that qualified name in exactly one file, and that file no
+    longer defines it. Anything else, two definitions at the base or one
+    still in place, is a different function with the same name, and this one
+    is measured as new."""
     if lang not in DEFINITION:
         return (0, 0, 0)
     pattern, globs = DEFINITION[lang]
     leaf = name.rsplit(".", 1)[-1]
     hits = _git(["grep", "-l", "-E", pattern.format(leaf), base, "--", *globs], root).stdout
-    best = (0, 0, 0)
+    sites = []
     for hit in hits.splitlines():
-        src = _base_text(root, base, hit.split(":", 1)[-1])
-        try:
-            found = measure(lang, src)[1].get(name) if src is not None else None
-        except (SyntaxError, ValueError):
-            found = None
+        rel = hit.split(":", 1)[-1]
+        found = _defines(lang, _base_text(root, base, rel), name)
         if found:
-            best = (max(best[0], found[0]), max(best[1], found[1]), 0)
-    return best
+            sites.append((rel, found))
+    if len(sites) != 1:
+        return (0, 0, 0)
+    rel, (size, cx, _) = sites[0]
+    now = root / rel
+    if _defines(lang, now.read_text(encoding="utf-8", errors="replace") if now.is_file() else None, name):
+        return (0, 0, 0)
+    return (size, cx, 0)
 
 
 def _base_measure(f: Path, ctx: tuple[Path, str] | None) -> tuple[int, dict[str, tuple[int, int, int]]]:
@@ -119,21 +140,28 @@ def _smell(f: Path, line: int, rule: str, what: str,
            counts: tuple[int, int, int], history: bool = True) -> dict[str, Any] | None:
     """counts = (now, before, limit). None when under the limit now.
 
+    A smell that was not there before fails, and so does one that was there
+    and got bigger: the worst code is where growth most needs a brake. One
+    that stayed the same or shrank warns.
+
     With no history, before is a default and not a measurement: the smell still
     counts as new, since nothing shows it is old, and the message says why."""
     now, before, limit = counts
     if now < limit:
         return None
     new = before < limit
+    grew = not new and now > before
     if not history:
         why = "NEW: no git history here, so its age cannot be told and it counts as new"
     elif new:
         why = f"NEW: was {before} before this change"
+    elif grew:
+        why = f"existing, and it GREW from {before}: a smell may shrink or stay, not grow"
     else:
         why = f"existing: was already {before}, so a warning"
     return {
         "file": str(f), "line": line, "col": 0,
-        "severity": "error" if new else "warning",
+        "severity": "error" if new or grew else "warning",
         "rule": rule,
         "message": f"{what} is {now} (a smell at {limit}); {why}",
         "fixable": False, "fixable_unsafe": False,

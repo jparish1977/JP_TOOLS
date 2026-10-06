@@ -1,0 +1,35 @@
+{
+  "about": "The smells arm's new-vs-existing judgement: growth of an existing smell fails, and a measure travels between files only from the one base definition gone from its file. Run: mutate-on-target.py TREE jpcheck/smells.py tests/test_check_smells.py tests/mutants/jpt-new-vs-existing-on-smells.json",
+  "mutants": [
+    {
+      "name": "an existing smell may grow, as before",
+      "edits": [["    grew = not new and now > before", "    grew = False"]],
+      "target": "a 120-line function grown to 121 fails, exit 1, saying it grew"
+    },
+    {
+      "name": "growth counted only when it at least doubles",
+      "edits": [["    grew = not new and now > before", "    grew = not new and now >= 2 * before"]],
+      "target": "a complexity-15 function made 16 fails, exit 1, saying it grew"
+    },
+    {
+      "name": "staying the same counted as growth",
+      "edits": [["    grew = not new and now > before", "    grew = not new and now >= before"]],
+      "target": "CONTROL: both unchanged only warn, exit 0"
+    },
+    {
+      "name": "a name defined in two base files still carries a measure",
+      "edits": [["    if len(sites) != 1:\n        return (0, 0, 0)", "    if not sites:\n        return (0, 0, 0)"]],
+      "target": "G: a main gone from keep.py, while twin.py has one too, is not known to have moved"
+    },
+    {
+      "name": "a definition still in its base file still carries its measure",
+      "edits": [["    if _defines(lang, now.read_text(encoding=\"utf-8\", errors=\"replace\") if now.is_file() else None, name):\n        return (0, 0, 0)\n", ""]],
+      "target": "F: a NEW main of complexity 12 does not inherit the 20 of a main still in keep.py"
+    },
+    {
+      "name": "a function that really moved is measured as new",
+      "edits": [["    return (size, cx, 0)", "    return (0, 0, 0)"]],
+      "target": "E: a smelly function moved out into a new file is existing"
+    }
+  ]
+}

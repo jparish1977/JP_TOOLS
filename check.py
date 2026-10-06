@@ -80,7 +80,8 @@ def _parser() -> argparse.ArgumentParser:
                              "deleting files.")
     parser.add_argument("--smells-base", metavar="REF", default="HEAD",
                         help="What a smell is NEW against: over its threshold "
-                             "now and not at REF fails; already over at REF warns. "
+                             "now and not at REF fails, and so does one over at REF "
+                             "that grew; one already over that did not grow warns. "
                              "Default HEAD, the last commit, which is what the "
                              "pre-commit hook wants. CI on a pull request passes "
                              "the PR's base.")

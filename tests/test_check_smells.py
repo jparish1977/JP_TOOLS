@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
 JP_TOOLS/tests/test_check_smells.py
-check.py's smells arm: a smell that is NEW fails, one that EXISTS warns.
+check.py's smells arm: a smell that is NEW fails, one that EXISTS warns,
+and one that exists and GROWS fails.
 
 THE RULE THIS PINS DOWN
     Four smells (METHODOLOGY 2.14): a file too long, a function too long, a
     function too complex, a file too complex. Each FAILS when it was not there
-    at the base (HEAD by default, --smells-base in CI) and WARNS when it
-    already was, so adopting the gate never blocks on what is already there,
-    and nothing new gets worse.
+    at the base (HEAD by default, --smells-base in CI) or was there and got
+    bigger, and WARNS when it was already there and did not grow, so adopting
+    the gate never blocks on what is already there, and nothing gets worse.
+
+    A smell that MOVES is existing: a renamed file, or a function moved to
+    another file. Identity is the file and the qualified name, so a function
+    inherits a measure from elsewhere only when the base tree defined that name
+    in exactly one file and that file no longer defines it.
 
 Runs `check.py --tools smells` in a throwaway git repo, so ruff and mypy
 cannot blur the verdict. One small function per group: this file is held to
@@ -120,6 +126,32 @@ def function_complexity(repo: Path) -> None:
           rc == 1 and ("SMELL-FUNC-COMPLEXITY", "error") in pairs, raw)
 
 
+def growth(repo: Path) -> None:
+    """An existing smell may stay or shrink; growing it fails (#113)."""
+    print("\nAn existing smell that grows:")
+    f = repo / "grow.py"
+    f.write_text(long_func("g", 120) + "\n\n" + complex_func("k", 15), encoding="utf-8")
+    commit(repo, "smelly at base")
+    f.write_text(long_func("g", 121) + "\n\n" + complex_func("k", 15), encoding="utf-8")
+    rc, pairs, raw = smells(f)
+    check("a 120-line function grown to 121 fails, exit 1, saying it grew",
+          rc == 1 and ("SMELL-FUNC-LINES", "error") in pairs and "GREW from 120" in raw, raw)
+    f.write_text(long_func("g", 120) + "\n\n" + complex_func("k", 16), encoding="utf-8")
+    rc, pairs, raw = smells(f)
+    check("a complexity-15 function made 16 fails, exit 1, saying it grew",
+          rc == 1 and ("SMELL-FUNC-COMPLEXITY", "error") in pairs and "GREW from 15" in raw, raw)
+    f.write_text(long_func("g", 110) + "\n\n" + complex_func("k", 12), encoding="utf-8")
+    rc, pairs, raw = smells(f)
+    check("CONTROL: both shrunk but still smells only warn, exit 0",
+          rc == 0 and pairs == [("SMELL-FUNC-COMPLEXITY", "warning"), ("SMELL-FUNC-LINES", "warning")],
+          raw)
+    f.write_text(long_func("g", 120) + "\n\n" + complex_func("k", 15), encoding="utf-8")
+    rc, pairs, raw = smells(f)
+    check("CONTROL: both unchanged only warn, exit 0",
+          rc == 0 and pairs == [("SMELL-FUNC-COMPLEXITY", "warning"), ("SMELL-FUNC-LINES", "warning")],
+          raw)
+
+
 def file_smells(repo: Path) -> None:
     print("\nFile length (1000 lines) and file complexity (over 100):")
     big = repo / "big.py"
@@ -130,11 +162,16 @@ def file_smells(repo: Path) -> None:
           rc == 1 and pairs == [("SMELL-FILE-LINES", "error"), ("SMELL-FUNC-LINES", "error")],
           raw)
     commit(repo, "big file")
-    big.write_text("x = 1\n" * 1001, encoding="utf-8")
+    big.write_text("y = 1\n" * 1000, encoding="utf-8")
     rc, pairs, raw = smells(big)
-    check("an existing 1000-line file only warns, exit 0, and so does its top level",
+    check("an existing 1000-line file edited at the same size only warns, exit 0, and so does its top level",
           rc == 0 and pairs == [("SMELL-FILE-LINES", "warning"), ("SMELL-FUNC-LINES", "warning")],
           raw)
+    big.write_text("x = 1\n" * 1001, encoding="utf-8")
+    rc, pairs, raw = smells(big)
+    check("an existing 1000-line file GROWN to 1001 fails, exit 1, saying it grew",
+          rc == 1 and ("SMELL-FILE-LINES", "error") in pairs and "GREW from 1000" in raw, raw)
+    big.write_text("x = 1\n" * 1000, encoding="utf-8")
     busy = repo / "busy.py"
     busy.write_text(busy_source(), encoding="utf-8")
     rc, pairs, raw = smells(busy)
@@ -187,6 +224,32 @@ def moves(repo: Path) -> None:
                     encoding="utf-8")
     rc, pairs, raw = smells(part)
     check("CONTROL: a genuinely new smelly function in that file still fails, exit 1",
+          rc == 1 and ("SMELL-FUNC-COMPLEXITY", "error") in pairs, raw)
+    part.write_text(complex_func("cpx", 11), encoding="utf-8")
+    commit(repo, "split")
+    same_name(repo)
+
+
+def same_name(repo: Path) -> None:
+    """A name alone carries no measure between files (#114): identity is the
+    file and the qualified name, so a measure travels only from the one base
+    definition that is gone from its file."""
+    keep = repo / "keep.py"
+    keep.write_text(complex_func("main", 20), encoding="utf-8")
+    commit(repo, "a smelly main that stays")
+    fresh = repo / "fresh.py"
+    fresh.write_text(complex_func("main", 12), encoding="utf-8")
+    rc, pairs, raw = smells(fresh)
+    check("F: a NEW main of complexity 12 does not inherit the 20 of a main still in keep.py: fails, exit 1",
+          rc == 1 and ("SMELL-FUNC-COMPLEXITY", "error") in pairs and "was 0" in raw, raw)
+    fresh.unlink()
+    (repo / "twin.py").write_text(complex_func("main", 20), encoding="utf-8")
+    commit(repo, "a second smelly main")
+    keep.write_text("def other():\n    return 1\n", encoding="utf-8")
+    moved = repo / "moved_main.py"
+    moved.write_text(complex_func("main", 20), encoding="utf-8")
+    rc, pairs, raw = smells(moved)
+    check("G: a main gone from keep.py, while twin.py has one too, is not known to have moved: fails, exit 1",
           rc == 1 and ("SMELL-FUNC-COMPLEXITY", "error") in pairs, raw)
 
 
@@ -243,6 +306,7 @@ def main() -> int:
         git(repo, "init", "-q")
         function_length(repo)
         function_complexity(repo)
+        growth(repo)
         file_smells(repo)
         the_base(repo)
         moves(repo)

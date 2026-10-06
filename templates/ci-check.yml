@@ -215,8 +215,9 @@ jobs:
         env:
           SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          # The smells arm fails a smell that is NEW against --smells-base
-          # and warns on one that existed. Its default, HEAD, is the commit under
+          # The smells arm fails a smell that is NEW against --smells-base, or
+          # one that existed and grew, and warns on one that existed and did not
+          # grow. Its default, HEAD, is the commit under
           # test here, so without this a new smell only ever warned. The base is
           # the PR's, or on a push the commit before it; a first push has none
           # (all zeros), which falls back to HEAD and says so.

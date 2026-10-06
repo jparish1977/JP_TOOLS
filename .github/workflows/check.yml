@@ -10,8 +10,9 @@ on:
 # a hand-kept list lets a new file go unchecked while the build is green.
 # rc accumulates in every loop, so one failure never hides the files after it.
 #
-# The smells arm fails a smell that is NEW against --smells-base and warns on
-# one that existed. The base is the PR's, or on a push the commit before it;
+# The smells arm fails a smell that is NEW against --smells-base, or one that
+# existed and grew, and warns on one that existed and did not grow. The base
+# is the PR's, or on a push the commit before it;
 # a first push has none (all zeros), which falls back to HEAD and says so,
 # since against HEAD a new smell only warns.
 
