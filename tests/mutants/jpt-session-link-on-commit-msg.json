@@ -1,0 +1,20 @@
+{
+  "about": "The commit-msg template refuses a message linking a Claude Code session, in any case. Run: mutate-on-target.py TREE hooks/commit-msg.sh tests/test_install_hooks.py tests/mutants/jpt-session-link-on-commit-msg.json",
+  "mutants": [
+    {
+      "name": "the link is never found",
+      "edits": [["found=$(grep -n -i -E 'claude\\.ai/code/session_' \"$msg_file\")", "found="]],
+      "target": "a session link in the subject is refused, naming the line"
+    },
+    {
+      "name": "case matters",
+      "edits": [["grep -n -i -E 'claude", "grep -n -E 'claude"]],
+      "target": "a session link in another case is refused, naming the line"
+    },
+    {
+      "name": "a found link is let through",
+      "edits": [["    echo \"=====================================\"\n    exit 1\nfi\nexit 0", "    echo \"=====================================\"\nfi\nexit 0"]],
+      "target": "... and none of those commits was made"
+    }
+  ]
+}

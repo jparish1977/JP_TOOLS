@@ -58,7 +58,7 @@ Without access to them, `composer install` stops on the two packages.
 | `check-pins.py` | Check that the gate's tools are pinned to one version in `requirements-dev.txt`, `composer.json` and `package.json`, and installed at it |
 | `list-exemptions.py` | Inventory every `# pragma: no cover` and its reason, the ones the gate lets pass included |
 | `list-suppressions.py` | Inventory every suppression in every language (`noqa`, `type: ignore`, shellcheck, cppcheck, phpstan, phpcs, eslint, stylelint) and its reason, the ones the gate lets pass included |
-| `install-hooks.py` | Install pre-commit hook into any git repo |
+| `install-hooks.py` | Install the pre-commit and commit-msg hooks into any git repo |
 | `init-ci.py` | Copy GitHub Actions CI template into a repo |
 
 ### File Analysis (PHP -- hex architecture)
@@ -340,17 +340,25 @@ Shared configuration files in `configs/`:
 | `phpcs.xml` | PHP_CodeSniffer |
 | `rector.php` | Rector |
 
-## Pre-Commit Hook
+## Git Hooks
 
 ```bash
-# Install into any repo
+# Install into any repo (installs whichever hook is missing)
 python install-hooks.py /path/to/repo
 
-# Remove
+# Remove both
 python install-hooks.py /path/to/repo --remove
+
+# Which repos' hooks are current
+python install-hooks.py --status ~/projects
 ```
 
-Runs `check.py .` before every commit. Fails the commit if errors are found.
+- **pre-commit** runs `check.py` on each staged file before every commit, and
+  fails the commit if any has errors.
+- **commit-msg** refuses a message that links a Claude Code session
+  (`claude.ai/code/session_...`), naming the line: such a link points at a
+  private session and would be published with the repository's history.
+
 Use `git commit --no-verify` to bypass when needed.
 
 ## CI Integration

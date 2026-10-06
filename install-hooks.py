@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 """
 JP_TOOLS/install-hooks.py
-Install a pre-commit hook into a git repo that runs check.py before each commit.
+Install JP_TOOLS' git hooks into a repo: pre-commit, which runs check.py on
+each staged file, and commit-msg, which refuses a message that links a Claude
+Code session.
 
 Usage:
-    python install-hooks.py [path-to-repo]     # defaults to cwd
-    python install-hooks.py --remove [path]     # uninstall the hook
+    python install-hooks.py [path-to-repo]     # defaults to cwd; installs whichever is missing
+    python install-hooks.py --remove [path]     # uninstall both
 """
 
 import argparse
@@ -44,8 +46,6 @@ def _tools_dir() -> Path:
 TOOLS_DIR = _tools_dir()
 CHECK_PY  = TOOLS_DIR / "check.py"
 METHODOLOGY_DOC = TOOLS_DIR / "METHODOLOGY.md"
-
-HOOK_MARKER = "# JP_TOOLS pre-commit hook"
 
 # THE INSTALLED HOOK IS A SHIM. A full copy of the checks, taken at install
 # time, would need a reinstall in every repo after every change, with nothing
@@ -137,6 +137,22 @@ export TOOLS_DIR JP_TOOLS_HOOK_API
 exec sh "$TOOLS_DIR/hooks/pre-commit.sh"
 """.replace("__API__", str(SHIM_API))
 
+# Every hook installed, each a shim for hooks/<HOOK>.sh. The commit-msg shim
+# is the pre-commit one with the name swapped, so the two cannot drift apart,
+# and it passes on git's argument, the message file.
+HOOKS = ("pre-commit", "commit-msg")
+
+
+def marker(hook: str) -> str:
+    return f"# JP_TOOLS {hook} hook"
+
+
+def shim_template(hook: str) -> str:
+    if hook == "pre-commit":
+        return SHIM_TEMPLATE
+    return SHIM_TEMPLATE.replace("pre-commit", hook).replace(
+        f'exec sh "$TOOLS_DIR/hooks/{hook}.sh"', f'exec sh "$TOOLS_DIR/hooks/{hook}.sh" "$@"')
+
 
 def _refuse_symlink(hook_file: Path, verb: str) -> None:
     """Exit 2 if the hook is a symlink, dangling or not, naming its target.
@@ -160,34 +176,44 @@ def _refuse_symlink(hook_file: Path, verb: str) -> None:
 
 
 def install(repo_path: Path) -> None:
+    """Install every hook that is missing; one already installed is left as it is."""
     git_dir = repo_path / ".git"
     if not git_dir.is_dir():
         print(f"Error: {repo_path} is not a git repository (.git not found)")
         sys.exit(1)
-
     hooks_dir = git_dir / "hooks"
     hooks_dir.mkdir(exist_ok=True)
-    hook_file = hooks_dir / "pre-commit"
-    _refuse_symlink(hook_file, "install")
+    # Every refusal before any write, so a refused repo is left as it was.
+    for hook in HOOKS:
+        _refuse_symlink(hooks_dir / hook, "install")
+    for hook in HOOKS:
+        _install_one(hooks_dir / hook, hook)
+    print(f"Checks will run: {CHECK_PY} against each staged file; the message is "
+          "refused if it links a Claude Code session")
+    print()
+    print("This project now follows JP_TOOLS methodology.")
+    print(f"Read it: {METHODOLOGY_DOC}")
 
-    # Check for existing hook
+
+def _install_one(hook_file: Path, hook: str) -> None:
+    template = shim_template(hook)
+    mark = marker(hook)
     if hook_file.exists():
         content = hook_file.read_text(encoding="utf-8", errors="replace")
-        if HOOK_MARKER in content:
-            print(f"JP_TOOLS hook already installed at {hook_file}")
-            print("Use --remove to uninstall first.")
+        if mark in content:
+            print(f"JP_TOOLS {hook} hook already installed at {hook_file}")
             return
         # There's a non-JP_TOOLS hook: don't clobber it
-        print(f"Warning: existing pre-commit hook found at {hook_file}")
-        print("Appending JP_TOOLS check. Review the hook if needed.")
+        print(f"Warning: existing {hook} hook found at {hook_file}")
+        print("Appending the JP_TOOLS hook. Review the hook if needed.")
         # Append to the existing hook WITHOUT the template's own shebang. The
         # repo's hook already starts with one, and remove() keeps every line
         # above the marker, so an appended shebang would survive each --remove
         # and every reinstall would add another. With the shebang dropped the
         # marker is the first appended line, and remove() gives back the
         # repo's hook as it was.
-        body = SHIM_TEMPLATE.format(
-            marker=HOOK_MARKER,
+        body = template.format(
+            marker=mark,
             tools_dir=str(TOOLS_DIR).replace("\\", "/"),
         )
         if body.startswith("#!"):
@@ -196,8 +222,8 @@ def install(repo_path: Path) -> None:
             f.write("\n" + body)
     else:
         hook_file.write_text(
-            SHIM_TEMPLATE.format(
-                marker=HOOK_MARKER,
+            template.format(
+                marker=mark,
                 tools_dir=str(TOOLS_DIR).replace("\\", "/"),
             ),
             encoding="utf-8",
@@ -205,37 +231,40 @@ def install(repo_path: Path) -> None:
 
     # Make executable (matters on Linux/Mac, no-op on Windows)
     hook_file.chmod(0o755)
-    print(f"Installed JP_TOOLS pre-commit hook at {hook_file}")
-    print(f"Checks will run: {CHECK_PY} against each staged file")
-    print()
-    print("This project now follows JP_TOOLS methodology.")
-    print(f"Read it: {METHODOLOGY_DOC}")
+    print(f"Installed JP_TOOLS {hook} hook at {hook_file}")
 
 
 def remove(repo_path: Path) -> None:
-    hook_file = repo_path / ".git" / "hooks" / "pre-commit"
-    _refuse_symlink(hook_file, "remove")
+    hooks_dir = repo_path / ".git" / "hooks"
+    for hook in HOOKS:
+        _refuse_symlink(hooks_dir / hook, "remove")
+    for hook in HOOKS:
+        _remove_one(hooks_dir / hook, hook)
+
+
+def _remove_one(hook_file: Path, hook: str) -> None:
+    mark = marker(hook)
     if not hook_file.exists():
-        print("No pre-commit hook found.")
+        print(f"No {hook} hook found.")
         return
 
     content = hook_file.read_text(encoding="utf-8", errors="replace")
-    if HOOK_MARKER not in content:
-        print("Pre-commit hook exists but is not from JP_TOOLS. Leaving it alone.")
+    if mark not in content:
+        print(f"The {hook} hook exists but is not from JP_TOOLS. Leaving it alone.")
         return
 
     # If the whole file is our hook, just delete it
     lines = content.split("\n")
     marker_idx = None
     for i, line in enumerate(lines):
-        if HOOK_MARKER in line:
+        if mark in line:
             marker_idx = i
             break
 
     if marker_idx is not None and marker_idx <= 1:
         # Our hook is the whole file (or starts at line 0-1)
         hook_file.unlink()
-        print(f"Removed JP_TOOLS pre-commit hook from {hook_file}")
+        print(f"Removed JP_TOOLS {hook} hook from {hook_file}")
     else:
         # Our section was appended. install() writes exactly "\n" + the marker
         # onward, so cut at that offset and the repo's hook comes back byte for
@@ -243,37 +272,55 @@ def remove(repo_path: Path) -> None:
         # rewrite a hook with no final newline or a trailing blank line. Older
         # installs also left their own "#!/bin/sh" just above the marker;
         # strip that too, so they come back clean.
-        before = content[:content.index("\n" + HOOK_MARKER)]
+        before = content[:content.index("\n" + mark)]
         if before.endswith("\n#!/bin/sh"):
             before = before[:-len("\n#!/bin/sh")]
         hook_file.write_text(before, encoding="utf-8")
         print(f"Removed JP_TOOLS section from {hook_file} (kept existing hook)")
 
 
-def hook_status(repo: Path) -> tuple[str, str]:
-    """(STATE, detail) for one repo's pre-commit hook.
+def _one_status(repo: Path, hook: str) -> tuple[str, str]:
+    """(STATE, detail) for one of a repo's hooks.
 
     An installed hook never updates itself. CURRENT means the JP_TOOLS section
     is exactly what this JP_TOOLS would install today for the same recorded
     path. STALE says why, so the fix is a reinstall.
     """
-    hook = repo / ".git" / "hooks" / "pre-commit"
-    if hook.is_symlink():
-        return "SYMLINK", f"-> {os.readlink(hook)} (the repo's own hook; install refuses it)"
-    if not hook.exists():
+    path = repo / ".git" / "hooks" / hook
+    mark = marker(hook)
+    if path.is_symlink():
+        return "SYMLINK", f"{hook} -> {os.readlink(path)} (the repo's own hook; install refuses it)"
+    if not path.exists():
         return "NONE", ""
-    content = hook.read_text(encoding="utf-8", errors="replace")
-    if HOOK_MARKER not in content:
+    content = path.read_text(encoding="utf-8", errors="replace")
+    if mark not in content:
         return "NOT-JP_TOOLS", ""
-    section = content[content.index(HOOK_MARKER):]
+    section = content[content.index(mark):]
     m = re.search(r'for cand in .* "([^"]*)"; do', section)
     if m is None:
-        return "STALE", "no run-time JP_TOOLS lookup: installed by an older install-hooks.py"
-    expected = SHIM_TEMPLATE.format(marker=HOOK_MARKER, tools_dir=m.group(1))
-    expected = expected[expected.index(HOOK_MARKER):]
+        return "STALE", f"{hook}: no run-time JP_TOOLS lookup: installed by an older install-hooks.py"
+    expected = shim_template(hook).format(marker=mark, tools_dir=m.group(1))
+    expected = expected[expected.index(mark):]
     if section.rstrip("\n") == expected.rstrip("\n"):
         return "CURRENT", f"records {m.group(1)}"
-    return "STALE", "differs from this JP_TOOLS' template"
+    return "STALE", f"{hook}: differs from this JP_TOOLS' template"
+
+
+def hook_status(repo: Path) -> tuple[str, str]:
+    """(STATE, detail) for a repo, from its pre-commit hook, the one that
+    shows whether JP_TOOLS was installed at all. Where it was, a commit-msg
+    hook that is missing, the repo's own, or not current makes the repo STALE:
+    install-hooks.py adds what is missing."""
+    state, detail = _one_status(repo, "pre-commit")
+    if state != "CURRENT":
+        return state, detail
+    msg_state, msg_detail = _one_status(repo, "commit-msg")
+    if msg_state == "CURRENT":
+        return state, detail
+    if msg_state in ("SYMLINK", "STALE"):
+        return msg_state, msg_detail
+    why = "no commit-msg hook" if msg_state == "NONE" else "a commit-msg hook without JP_TOOLS' section"
+    return "STALE", f"{why}: run install-hooks.py to add it"
 
 
 def status(roots: list[Path]) -> int:
@@ -297,7 +344,7 @@ def status(roots: list[Path]) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Install/remove JP_TOOLS pre-commit hook")
+    parser = argparse.ArgumentParser(description="Install/remove JP_TOOLS' pre-commit and commit-msg hooks")
     parser.add_argument("path", nargs="?", default=".",
                         help="Path to git repository (default: cwd)")
     parser.add_argument("--remove", action="store_true",
