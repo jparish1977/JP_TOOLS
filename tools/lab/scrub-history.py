@@ -9,7 +9,14 @@ ANSWERS: given a repo, a branch and a rules file, what does the branch look
   filter-repo's old-to-new commit map; publishing it is a separate, manual
   step, printed at the end and never run.
 
-    scrub-history.py SOURCE RULES.json --work DIR [--branch master]
+    scrub-history.py SOURCE RULES.json --work DIR [--branch master] [--squash MESSAGE]
+
+--squash replaces the branch's whole history with ONE commit holding the
+tip's tree, made with MESSAGE and the identity git is configured with,
+instead of rewriting each commit. Nothing old can survive it, binary files
+included, at the cost of the published history: keep a full copy of the old
+repository (a mirror bundle) somewhere private first. filter-repo is not
+used; the same proofs run on the one commit, and there is no commit map.
 
 SOURCE is a path or URL git can clone. RULES is JSON:
 
@@ -71,7 +78,11 @@ TESTED AGAINST: a throwaway three-commit repo with a name in a message, an
   409-commit branch: every name gone except what was listed (identities the
   mailmap missed, one prose use, one file name, and the tip files still to
   clean), and a first draft's blind replacements inside working code listed
-  as CHANGED rather than passed.
+  as CHANGED rather than passed. --squash, on the same fixture: a clean tip,
+  and a named file present only in history, each exit 0 (one commit, the
+  file gone with the history); a named file, a name in a file's text, or a
+  binary file holding it, still at the tip, and a MESSAGE naming it, each
+  exit 1.
 
 NOT TESTED AGAINST: more than one branch (only BRANCH is cloned, so tags and
   other branches are neither rewritten nor checked); names split across a
@@ -253,10 +264,18 @@ def filter_repo(clone: Path, work: Path, rules: Rules) -> None:
         shutil.copy(commit_map, work / "commit-map")
 
 
-def scrub(source: str, rules: Rules, work: Path, branch: str) -> int:
+def squash(clone: Path, message: str) -> None:
+    """Replace CLONE's branch with one commit holding its tip's tree. The old
+    commits stay in the clone's object store, unreachable: the checks and the
+    printed push both go from HEAD."""
+    tree = git(clone, "rev-parse", "HEAD^{tree}").strip()
+    git(clone, "reset", "-q", "--hard", git(clone, "commit-tree", tree, "-m", message).strip())
+
+
+def scrub(source: str, rules: Rules, work: Path, branch: str, squash_message: str | None = None) -> int:
     if work.exists() and any(work.iterdir()):
         raise RunError(f"{work} is not empty: give a new directory")
-    if shutil.which("git-filter-repo") is None:
+    if squash_message is None and shutil.which("git-filter-repo") is None:
         raise RunError("git-filter-repo is not installed (apt git-filter-repo)")
     clone = work / "repo"
     r = subprocess.run(["git", "clone", "-q", "--no-local", "--single-branch", "--branch", branch,
@@ -267,7 +286,10 @@ def scrub(source: str, rules: Rules, work: Path, branch: str) -> int:
     # Listed before filter-repo runs: it prunes the old commits and trees.
     old_files = git(clone, "ls-tree", "-r", "--full-tree", "HEAD").splitlines()
     keep_before = keep_counts(clone, "HEAD", rules["keep"])
-    filter_repo(clone, work, rules)
+    if squash_message is None:
+        filter_repo(clone, work, rules)
+    else:
+        squash(clone, squash_message)
     new_files = git(clone, "ls-tree", "-r", "--full-tree", "HEAD").splitlines()
     tip_changes = [f"TIP {path}" for path in
                    sorted({line.split("\t", 1)[1] for line in set(old_files) ^ set(new_files)})]
@@ -277,7 +299,8 @@ def scrub(source: str, rules: Rules, work: Path, branch: str) -> int:
         for tok in rules["keep"] if keep_before[tok] != keep_after[tok]]
     print(f"scrub-history: {branch} {old_tip[:10]} -> {git(clone, 'rev-parse', 'HEAD').strip()[:10]}, "
           f"{git(clone, 'rev-list', '--count', 'HEAD').strip()} commits, in {clone}")
-    print(f"scrub-history: old-to-new commit map: {work / 'commit-map'}")
+    print(f"scrub-history: old-to-new commit map: {work / 'commit-map'}" if squash_message is None else
+          "scrub-history: squashed to one commit: no commit map, the old commits live only in an archive")
     return report(left, tip_changes, branch, old_tip)
 
 
@@ -307,9 +330,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("rules", type=Path, help="the rules JSON (keep it private)")
     ap.add_argument("--work", type=Path, required=True, help="a new or empty directory for the clone")
     ap.add_argument("--branch", default="master")
+    ap.add_argument("--squash", metavar="MESSAGE",
+                    help="replace the whole history with one commit of the tip's tree, with this message")
     args = ap.parse_args(argv)
     try:
-        return scrub(args.source, load_rules(args.rules), args.work, args.branch)
+        return scrub(args.source, load_rules(args.rules), args.work, args.branch, args.squash)
     except (RunError, re.error, subprocess.CalledProcessError) as e:
         print(f"scrub-history: NOT RUN: {e}", file=sys.stderr)
         return 2
