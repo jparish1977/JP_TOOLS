@@ -1,0 +1,25 @@
+{
+  "about": "mutate-on-target --only runs the named mutants alone, refuses a name nothing has, and --list touches nothing. Run: mutate-on-target.py TREE mutate-on-target.py tests/test_mutate_on_target.py tests/mutants/jpt-only-on-mutate-on-target.json",
+  "mutants": [
+    {
+      "name": "a name no mutant has is run as nothing",
+      "edits": [["    missing = [n for n in only if n not in names]", "    missing: list[str] = []"]],
+      "target": "--only a name no mutant has: refused, exit 2"
+    },
+    {
+      "name": "--only ignored, every mutant runs",
+      "edits": [["    return [m for m in mutants if m[\"name\"] in only]", "    return mutants"]],
+      "target": "--only nine: the other mutant did not run"
+    },
+    {
+      "name": "the summary does not say the run was partial",
+      "edits": [["    of = f\"{len(mutants)} of {len(every)} mutant(s) (--only)\" if args.only else f\"{len(mutants)} mutant(s)\"", "    of = f\"{len(mutants)} mutant(s)\""]],
+      "target": "--only nine: exit, one of two run, and it says so"
+    },
+    {
+      "name": "--list goes on to run the spec",
+      "edits": [["            print(f\"{m['name']}\\t-> {m['target']}\")\n        return 0\n", "            print(f\"{m['name']}\\t-> {m['target']}\")\n"]],
+      "target": "--list: exit, each name and target"
+    }
+  ]
+}

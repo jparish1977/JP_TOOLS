@@ -2,7 +2,12 @@
 """Run mutate-on-target.py for specs, taking TARGET and TEST from each spec's about.
 
 Usage:
-    python mutate-spec.py [--jobs N] ROOT SPEC [SPEC ...]
+    python mutate-spec.py [--jobs N] [--only NAME ...] [--list] ROOT SPEC [SPEC ...]
+
+--list prints every spec's mutants, name and target, and runs nothing.
+--only NAME (repeatable, the name exactly) runs just the specs that have a
+mutant of that name, each with only its own named mutants; a NAME no spec has
+is refused, never run as nothing.
 
 A spec's `about` carries its own run line (`mutate-on-target.py TREE TARGET
 TEST SPEC`), so the caller does not restate it and get it wrong. Prints one
@@ -22,6 +27,7 @@ afterwards. ROOT itself is never mutated. --jobs 1 is serial.
 
 from __future__ import annotations
 
+import argparse
 import concurrent.futures
 import json
 import os
@@ -31,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import NoReturn
 
 # The packages beside this file import when another program loads it by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -50,8 +57,10 @@ def spec_stem(spec: str, base: str) -> str:
     return rel.removesuffix(".json").replace(os.sep, "__")
 
 
-def run_spec(root: str, spec: str, outdir: str, base: str) -> tuple[str, int, str]:
-    """One spec in a private copy of ROOT: (stem, rc, the runner's last line)."""
+def run_spec(root: str, spec: str, outdir: str, base: str,
+             only: list[str] | None = None) -> tuple[str, int, str]:
+    """One spec in a private copy of ROOT, all its mutants or just ONLY's:
+    (stem, rc, the runner's last line)."""
     stem = spec_stem(spec, base)
     with open(spec, encoding="utf-8") as fh:
         m = RUN_LINE.search(json.load(fh).get("about", ""))
@@ -64,8 +73,9 @@ def run_spec(root: str, spec: str, outdir: str, base: str) -> tuple[str, int, st
     try:
         shutil.copytree(root, tree, symlinks=True)
         with open(out, "w", encoding="utf-8") as fh:
+            chosen = [a for name in only or [] for a in ("--only", name)]
             rc = subprocess.run([sys.executable, str(RUNNER), tree, target, test,
-                                 os.path.abspath(spec)],
+                                 os.path.abspath(spec), *chosen],
                                 stdout=fh, stderr=subprocess.STDOUT, check=False).returncode
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -74,19 +84,56 @@ def run_spec(root: str, spec: str, outdir: str, base: str) -> tuple[str, int, st
     return stem, rc, last
 
 
+def names(spec: str) -> list[tuple[str, str]]:
+    """(name, target) of each of SPEC's mutants."""
+    with open(spec, encoding="utf-8") as fh:
+        return [(m["name"], m["target"]) for m in json.load(fh)["mutants"]]
+
+
+def chosen(specs: list[str], only: list[str]) -> dict[str, list[str] | None]:
+    """{spec: the ONLY names it has, or None for all}, leaving out a spec with
+    none of them. A name no spec has stops the run: run as nothing, it would
+    read as all killed."""
+    if not only:
+        return dict.fromkeys(specs)
+    have = {sp: [n for n, _ in names(sp)] for sp in specs}
+    missing = [n for n in only if not any(n in h for h in have.values())]
+    if missing:
+        sys.stderr.write(f"mutate-spec: --only {missing!r}: no mutant in the given specs has "
+                         "that name; --list shows them\n")
+        sys.exit(2)
+    return {sp: [n for n in only if n in h] for sp, h in have.items() if any(n in h for n in only)}
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse, but a usage error exits 2 with the usage."""
+
+    def error(self, message: str) -> NoReturn:
+        sys.stderr.write(f"mutate-spec: {message}\n{__doc__}\n")
+        sys.exit(2)
+
+
 def main(argv: list[str]) -> int:
-    jobs = os.cpu_count() or 1
-    if argv[:1] == ["--jobs"] and len(argv) > 1:
-        jobs, argv = max(1, int(argv[1])), argv[2:]
-    if len(argv) < 2:
-        sys.exit(__doc__)
+    p = _Parser(add_help=False)
+    p.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
+    p.add_argument("--only", action="append", default=[], metavar="NAME")
+    p.add_argument("--list", action="store_true")
+    p.add_argument("root")
+    p.add_argument("specs", nargs="+")
+    args = p.parse_args(argv)
     name_process("mutate-spec")
-    root, specs = os.path.abspath(argv[0]), argv[1:]
-    outdir = os.environ.get("MUTATE_OUT_DIR", ".")
+    root, specs, jobs = os.path.abspath(args.root), args.specs, max(1, args.jobs)
     base = os.path.commonpath([os.path.dirname(os.path.abspath(sp)) for sp in specs])
+    if args.list:
+        for sp in specs:
+            for name, target in names(sp):
+                print(f"{spec_stem(sp, base)}: {name}\t-> {target}")
+        return 0
+    runs = chosen(specs, args.only)
+    outdir = os.environ.get("MUTATE_OUT_DIR", ".")
     bad = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(jobs, len(specs))) as pool:
-        futures = [pool.submit(run_spec, root, sp, outdir, base) for sp in specs]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(jobs, len(runs))) as pool:
+        futures = [pool.submit(run_spec, root, sp, outdir, base, only) for sp, only in runs.items()]
         for fut in concurrent.futures.as_completed(futures):
             stem, rc, last = fut.result()
             print(f"{stem}: rc={rc} {last[:140]}", flush=True)

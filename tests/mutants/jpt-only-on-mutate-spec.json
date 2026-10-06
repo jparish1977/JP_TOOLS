@@ -1,0 +1,20 @@
+{
+  "about": "mutate-spec --only runs just the specs that have the name, each with its own named mutants, and refuses a name no spec has. Run: mutate-on-target.py TREE mutate-spec.py tests/test_mutate_on_target.py tests/mutants/jpt-only-on-mutate-spec.json",
+  "mutants": [
+    {
+      "name": "a spec without the name still runs, all of it",
+      "edits": [["    return {sp: [n for n in only if n in h] for sp, h in have.items() if any(n in h for n in only)}", "    return {sp: [n for n in only if n in h] for sp, h in have.items()}"]],
+      "target": "mutate-spec --only nine: exit, and only the spec that has it ran"
+    },
+    {
+      "name": "the names are not passed to the runner",
+      "edits": [["            chosen = [a for name in only or [] for a in (\"--only\", name)]", "            chosen: list[str] = []"]],
+      "target": "mutate-spec --only nine: one of its two mutants"
+    },
+    {
+      "name": "a name no spec has exits 1, as a failed mutant would",
+      "edits": [["                         \"that name; --list shows them\\n\")\n        sys.exit(2)", "                         \"that name; --list shows them\\n\")\n        sys.exit(1)"]],
+      "target": "mutate-spec --only a name no spec has: refused, exit 2"
+    }
+  ]
+}

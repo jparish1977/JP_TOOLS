@@ -2,7 +2,13 @@
 """Mutation control: each mutant must fail the ONE check aimed at it.
 
 Usage:
-    python mutate-on-target.py TREE TARGET TEST SPEC.json
+    python mutate-on-target.py TREE TARGET TEST SPEC.json [--only NAME ...] [--list]
+
+--list prints each mutant's name and target, and touches nothing. --only NAME
+(repeatable, the name exactly) runs the control and those mutants alone, so
+re-anchoring one mutant costs one mutant's run; a NAME no mutant has is
+refused, never run as nothing, and the summary says how many of the spec's
+mutants ran.
 
 TREE is a checkout whose TARGET (a path inside it) is mutated in place and
 restored whatever happens; TEST (also inside TREE) is run from TREE after each
@@ -51,6 +57,7 @@ restore did not read back byte for byte.
 
 from __future__ import annotations
 
+import argparse
 import fcntl
 import hashlib
 import importlib.util
@@ -116,10 +123,27 @@ def lock_tree(tree: str) -> int:
     return fd
 
 
-def load_mutants(r: Run, spec: str, original: bytes) -> list[dict[str, Any]]:
-    """The spec's mutants, refused unless every edit anchors exactly once."""
+def read_spec(spec: str) -> list[dict[str, Any]]:
     with open(spec, encoding="utf-8") as fh:
         mutants: list[dict[str, Any]] = json.load(fh)["mutants"]
+    return mutants
+
+
+def select(mutants: list[dict[str, Any]], only: list[str]) -> list[dict[str, Any]]:
+    """The mutants named in ONLY (all of them when ONLY is empty). A name no
+    mutant has is refused: run as nothing, it would read as all killed."""
+    if not only:
+        return mutants
+    names = [m["name"] for m in mutants]
+    missing = [n for n in only if n not in names]
+    if missing:
+        refuse(f"--only {missing!r}: no mutant has that name; the spec's names are "
+               + "; ".join(repr(n) for n in names))
+    return [m for m in mutants if m["name"] in only]
+
+
+def load_mutants(r: Run, mutants: list[dict[str, Any]], original: bytes) -> list[dict[str, Any]]:
+    """MUTANTS, refused unless every edit anchors exactly once."""
     for m in mutants:
         for old, _new in m["edits"]:
             n = original.count(old.encode())
@@ -200,11 +224,32 @@ def mutate_all(r: Run, original: bytes, mutants: list[dict[str, Any]]) -> int:
     return bad
 
 
+class _Parser(argparse.ArgumentParser):
+    """argparse, but a usage error exits 2 with the usage, as a refusal does."""
+
+    def error(self, message: str) -> NoReturn:
+        refuse(f"{message}\n{__doc__}")
+
+
+def parse(argv: list[str]) -> argparse.Namespace:
+    p = _Parser(add_help=False)
+    for name in ("tree", "target", "test", "spec"):
+        p.add_argument(name)
+    p.add_argument("--only", action="append", default=[], metavar="NAME")
+    p.add_argument("--list", action="store_true")
+    return p.parse_args(argv)
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 4:
-        sys.exit(__doc__)
+    args = parse(argv)
     name_process("mut-on-target")
-    r = make_run(*argv[:3])
+    every = read_spec(args.spec)
+    if args.list:
+        for m in every:
+            print(f"{m['name']}\t-> {m['target']}")
+        return 0
+    chosen = select(every, args.only)
+    r = make_run(args.tree, args.target, args.test)
     lock_tree(r.tree)
     if os.path.exists(r.saved):
         refuse(f"{r.saved} holds the ORIGINAL of {r.target}, left by a run that was "
@@ -212,8 +257,9 @@ def main(argv: list[str]) -> int:
                "mutated. Restore it from that file, delete the file, run again")
     with open(r.target, "rb") as fh:
         original = fh.read()
-    mutants = load_mutants(r, argv[3], original)
-    print(f"target {r.target_rel}, test {r.test_rel}, {len(mutants)} mutant(s)")
+    mutants = load_mutants(r, chosen, original)
+    of = f"{len(mutants)} of {len(every)} mutant(s) (--only)" if args.only else f"{len(mutants)} mutant(s)"
+    print(f"target {r.target_rel}, test {r.test_rel}, {of}")
     # A SIGTERM becomes an exit, so the restore below still runs; a SIGKILL
     # leaves the original behind for the next run to refuse on.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
@@ -233,7 +279,7 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(f"mutate: {r.target} did NOT read back as the original after "
                          f"the restore; the original is in {r.saved}\n")
         return 3
-    print(f"mutate-on-target: {len(mutants)} mutant(s), "
+    print(f"mutate-on-target: {of}, "
           f"{'every one killed on target' if not bad else f'{bad} wrong'}")
     return 1 if bad else 0
 

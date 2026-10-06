@@ -17,6 +17,9 @@ WHAT IS CHECKED
     - A spec that does not anchor refuses, exit 2.
     - Two specs given to mutate-spec.py run at the same time, each in its own
       copy, leaving ROOT untouched and no copy behind.
+    - --only NAME (both tools) runs those mutants alone and says how many of
+      the spec's ran; a name nothing has is refused, exit 2; --list names
+      each mutant and its target and touches nothing.
     Not checked: exit 3, a restore that does not read back; nothing short of
     a second writer racing the restore produces it.
 
@@ -215,6 +218,74 @@ def test_specs_with_one_file_name() -> None:
                "every one killed" in by_label.get("books__code", "")
                and "1 wrong" in by_label.get("figures__code", ""))
     check("same file name: the surviving mutant still fails the run", r.returncode, 1)
+
+
+def two_mutant_spec(name: str) -> tuple[str, str, dict[str, str]]:
+    """The usual tree, and a spec of two mutants, 'two' and 'nine', both killed on target."""
+    tree, spec, env = fixture(name)
+    with open(spec, "w", encoding="utf-8") as fh:
+        json.dump({"about": "Run: mutate-on-target.py TREE t.py test.py SPEC.",
+                   "mutants": [{"name": n, "edits": [["VALUE = 1", v]], "target": "value is one"}
+                               for n, v in (("two", "VALUE = 2"), ("nine", "VALUE = 9"))]}, fh)
+    return tree, spec, env
+
+
+def runner_with(tree: str, spec: str, env: dict[str, str], *extra: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, RUNNER, tree, "t.py", "test.py", spec, *extra],
+                          capture_output=True, text=True, env=env, check=False, timeout=120)
+
+
+def test_only_and_list() -> None:
+    """--only NAME runs the control and that mutant alone, and says how many of
+    the spec's ran; a name no mutant has is refused, never run as nothing;
+    --list names each mutant and its target and touches nothing."""
+    tree, spec, env = two_mutant_spec("only")
+    r = runner_with(tree, spec, env, "--only", "nine")
+    check("--only nine: exit, one of two run, and it says so",
+          (r.returncode, "1 of 2 mutant(s) (--only), every one killed" in r.stdout), (0, True))
+    check("--only nine: the other mutant did not run", "  two " in r.stdout, False)
+    r = runner_with(tree, spec, env, "--only", "two", "--only", "nine")
+    check("--only twice: both run", (r.returncode, "2 of 2 mutant(s) (--only)" in r.stdout), (0, True))
+    r = runner_with(tree, spec, env, "--only", "seven")
+    check("--only a name no mutant has: refused, exit 2, naming the spec's names",
+          (r.returncode, "no mutant has that name" in r.stderr and "'two'" in r.stderr), (2, True))
+    check("--only a name no mutant has: TARGET untouched", target_bytes(tree), ORIGINAL)
+    r = runner_with(tree, spec, env, "--list")
+    check("--list: exit, each name and target",
+          (r.returncode, r.stdout.splitlines()), (0, ["two\t-> value is one", "nine\t-> value is one"]))
+    check("--list: TARGET untouched", target_bytes(tree), ORIGINAL)
+
+
+def test_spec_only_and_list() -> None:
+    """mutate-spec.py --only runs just the specs that have the name, each with
+    its own named mutants; a name no spec has is refused; --list runs nothing."""
+    tree, spec, env = two_mutant_spec("spec-only")
+    other = os.path.join(TMP, "spec-only-other.json")
+    with open(other, "w", encoding="utf-8") as fh:
+        json.dump({"about": "Run: mutate-on-target.py TREE t.py test.py SPEC.",
+                   "mutants": [{"name": "three", "edits": [["VALUE = 1", "VALUE = 3"]],
+                                "target": "value is one"}]}, fh)
+    outdir = os.path.join(TMP, "spec-only-out")
+    os.makedirs(outdir)
+    spec_py = os.path.join(os.path.dirname(RUNNER), "mutate-spec.py")
+
+    def spec_run(*extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([sys.executable, spec_py, tree, spec, other, *extra], capture_output=True,
+                              text=True, env=dict(env, MUTATE_OUT_DIR=outdir), check=False, timeout=120)
+
+    r = spec_run("--only", "nine")
+    check("mutate-spec --only nine: exit, and only the spec that has it ran",
+          (r.returncode, [ln.split(":")[0] for ln in r.stdout.splitlines()]), (0, ["spec-only"]))
+    check_true("mutate-spec --only nine: one of its two mutants", "1 of 2 mutant(s) (--only)" in r.stdout)
+    r = spec_run("--only", "seven")
+    check("mutate-spec --only a name no spec has: refused, exit 2",
+          (r.returncode, "no mutant in the given specs" in r.stderr, r.stdout), (2, True, ""))
+    r = spec_run("--list")
+    check("mutate-spec --list: exit, every spec's names",
+          (r.returncode, sorted(r.stdout.splitlines())),
+          (0, ["spec-only-other: three\t-> value is one", "spec-only: nine\t-> value is one",
+               "spec-only: two\t-> value is one"]))
+    check("mutate-spec --list and the refusal: TARGET untouched", target_bytes(tree), ORIGINAL)
 
 
 if __name__ == "__main__":
