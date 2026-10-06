@@ -16,6 +16,7 @@ range put back into any of them fails here on every box.
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -81,6 +82,23 @@ def test_powershell() -> None:
         check("powershell, pwsh older than tested: exit", code, FINDINGS)
         check_true("powershell, older: says so", "pwsh 7.4.1 is older than the tested 7.6.5" in out)
         check("powershell, no pwsh at all: exit", pins(d, "powershell")[0], NOT_RUN)
+        broken = Path(tmp) / "bin"
+        broken.mkdir()
+        (broken / "pwsh").write_text("#!/bin/sh\necho 'snap-confine cannot continue' >&2\nexit 1\n",
+                                     encoding="utf-8")
+        (broken / "pwsh").chmod(0o755)
+        old_path = os.environ["PATH"]
+        os.environ["PATH"] = str(broken)
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                code = PINS.main(["powershell"], root=d)
+        finally:
+            os.environ["PATH"] = old_path
+        said = buf.getvalue()
+        check("powershell, a pwsh that does not run: exit, and what it said, not 'not installed'",
+              (code, "did not run (exit 1): snap-confine cannot continue" in said,
+               "is not installed" in said), (NOT_RUN, True, False))
         (d / "requirements-system.txt").write_text(SYSTEM.replace("1.25.0", ">=1.20"), encoding="utf-8")
         code, out = pins(d, "powershell", ps=("7.6.5", {"PSScriptAnalyzer": "1.25.0"}))
         check("powershell, a module 'pin' that is a range: exit", code, FINDINGS)

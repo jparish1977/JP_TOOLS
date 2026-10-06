@@ -103,6 +103,26 @@ def test_no_pwsh_fetches_the_pinned_release() -> None:
                    any(c[0] == "pwsh" and "-RequiredVersion 1.25.0" in " ".join(c) for c in ran))
 
 
+def test_a_failed_module_install_fails_the_script() -> None:
+    """pwsh -Command exits 0 after a non-terminating error, so the install asks
+    for 'Stop'; a pwsh that then exits 1 stops the script there. Invariant
+    globalization is not set: PowerShellGet will not load under it."""
+    failing = ("if any('Install-Module' in a for a in sys.argv):\n"
+               "    import os\n"
+               "    sys.exit(1 if 'DOTNET_SYSTEM_GLOBALIZATION_INVARIANT' not in os.environ else 7)\n"
+               + FAKE_PWSH)
+    with fake_tools(keep_path=True, pwsh=failing) as (work, log):
+        script = jp_tools(Path(work) / "jp", MANIFEST)
+        env = {k: v for k, v in os.environ.items() if k != "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT"}
+        r = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                           env={**env, "HOME": str(work)})
+        ran = calls(log)
+    installs = [" ".join(c) for c in ran if "Install-Module" in " ".join(c)]
+    check("install fails: exit 1, the version query never run", (r.returncode, len(ran)), (1, 1))
+    check_true("install fails: the command stops on any error",
+               bool(installs) and "$ErrorActionPreference = 'Stop';" in installs[0])
+
+
 def test_a_manifest_without_the_lines() -> None:
     with fake_tools(keep_path=True, pwsh=FAKE_PWSH) as (work, log):
         script = jp_tools(Path(work) / "jp", "shellcheck 0.9.0 shellcheck -\n")

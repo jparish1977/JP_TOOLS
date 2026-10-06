@@ -31,6 +31,7 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `ci-job-fields.py` | what did check.py report inside a CI job, per file; exits 1 on an empty log |
 | `file-sizes.py` | how many source files pass a line threshold, and how much of each is prose |
 | `doc-pointers.py` | do the `~/` paths in the docs still resolve, in three outcomes |
+| `psscriptanalyzer-sweep.py` | how much would a PSScriptAnalyzer gate find across a tree of repos, by severity, rule and repo |
 | `shellcheck-sweep.py` | how much would a shellcheck gate find across a tree of repos, by level and by repo |
 | `ast-before-after.py` | which functions a cleanup restructured between two refs, drawn before and after, with complexity and check.py findings by rule |
 | `prune-merged-branches.py` | which remote branches hold nothing the base does not already have, and which only LOOK unmerged because they landed rebased |

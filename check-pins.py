@@ -188,7 +188,9 @@ _PS_QUERY = (
 
 
 def powershell_installed(modules: list[str]) -> tuple[str | None, dict[str, str]]:
-    """(pwsh's version, {module: highest installed version}); (None, {}) without pwsh."""
+    """(pwsh's version, {module: highest installed version}); (None, {}) without pwsh.
+    A pwsh that is there and does not run (a snap one with no capabilities,
+    say) raises NotRunError with what it said: it is not "not installed"."""
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if pwsh is None:
         return None, {}
@@ -196,8 +198,11 @@ def powershell_installed(modules: list[str]) -> tuple[str | None, dict[str, str]
                        capture_output=True, text=True, check=False,
                        env={**os.environ, "JP_PINS_MODULES": ",".join(modules)})
     lines = r.stdout.splitlines()
+    if r.returncode != 0 or not lines:
+        said = (r.stderr.strip().splitlines() or ["no output"])[0]
+        raise NotRunError(f"{pwsh} did not run (exit {r.returncode}): {said[:200]}")
     have = dict(ln.split(" ", 1) for ln in lines[1:] if " " in ln)
-    return (lines[0].strip() if lines else None), have
+    return lines[0].strip(), have
 
 
 def _at_least(have: str, least: str) -> bool:
