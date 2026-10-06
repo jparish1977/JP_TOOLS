@@ -20,11 +20,14 @@
 # --classic` is the same release. Without it a .ps1 file exits 2. A TOOL of
 # pwsh:MODULE is a PowerShell module, installed from the PowerShell Gallery:
 #     pwsh -c 'Install-Module NAME -RequiredVersion VERSION -Scope CurrentUser'
-# and here VERSION is the pin: the Gallery serves every release.
+# and here VERSION is the pin: the Gallery serves every release. The pwsh
+# line's fifth column is the SHA-256 of that release's linux-x64 tarball, from
+# the release's own hashes.sha256: install-pwsh.sh refuses a download that
+# does not match it.
 
 shellcheck        0.9.0   shellcheck    koalaman.shellcheck
 cppcheck          2.13.0  cppcheck      Cppcheck.Cppcheck
-pwsh              7.6.5   powershell    Microsoft.PowerShell
+pwsh              7.6.5   powershell    Microsoft.PowerShell  sha256:b34ab3b19acac1d3d4d0d3cfdb02acf62f457b0b6a962ff008132033f7566844
 pwsh:PSScriptAnalyzer 1.25.0 -          -
 php:gd            8.3     php-gd        -
 php:sqlite3       8.3     php-sqlite3   -

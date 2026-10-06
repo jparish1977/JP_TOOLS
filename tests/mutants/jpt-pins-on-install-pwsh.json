@@ -18,8 +18,18 @@
     },
     {
       "name": "a missing manifest line read as empty",
-      "edits": [["    echo \"install-pwsh: no '$tool' line in requirements-system.txt\" >&2\n    return 1", "    echo \"install-pwsh: no '$tool' line in requirements-system.txt\" >&2\n    return 0"]],
+      "edits": [["    echo \"install-pwsh: no '$tool' line with column $col in requirements-system.txt\" >&2\n    return 1", "    echo \"install-pwsh: no '$tool' line with column $col in requirements-system.txt\" >&2\n    return 0"]],
       "target": "no pwsh line: exit 1, naming it, and nothing run"
+    },
+    {
+      "name": "the download is not checked against its hash",
+      "edits": [["    if ! echo \"$pwsh_sha256  $dest/$tarball\" | sha256sum --check --quiet --strict; then", "    if false; then"]],
+      "target": "hash mismatch: exit 1, says so, nothing unpacked or left, no module install"
+    },
+    {
+      "name": "the Gallery trusted again",
+      "edits": [["\"\\$ErrorActionPreference = 'Stop'; Install-Module", "\"\\$ErrorActionPreference = 'Stop'; Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module"]],
+      "target": "pwsh present: the Gallery's trust setting is not touched"
     }
   ]
 }

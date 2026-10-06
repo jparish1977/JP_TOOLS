@@ -8,13 +8,17 @@ WHAT IS CHECKED, against a fake pwsh and a fake curl:
     - pwsh already on PATH: nothing is downloaded, and PSScriptAnalyzer is
       installed at the manifest's pin.
     - no pwsh: exactly the manifest's release is fetched (its URL, linux x64),
-      unpacked into ~/.local/pwsh, put on GITHUB_PATH, and the module
-      installed with it.
+      checked against the manifest's sha256, unpacked into ~/.local/pwsh, put
+      on GITHUB_PATH, and the module installed with it.
+    - a download whose sha256 is not the manifest's: exit 1, nothing unpacked,
+      the module not installed.
+    - the install never changes the Gallery's trust setting.
     - a manifest without the lines: the script stops, naming the missing one.
 
     python3 tests/test_install_pwsh.py
 """
 
+import hashlib
 import io
 import os
 import shutil
@@ -64,33 +68,54 @@ def test_pwsh_already_there() -> None:
     check("pwsh present: nothing downloaded", [c for c in ran if c[0] == "curl"], [])
     check_true("pwsh present: the module installed at the manifest's pin",
                any("Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0" in " ".join(c) for c in ran))
+    check("pwsh present: the Gallery's trust setting is not touched",
+          [c for c in ran if "Set-PSRepository" in " ".join(c)], [])
+
+
+def fetch_without_pwsh(tmp: str, sha256: str | None = None) -> tuple[subprocess.CompletedProcess[str],
+                                                                        list[list[str]], Path, Path]:
+    """install-pwsh.sh with no pwsh on PATH and only curl faked, serving a
+    tarball whose pwsh is a fake; the manifest's pwsh line carries SHA256,
+    the served tarball's own by default. (result, calls, ~/.local/pwsh, GITHUB_PATH)."""
+    release = tarball_with_pwsh()
+    blob = Path(tmp) / "release.tar.gz"
+    blob.write_bytes(release)
+    sha256 = sha256 or hashlib.sha256(release).hexdigest()
+    manifest = MANIFEST.replace("Microsoft.PowerShell\n", f"Microsoft.PowerShell sha256:{sha256}\n")
+    curl = ("out = sys.argv[sys.argv.index('-o') + 1]\n"
+            f"open(out, 'wb').write(open({str(blob)!r}, 'rb').read())\n")
+    # Only curl is faked: the real tar, sha256sum, mkdir, rm and chmod do the
+    # work, from /usr/bin and /bin, and no real pwsh is on that PATH.
+    bin_dir = Path(tmp) / "bin"
+    bin_dir.mkdir()
+    log = Path(tmp) / "log"
+    log.touch()
+    (bin_dir / "curl").write_text(f"#!{sys.executable}\n{LOG_ARGV}{curl}")
+    (bin_dir / "curl").chmod(0o755)
+    home = Path(tmp) / "home"
+    home.mkdir()
+    gh_path = Path(tmp) / "github_path"
+    script = jp_tools(Path(tmp) / "jp", manifest)
+    path = f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin"
+    r = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                       env={"PATH": path, "HOME": str(home), "FAKE_LOG": str(log),
+                            "GITHUB_PATH": str(gh_path)})
+    return r, calls(log), home / ".local" / "pwsh", gh_path
+
+
+def test_a_download_that_does_not_match_its_hash() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        r, ran, dest, _ = fetch_without_pwsh(tmp, sha256="0" * 64)
+        check("hash mismatch: exit 1, says so, nothing unpacked or left, no module install",
+              (r.returncode, "does not match the sha256" in r.stderr, sorted(p.name for p in dest.iterdir()),
+               [c for c in ran if c[0] == "pwsh"]),
+              (1, True, [], []))
 
 
 def test_no_pwsh_fetches_the_pinned_release() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        blob = Path(tmp) / "release.tar.gz"
-        blob.write_bytes(tarball_with_pwsh())
-        curl = ("out = sys.argv[sys.argv.index('-o') + 1]\n"
-                f"open(out, 'wb').write(open({str(blob)!r}, 'rb').read())\n")
-        # Only curl is faked: the real tar, mkdir, rm and chmod unpack the
-        # release, from /usr/bin and /bin, and no real pwsh is on that PATH.
-        bin_dir = Path(tmp) / "bin"
-        bin_dir.mkdir()
-        log = Path(tmp) / "log"
-        log.touch()
-        (bin_dir / "curl").write_text(f"#!{sys.executable}\n{LOG_ARGV}{curl}")
-        (bin_dir / "curl").chmod(0o755)
-        home = Path(tmp) / "home"
-        home.mkdir()
-        gh_path = Path(tmp) / "github_path"
-        script = jp_tools(Path(tmp) / "jp", MANIFEST)
-        path = f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin"
-        r = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
-                           env={"PATH": path, "HOME": str(home), "FAKE_LOG": str(log),
-                                "GITHUB_PATH": str(gh_path)})
-        ran = calls(log)
+        r, ran, dest, gh_path = fetch_without_pwsh(tmp)
         urls = [c[c.index("-fsSL") + 1] for c in ran if c[0] == "curl"]
-        dest = home / ".local" / "pwsh"
         check("no pwsh: exit", (r.returncode, r.stderr[-300:]), (0, ""))
         check("no pwsh: the manifest's release, linux x64",
               urls, [("https://github.com/PowerShell/PowerShell/releases/download/v7.6.5/"

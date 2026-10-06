@@ -30,7 +30,7 @@ from typing import Any
 from _harness import ROOT, check, check_true, run
 from fake_tools import install
 from jpcheck.files import _detect_lang
-from jpcheck.native_tools import _NO_MODULE, run_psscriptanalyzer
+from jpcheck.native_tools import _NO_MODULE, _NO_TARGET, run_psscriptanalyzer
 
 CHECK_PY = ROOT / "check.py"
 BARE = "Write-Host 'hi'\n"
@@ -93,6 +93,9 @@ def test_how_the_report_is_read() -> None:
     r = fake_run(f"sys.exit({_NO_MODULE})\n")
     check("no module: unavailable, naming the Install-Module command",
           (r["status"], "Install-Module PSScriptAnalyzer" in str(r.get("note"))), ("unavailable", True))
+    r = fake_run(f"sys.exit({_NO_TARGET})\n")
+    check("a target pwsh cannot see: error, never a pass",
+          (r["status"], "nothing was analysed" in str(r.get("note"))), ("error", True))
     found = [{"line": 3, "col": 1, "severity": "Warning", "rule": "PSAvoidUsingEmptyCatchBlock",
               "message": "m"},
              {"line": 5, "col": 2, "severity": "Information", "rule": "PSUseSingularNouns",
@@ -131,6 +134,8 @@ def test_the_real_tool() -> None:
             (d / name).write_text(body, encoding="utf-8")
             code, doc = check_py(str(d / name))
             results[name] = (code, checks(doc))
+        gone = run_psscriptanalyzer(str(d / "not-there.ps1"))["status"]
+    check("the real tool, a file that is not there: error", gone, "error")
     check("a bare Write-Host: exit 1, PSAvoidUsingWriteHost",
           results["bare.ps1"], (1, [("psscriptanalyzer", "fail", ["PSAvoidUsingWriteHost"]),
                                     ("directive-reason", "pass", [])]))

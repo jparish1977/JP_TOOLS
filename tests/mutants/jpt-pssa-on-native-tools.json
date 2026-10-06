@@ -25,6 +25,11 @@
       "name": "the path is not wildcard-escaped",
       "edits": [["\"$path = [System.Management.Automation.WildcardPattern]::Escape($env:JP_PSA_TARGET); \"", "\"$path = $env:JP_PSA_TARGET; \""]],
       "target": "a name with wildcard characters is analysed, not matched as a pattern: exit 1"
+    },
+    {
+      "name": "a target pwsh cannot see read as a report",
+      "edits": [["    if result.returncode == _NO_TARGET:\n", "    if False:\n"]],
+      "target": "a target pwsh cannot see: error, never a pass"
     }
   ]
 }

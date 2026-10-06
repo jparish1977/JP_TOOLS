@@ -115,6 +115,7 @@ PSSA_VERSION = "1.25.0"   # requirements-system.txt's pin
 PSSA_INSTALL = (f"pwsh -c 'Install-Module PSScriptAnalyzer -RequiredVersion {PSSA_VERSION} "
                 "-Scope CurrentUser' (requirements-system.txt)")
 _NO_MODULE = 3
+_NO_TARGET = 4
 
 # Run in one pwsh: the target comes in through JP_PSA_TARGET, never the
 # command line, so no path needs quoting. A missing module exits 3 rather
@@ -123,9 +124,11 @@ _NO_MODULE = 3
 # -InputObject so Windows PowerShell 5.1 (no -AsArray) prints an array too.
 # -Path expands wildcards, and Invoke-ScriptAnalyzer has no -LiteralPath, so
 # the path is escaped first: a script named a[1].ps1 otherwise matches no
-# file, is analysed as nothing, and would report a pass.
+# file, is analysed as nothing, and would report a pass. A target pwsh cannot
+# see at all exits 4, so any other way of analysing nothing is an error too.
 _PSSA_SCRIPT = (
     "if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) { exit 3 }; "
+    "if (-not (Test-Path -LiteralPath $env:JP_PSA_TARGET -PathType Leaf)) { exit 4 }; "
     "Import-Module PSScriptAnalyzer -ErrorAction Stop; "
     "$path = [System.Management.Automation.WildcardPattern]::Escape($env:JP_PSA_TARGET); "
     "$found = @(Invoke-ScriptAnalyzer -Path $path | ForEach-Object { "
@@ -166,6 +169,9 @@ def run_psscriptanalyzer(target: str) -> dict[str, Any]:
                             env={**_plain_env(), "JP_PSA_TARGET": target})
     if result.returncode == _NO_MODULE:
         return _pssa_missing("PSScriptAnalyzer", PSSA_INSTALL)
+    if result.returncode == _NO_TARGET:
+        return {"tool": "psscriptanalyzer", "status": "error", "issues": [],
+                "note": f"pwsh cannot see {target} as a file: nothing was analysed"}
     try:
         found = json.loads(result.stdout or "null")
     except ValueError:
