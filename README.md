@@ -52,7 +52,7 @@ Without access to them, `composer install` stops on the two packages.
 
 | Script | Purpose |
 |---|---|
-| `check.py` | Run quality checks, output JSON report |
+| `check.py` | Run quality checks, output JSON report (what other tools may rely on in it: `docs/check-output.md`) |
 | `fix.py` | Auto-fix what's fixable, report what isn't |
 | `coverage-gate.py` | Fail under a line-coverage threshold, read from a Clover report (PHP; see `docs/coverage.md`) |
 | `check-pins.py` | Check that the gate's tools are pinned to one version in `requirements-dev.txt`, `composer.json` and `package.json`, and installed at it |

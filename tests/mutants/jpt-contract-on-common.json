@@ -1,0 +1,25 @@
+{
+  "about": "check.py's status sets, held to docs/check-output.md. Run: mutate-on-target.py TREE jpcheck/common.py tests/test_check_output_contract.py tests/mutants/jpt-contract-on-common.json",
+  "mutants": [
+    {
+      "name": "a verdict dropped from the code only",
+      "edits": [["_VERDICTS = (\"pass\", \"warn\", \"fail\")", "_VERDICTS = (\"pass\", \"fail\")"]],
+      "target": "the page's verdicts, mildest first, are _VERDICTS"
+    },
+    {
+      "name": "skip no longer counted as ran",
+      "edits": [["_RAN = (*_VERDICTS, \"skip\")", "_RAN = _VERDICTS"]],
+      "target": "the page's ran statuses are _RAN"
+    },
+    {
+      "name": "a not-run status dropped from the code only",
+      "edits": [["_NOT_RUN = (\"error\", \"unavailable\", \"unknown\")", "_NOT_RUN = (\"error\", \"unavailable\")"]],
+      "target": "the page's not-run statuses are _NOT_RUN"
+    },
+    {
+      "name": "a new status written that the page does not list",
+      "edits": [["        \"status\": \"unavailable\",", "        \"status\": \"missing\","]],
+      "target": "every status literal in check.py and jpcheck/ is on the page"
+    }
+  ]
+}

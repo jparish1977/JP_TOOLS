@@ -1,0 +1,20 @@
+{
+  "about": "check.py's exit rules as docs/check-output.md states them. Run: mutate-on-target.py TREE jpcheck/registry.py tests/test_check_output_contract.py tests/mutants/jpt-contract-on-registry.json",
+  "mutants": [
+    {
+      "name": "skip read as not run",
+      "edits": [["    not_run = [c for c in checks if c.get(\"status\") not in _RAN]", "    not_run = [c for c in checks if c.get(\"status\") not in (\"pass\", \"warn\", \"fail\")]"]],
+      "target": "pass, warn and skip: exit"
+    },
+    {
+      "name": "only the listed not-run statuses exit 2",
+      "edits": [["    not_run = [c for c in checks if c.get(\"status\") not in _RAN]", "    not_run = [c for c in checks if c.get(\"status\") in (\"error\", \"unavailable\", \"unknown\")]"]],
+      "target": "a status the page does not list: exit"
+    },
+    {
+      "name": "not-run wins over findings",
+      "edits": [["    if summary[\"errors\"] > 0:\n        return jpexit.FINDINGS\n    if not_run:", "    if not_run:\n        return jpexit.NOT_RUN\n    if summary[\"errors\"] > 0:\n        return jpexit.FINDINGS\n    if not_run:"]],
+      "target": "findings and a check that did not run: findings win, exit"
+    }
+  ]
+}

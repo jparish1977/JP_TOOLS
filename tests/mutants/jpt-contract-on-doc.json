@@ -1,0 +1,25 @@
+{
+  "about": "docs/check-output.md, held to check.py's code. Run: mutate-on-target.py TREE docs/check-output.md tests/test_check_output_contract.py tests/mutants/jpt-contract-on-doc.json",
+  "mutants": [
+    {
+      "name": "warn left off the page",
+      "edits": [["| `warn` | verdict | ran, every counted finding is a warning |\n", ""]],
+      "target": "the page's verdicts, mildest first, are _VERDICTS"
+    },
+    {
+      "name": "skip filed as a verdict on the page",
+      "edits": [["| `skip` | ran |", "| `skip` | verdict |"]],
+      "target": "the page's verdicts, mildest first, are _VERDICTS"
+    },
+    {
+      "name": "unknown left off the page",
+      "edits": [["| `unknown` | not run | no runner for the tool named |\n", ""]],
+      "target": "the page's not-run statuses are _NOT_RUN"
+    },
+    {
+      "name": "an exit code misnamed on the page",
+      "edits": [["| 2 | `NOT_RUN` |", "| 2 | `SKIPPED` |"]],
+      "target": "the page's exit codes are jpexit's"
+    }
+  ]
+}

@@ -248,12 +248,22 @@ def _tool_missing(name: str, install: str = "") -> dict[str, Any]:
     }
 
 
+# The statuses are an interface: other repositories read check.py's JSON, and
+# docs/check-output.md is the contract they read it by. Changing these sets
+# changes that contract; tests/test_check_output_contract.py holds the two to
+# each other.
+#
 # A check's verdict on what it found, mildest first (_verdict). Only errors
 # decide the exit code; "warn" is reported and exits 0.
 _VERDICTS = ("pass", "warn", "fail")
 # Statuses that mean a check ran and reached a verdict. "skip" is a runner
 # deciding it does not apply (npm-audit with no package.json), not a failure.
 _RAN = (*_VERDICTS, "skip")
+# Statuses a check that did not run reports: its tool failed (error), is not
+# installed (unavailable), or has no runner (unknown). The exit code treats
+# ANY status outside _RAN as not run, so one added without updating this still
+# exits 2.
+_NOT_RUN = ("error", "unavailable", "unknown")
 
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
