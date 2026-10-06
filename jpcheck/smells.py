@@ -183,8 +183,16 @@ def _file_smells(f: Path) -> list[dict[str, Any]]:
     if lang not in _MEASURES:
         return [_unmeasured(f, f"no measure for {lang} files")]
     try:
-        lines, funcs = measure(lang, f.read_text(encoding="utf-8", errors="replace"))
-    except (SyntaxError, ValueError, OSError):
+        src = f.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return [_unmeasured(f, f"it could not be read: {e}")]
+    # Only the FILE's fault is caught here. A measuring tool that cannot be run
+    # raises OSError, which reaches run_smells and is reported as the check
+    # not running, never as a warning about the file: a warning exits 0, and
+    # nothing was measured.
+    try:
+        lines, funcs = measure(lang, src)
+    except (SyntaxError, ValueError):
         return [_unmeasured(f, "it could not be parsed (its linter reports the parse error)")]
     ctx = _smells_context(f)
     history = ctx is not None
@@ -243,4 +251,7 @@ def run_smells(target: str) -> dict[str, Any]:
         return _unavailable("git, to read history and tell a new smell from an existing one")
     except ToolMissingError as e:
         return _unavailable(f"{e}, to measure")
+    except OSError as e:
+        return {"tool": "smells", "status": "error", "issues": [],
+                "note": f"a measuring tool could not be run: {e}"}
     return {"tool": "smells", "status": _verdict(issues), "issues": issues}

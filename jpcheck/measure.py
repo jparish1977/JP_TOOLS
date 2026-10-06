@@ -26,7 +26,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-from jpcheck.common import _php_bin
+from jpcheck.common import _php_bin, _php_cmd
 
 Measure = tuple[int, dict[str, tuple[int, int, int]]]
 Funcs = dict[str, tuple[int, int, int]]
@@ -151,11 +151,16 @@ _PHPCS_RULESET = """<?xml version="1.0"?>
 """
 
 
-def _php_tool(name: str) -> str:
-    found = _php_bin(name)
+def _php_tool(name: str) -> list[str]:
+    """The command that runs Composer bin NAME: php, then the bin's proxy, as
+    the lint runners call it. The proxy is a PHP script with no extension,
+    which Windows cannot execute on its own (WinError 193)."""
+    php, found = _php_cmd(), _php_bin(name)
+    if not php:
+        raise ToolMissingError("php")
     if not found:
         raise ToolMissingError(f"{name} (composer install in JP_TOOLS)")
-    return found
+    return [php, found]
 
 
 def _php_ast(src: str) -> list[dict[str, Any]]:
@@ -163,7 +168,7 @@ def _php_ast(src: str) -> list[dict[str, Any]]:
     with tempfile.TemporaryDirectory() as d:
         path = Path(d) / "measured.php"
         path.write_text(src, encoding="utf-8")
-        r = subprocess.run([_php_tool("php-parse"), "-j", str(path)],
+        r = subprocess.run([*_php_tool("php-parse"), "-j", str(path)],
                            capture_output=True, text=True, check=False)
     start = r.stdout.find("[")
     if r.returncode != 0 or "Syntax error" in r.stdout or start < 0:
@@ -177,7 +182,7 @@ def _phpcs_complexity(src: str) -> dict[int, int]:
     with tempfile.TemporaryDirectory() as d:
         ruleset = Path(d) / "ruleset.xml"
         ruleset.write_text(_PHPCS_RULESET, encoding="utf-8")
-        r = subprocess.run([_php_tool("phpcs"), f"--standard={ruleset}", "--report=json", "-q",
+        r = subprocess.run([*_php_tool("phpcs"), f"--standard={ruleset}", "--report=json", "-q",
                             "--stdin-path=measured.php", "-"],
                            input=src, capture_output=True, text=True, check=False)
     if r.returncode not in (0, 1, 2):

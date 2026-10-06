@@ -12,6 +12,11 @@ WHAT IS CHECKED
     its language's tool also counts it into the parent. A file that does not
     parse is refused (ValueError), not measured as empty.
 
+    The PHP tools run as `php PROXY`, so proxies without the executable bit
+    (Windows cannot execute an extensionless script) measure the same. A
+    measuring tool that cannot be run makes the smells check not run, never a
+    warning about the file.
+
     A tool that is not installed prints SKIP for its language: not a pass.
 
     python3 tests/test_measure.py
@@ -19,10 +24,16 @@ WHAT IS CHECKED
 
 import shutil
 import sys
+import tempfile
+from pathlib import Path
+from unittest import mock
 
 from _harness import ROOT, check, run
+from jpcheck import measure as measure_module
+from jpcheck import smells as smells_module
 from jpcheck.common import _php_bin, node_module_roots
 from jpcheck.measure import TOP_LEVEL, file_complexity, measure
+from jpcheck.smells import run_smells
 
 FIXTURES = ROOT / "tests" / "fixtures" / "measure"
 
@@ -101,6 +112,50 @@ def test_a_file_that_does_not_parse_is_refused() -> None:
         except (SyntaxError, ValueError):
             refused = True
         check(f"{lang}: a file that does not parse is refused, not measured empty", refused, True)
+
+
+def wrapper_proxies(tmp: Path) -> dict[str, str]:
+    """php-parse and phpcs proxies that are PHP scripts WITHOUT the executable
+    bit, each requiring the real one: what Windows sees in vendor/bin, where an
+    extensionless script cannot be executed directly (WinError 193)."""
+    out = {}
+    for name in ("php-parse", "phpcs"):
+        w = tmp / name
+        w.write_text(f"<?php\nrequire {str(_php_bin(name))!r};\n", encoding="utf-8")
+        w.chmod(0o644)
+        out[name] = str(w)
+    return out
+
+
+def test_php_tools_run_through_php() -> None:
+    """The PHP measure runs its tools as `php PROXY`, so a proxy that cannot be
+    executed on its own measures the same."""
+    if not ready("php"):
+        return
+    lang, fixture, want, _ = CASES[1]
+    src = (FIXTURES / fixture).read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as tmp, \
+            mock.patch.object(measure_module, "_php_bin", wrapper_proxies(Path(tmp)).get):
+        try:
+            got: object = measure(lang, src)[1]
+        except OSError as e:
+            got = f"{type(e).__name__}: {e}"
+    check("php: proxies that cannot be executed directly still measure the sample, through php",
+          got, want)
+
+
+def test_a_tool_that_cannot_run_is_not_a_finding() -> None:
+    """A measuring tool that cannot be run makes the smells check not run
+    (status error, exit 2), never a 'could not be parsed' warning that exits 0."""
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "a.php"
+        f.write_text("<?php\n\nfunction f(): int\n{\n    return 1;\n}\n", encoding="utf-8")
+        cannot = OSError(193, "%1 is not a valid Win32 application")
+        with mock.patch.object(smells_module, "measure", side_effect=cannot):
+            result = run_smells(str(f))
+    check("a measuring tool that cannot run: smells did not run, and says why",
+          (result["status"], result["issues"], "could not be run" in result.get("note", "")),
+          ("error", [], True))
 
 
 if __name__ == "__main__":
