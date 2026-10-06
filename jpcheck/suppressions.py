@@ -227,7 +227,8 @@ def run_suppress_reason(target: str) -> dict[str, Any]:
 # hundred on a large repo (structural E402s on imports after a `sys.path`
 # insert, for one) and fail nothing. `noqa-no-reason` forces the reason at the
 # moment the marker is written, which is when someone reads it. The JS side
-# keeps its per-suppression warnings.
+# keeps its per-suppression warnings. Listing every marker with its reason, the
+# passing ones included, is list-suppressions.py, which reads noqa_markers().
 #
 # THREE THINGS FAIL, and they are deliberately not one rule:
 #   * A marker with no reason. For a structural suppression the sentence IS the

@@ -104,14 +104,28 @@ _DIRECTIVES: dict[str, list[Directive]] = {
 }
 
 
+def _written(d: Directive, m: re.Match[str]) -> tuple[str, str]:
+    """(the directive as written, without its comment marks or its reason;
+    its reason, or "" when it states none in its tool's form)."""
+    rest = m.group("rest")
+    why = d.reason.search(rest)
+    keep = rest[:why.start()] if why else rest
+    head = m.group(0)[:len(m.group(0)) - len(rest)] + keep
+    return (head.strip().lstrip("#/* ").rstrip(" */;-(#"),
+            why.group("why").strip() if why and d.reasoned(rest) else "")
+
+
 def directives(text: str, lang: str) -> list[dict[str, Any]]:
-    """Every honoured suppression directive in TEXT for LANG: name, line, reason or not."""
+    """Every honoured suppression directive in TEXT for LANG: name, line, whether
+    it states a reason, and for an inventory, the directive as written and the reason."""
     found = []
     for n, line in enumerate(text.splitlines(), 1):
         for d in _DIRECTIVES.get(lang, []):
             m = d.pattern.search(line)
             if m:
-                found.append({"name": d.name, "line": n, "reasoned": d.reasoned(m.group("rest"))})
+                written, reason = _written(d, m)
+                found.append({"name": d.name, "line": n, "reasoned": d.reasoned(m.group("rest")),
+                              "directive": written, "reason": reason})
                 break
     return found
 

@@ -56,6 +56,8 @@ Without access to them, `composer install` stops on the two packages.
 | `fix.py` | Auto-fix what's fixable, report what isn't |
 | `coverage-gate.py` | Fail under a line-coverage threshold, read from a Clover report (PHP; see `docs/coverage.md`) |
 | `check-pins.py` | Check that the gate's tools are pinned to one version in `requirements-dev.txt`, `composer.json` and `package.json`, and installed at it |
+| `list-exemptions.py` | Inventory every `# pragma: no cover` and its reason, the ones the gate lets pass included |
+| `list-suppressions.py` | Inventory every suppression in every language (`noqa`, `type: ignore`, shellcheck, cppcheck, phpstan, phpcs, eslint, stylelint) and its reason, the ones the gate lets pass included |
 | `install-hooks.py` | Install pre-commit hook into any git repo |
 | `init-ci.py` | Copy GitHub Actions CI template into a repo |
 

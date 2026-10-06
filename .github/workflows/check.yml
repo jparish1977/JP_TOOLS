@@ -175,6 +175,9 @@ jobs:
           echo
           echo "Coverage exemptions, which coverage does not hide:"
           python list-exemptions.py . || true
+          echo
+          echo "Suppressions, every language, the ones check.py lets pass included:"
+          python list-suppressions.py . || true
 
   js:
     name: JS (eslint, prettier)

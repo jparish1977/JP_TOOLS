@@ -457,7 +457,7 @@ Section 7 inverted. Those are the claims you make at the start of a project; the
 
 3. **Check coverage, and check what it is measuring.** `.coveragerc` traces subprocesses and does **not** honour `pragma: no cover`, both deliberately. Without subprocess tracing, code exercised through a CLI reads as untested; honouring the pragma adds coverage nobody earned. A naive setup is wrong in the flattering direction. See `docs/coverage.md`.
 
-4. **Read the exemptions**: `python list-exemptions.py <file>`. §2.6 says `pragma: no cover` belongs only on IO leaves. The `no-cover` check refuses an unjustified branchy exemption, but **a reason is not a justification**: three words can satisfy the check and justify nothing. Only a person reading the list catches that.
+4. **Read the exemptions and the suppressions**: `python list-exemptions.py <file>` and `python list-suppressions.py <file>`. §2.6 says `pragma: no cover` belongs only on IO leaves. The `no-cover`, `noqa` and `directive-reason` checks refuse an exemption or suppression that states no reason, but **a reason is not a justification**: three words can satisfy the check and justify nothing. Only a person reading the list catches that.
 
 5. **Confirm CI actually covers the file, by name.** The file list in `.github/workflows/check.yml` is manual. A green badge on a file no job touches is not a pass, it is a check that did not run.
 

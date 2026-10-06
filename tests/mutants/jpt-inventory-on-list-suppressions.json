@@ -1,0 +1,35 @@
+{
+  "about": "list-suppressions.py lists every suppression in every language, and --strict counts what check.py refuses. Run: mutate-on-target.py TREE list-suppressions.py tests/test_list_suppressions.py tests/mutants/jpt-inventory-on-list-suppressions.json",
+  "mutants": [
+    {
+      "name": "Python's noqa and type: ignore left out",
+      "edits": [["    if lang == \"python\":\n        return [{\"kind\": m[\"kind\"]", "    if lang == \"nothing\":\n        return [{\"kind\": m[\"kind\"]"]],
+      "target": "each suppression, every language, with what it names and its reason"
+    },
+    {
+      "name": "the other languages left out",
+      "edits": [["        if lang != \"python\" and lang not in _DIRECTIVES:", "        if lang != \"python\":"]],
+      "target": "each suppression, every language, with what it names and its reason"
+    },
+    {
+      "name": "the skip list ignored",
+      "edits": [["p.is_file() and is_project_file(p, target))", "p.is_file())"]],
+      "target": "--json: exit, and the files scanned"
+    },
+    {
+      "name": "a noqa naming no codes not counted as refused",
+      "edits": [["    return not row[\"reason\"] or (row[\"kind\"] == \"noqa\" and not row[\"codes\"])", "    return not row[\"reason\"]"]],
+      "target": "--strict counts exactly what check.py refuses"
+    },
+    {
+      "name": "a type: ignore counted as refused",
+      "edits": [["    if row[\"kind\"] == \"type-ignore\":\n        return False\n", ""]],
+      "target": "--strict counts exactly what check.py refuses"
+    },
+    {
+      "name": "--strict never fails",
+      "edits": [["    return jpexit.FINDINGS if (args.strict and bad) else jpexit.OK", "    return jpexit.OK"]],
+      "target": "--strict with refused suppressions: exit"
+    }
+  ]
+}
