@@ -13,7 +13,7 @@
     },
     {
       "name": "a report that is not JSON read as a pass",
-      "edits": [["        return {\"tool\": \"psscriptanalyzer\", \"status\": \"error\", \"issues\": [],", "        return {\"tool\": \"psscriptanalyzer\", \"status\": \"pass\", \"issues\": [],"]],
+      "edits": [["        return {\"tool\": \"psscriptanalyzer\", \"status\": \"error\", \"issues\": [],\n                \"note\": f\"pwsh exit", "        return {\"tool\": \"psscriptanalyzer\", \"status\": \"pass\", \"issues\": [],\n                \"note\": f\"pwsh exit"]],
       "target": "a report that is not JSON: error, never a pass"
     },
     {
