@@ -1,0 +1,20 @@
+{
+  "about": "A .sh or .bash suffix says only 'a script': a #! line naming Python wins. Run: mutate-on-target.py TREE jpcheck/files.py tests/test_check_shebang.py tests/mutants/jpt-script-suffix-on-files.json",
+  "mutants": [
+    {
+      "name": "the #! line read only for a file with no suffix, as before",
+      "edits": [["    named = _shebang_lang(p) if not ext or ext in _SCRIPT_SUFFIXES else None", "    named = _shebang_lang(p) if not ext else None"]],
+      "target": "a Python program named .sh is Python, and ruff finds its unused import, exit 1"
+    },
+    {
+      "name": "the suffix wins over the #! line",
+      "edits": [["    return named or _EXT_TO_LANG.get(ext)", "    return _EXT_TO_LANG.get(ext) or named"]],
+      "target": "a Python program named .sh is Python, and ruff finds its unused import, exit 1"
+    },
+    {
+      "name": "a .sh with no #! line is no longer shell",
+      "edits": [["    return named or _EXT_TO_LANG.get(ext)", "    return named if ext in _SCRIPT_SUFFIXES else named or _EXT_TO_LANG.get(ext)"]],
+      "target": "CONTROL: plain.sh stays shell"
+    }
+  ]
+}

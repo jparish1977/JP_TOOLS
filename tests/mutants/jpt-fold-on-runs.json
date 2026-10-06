@@ -1,0 +1,15 @@
+{
+  "about": "A directory-wide tool that discovers by suffix is handed each file whose suffix does not name its language. Run: mutate-on-target.py TREE jpcheck/runs.py tests/test_check_shebang.py tests/mutants/jpt-fold-on-runs.json",
+  "mutants": [
+    {
+      "name": "only a file with no suffix is folded in, as before",
+      "edits": [["    for fp in (f for f in files if _EXT_TO_LANG.get(Path(f).suffix.lower()) != _file_lang(Path(f))):", "    for fp in (f for f in files if not Path(f).suffix):"]],
+      "target": "directory mode: ruff's finding names the .sh Python program"
+    },
+    {
+      "name": "nothing is folded in",
+      "edits": [["    for fp in (f for f in files if _EXT_TO_LANG.get(Path(f).suffix.lower()) != _file_lang(Path(f))):", "    for fp in (f for f in files if False):"]],
+      "target": "ruff's finding names the script, not only the .py files"
+    }
+  ]
+}

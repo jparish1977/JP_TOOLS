@@ -13,6 +13,10 @@ THE GAP THIS PINS DOWN
     the directory and discover files by suffix, so a detected script never
     reaches them unless it is named to them.
 
+    A .sh or .bash suffix says only "a script": a Python program named
+    convert.sh is Python by its #! line, so the Python rules run on it and
+    shellcheck does not refuse it; one naming a shell, or none, stays shell.
+
 Skips when ruff or mypy is missing, because then check.py cannot fail a file.
 
     python3 tests/test_check_shebang.py
@@ -60,6 +64,35 @@ def issues_for(out: str, tool: str) -> list[str]:
         return []
     return [str(i.get("file", "")) for c in doc.get("checks", [])
             if c.get("tool") == tool for i in c.get("issues", [])]
+
+
+def language(out: str) -> str:
+    try:
+        return str(json.loads(out).get("language"))
+    except ValueError:
+        return "(no report)"   # reason: not a report, so no language; the check names what came out
+
+
+def script_suffix(d: Path) -> None:
+    """A .sh or .bash suffix says only "a script": a #! line naming Python
+    wins, and the Python rules run; one naming a shell, or none, stays shell."""
+    print("\nA script suffix, and a #! line:")
+    fake = d / "convert.sh"
+    fake.write_text(DIRTY, encoding="utf-8")
+    rc, out = run(str(fake))
+    check("a Python program named .sh is Python, and ruff finds its unused import, exit 1",
+          (language(out), rc, any(issues_for(out, "ruff"))) == ("python", 1, True), out[:400])
+    for name, body in (("real.sh", "#!/bin/sh\necho hi\n"), ("plain.sh", "echo hi\n"),
+                       ("env.bash", "#!/usr/bin/env bash\necho hi\n")):
+        (d / name).write_text(body, encoding="utf-8")
+        check(f"CONTROL: {name} stays shell", language(run(str(d / name))[1]) == "shell")
+    repo = d / "mixed"
+    repo.mkdir()
+    (repo / "ok.py").write_text(CLEAN, encoding="utf-8")
+    (repo / "convert.sh").write_text(DIRTY, encoding="utf-8")
+    rc, out = run(str(repo))
+    check("directory mode: ruff's finding names the .sh Python program",
+          any(f.endswith("convert.sh") for f in issues_for(out, "ruff")), out[:600])
 
 
 def main() -> int:
@@ -110,6 +143,8 @@ def main() -> int:
             langs = {}
         check("the python section counts the script as well as ok.py", langs.get("python") == 2,
               str(langs))
+
+        script_suffix(d)
 
     print(f"\n{checks - fails}/{checks} passed")
     return 1 if fails else 0

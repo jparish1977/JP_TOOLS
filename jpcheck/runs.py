@@ -5,7 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from jpcheck.common import _RAN, _VERDICTS, _worse
-from jpcheck.files import Ignore, _collect_files, _drop_ignored, _drop_ignored_issues
+from jpcheck.files import (
+    _EXT_TO_LANG,
+    Ignore,
+    _collect_files,
+    _drop_ignored,
+    _drop_ignored_issues,
+    _file_lang,
+)
 from jpcheck.lab import _mark_lab_exempt
 from jpcheck.registry import (
     _DIR_CAPABLE,
@@ -86,13 +93,14 @@ def _dir_capable_result(runner: Runner, target: str, files: list[str], root: Pat
                         ignores: list[Ignore]) -> dict[str, Any]:
     """One run over the whole directory, where the tool does its own discovery.
 
-    It discovers by SUFFIX, so a script found by its shebang is not in it:
-    each one is named to the tool and folded into the same result, a not-run
-    status included, so it cannot drop out.
+    It discovers by SUFFIX, so a script found by its shebang is not in it (one
+    with no suffix, or a Python program named .sh): each file whose suffix
+    does not name its language is named to the tool and folded into the same
+    result, a not-run status included, so it cannot drop out.
     """
     result = runner(target)
     _drop_ignored_issues(result, root, ignores)
-    for fp in (f for f in files if not Path(f).suffix):
+    for fp in (f for f in files if _EXT_TO_LANG.get(Path(f).suffix.lower()) != _file_lang(Path(f))):
         _fold(result, runner(fp))
     return result
 

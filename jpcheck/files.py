@@ -24,6 +24,11 @@ _EXT_TO_LANG = {
 # Interpreters shellcheck understands, as a #! line names them.
 _SHELL_INTERPRETERS = {b"sh", b"bash", b"dash", b"ksh"}
 
+# Suffixes that say only "a script": the #! line says which language, and
+# wins when it names one. A Python program named tool.sh is Python; read as
+# shell, shellcheck refuses it (SC1071) and the Python rules never run.
+_SCRIPT_SUFFIXES = {".sh", ".bash"}
+
 # Directories that are not this project's source, skipped by every walk: the
 # gate's file collection and the coverage-exemption scan alike. Virtualenvs
 # under other names are caught by their pyvenv.cfg (is_project_file).
@@ -71,16 +76,15 @@ def _cover(d: Path, suffixes: tuple[str, ...]) -> tuple[list[str], bool]:
 
 
 def _shebang_lang(p: Path) -> str | None:
-    """The language a script's #! line names, for a file with NO suffix.
+    """The language a script's #! line names, or None when it names none.
 
     Suffix-only detection would leave every extensionless script unchecked:
     the hook passes --skip-unsupported, so `bin/tool` would go through as
     "cannot detect language", while ruff and mypy both check such a file when
     it is named. Reads one line. Python and shell: `#!/bin/sh`, `#!/bin/bash`
     and `#!/usr/bin/env bash` alike, since `env` names the interpreter next.
+    _file_lang decides which files it is asked about.
     """
-    if p.suffix:
-        return None
     try:
         with p.open("rb") as fh:
             first = fh.readline(256)
@@ -103,11 +107,17 @@ def _interpreter_lang(shebang: bytes) -> str | None:
     return None
 
 
+def _file_lang(p: Path) -> str | None:
+    """A file's language: its #! line's, for a file with no suffix or a
+    script suffix (.sh, .bash) whose #! names one; otherwise its suffix's."""
+    ext = p.suffix.lower()
+    named = _shebang_lang(p) if not ext or ext in _SCRIPT_SUFFIXES else None
+    return named or _EXT_TO_LANG.get(ext)
+
+
 def _detect_lang(target: str) -> str:
     p = Path(target)
-    if p.is_file():
-        return _EXT_TO_LANG.get(p.suffix.lower()) or _shebang_lang(p) or "unknown"
-    return "unknown"
+    return (_file_lang(p) or "unknown") if p.is_file() else "unknown"
 
 
 # Extensions that are not source and are uninteresting to report as skipped.
@@ -159,8 +169,7 @@ def _collect_files(directory: str) -> tuple[dict[str, list[str]], dict[str, int]
                 skipped[kind] = skipped.get(kind, 0) + 1
                 continue
             ext = Path(f).suffix.lower()
-            lang = _EXT_TO_LANG.get(ext) or (
-                _shebang_lang(Path(root) / f) if not ext else None)
+            lang = _file_lang(Path(root) / f)
             if lang:
                 groups.setdefault(lang, []).append(str(Path(root) / f))
             elif ext not in _UNREMARKABLE:
