@@ -1,4 +1,4 @@
-"""Runners for C/C++ (cppcheck) and shell (shellcheck)."""
+"""Runners for C/C++ (cppcheck), shell (shellcheck) and PowerShell (PSScriptAnalyzer)."""
 
 import json
 import shutil
@@ -109,3 +109,85 @@ def run_shellcheck(target: str) -> dict[str, Any]:
             "fixable_unsafe": False,
         })
     return _tool_result("shellcheck", issues, result)
+
+
+PSSA_VERSION = "1.25.0"   # requirements-system.txt's pin
+PSSA_INSTALL = (f"pwsh -c 'Install-Module PSScriptAnalyzer -RequiredVersion {PSSA_VERSION} "
+                "-Scope CurrentUser' (requirements-system.txt)")
+_NO_MODULE = 3
+_NO_TARGET = 4
+
+# Run in one pwsh: the target comes in through JP_PSA_TARGET, never the
+# command line, so no path needs quoting. A missing module exits 3 rather
+# than failing Import-Module, so it reads as "not installed", not as a crash.
+# The findings go out as one JSON array, `[]` when there are none, built with
+# -InputObject so Windows PowerShell 5.1 (no -AsArray) prints an array too.
+# -Path expands wildcards, and Invoke-ScriptAnalyzer has no -LiteralPath, so
+# the path is escaped first: a script named a[1].ps1 otherwise matches no
+# file, is analysed as nothing, and would report a pass. A target pwsh cannot
+# see at all exits 4, so any other way of analysing nothing is an error too.
+_PSSA_SCRIPT = (
+    "if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) { exit 3 }; "
+    "if (-not (Test-Path -LiteralPath $env:JP_PSA_TARGET -PathType Leaf)) { exit 4 }; "
+    "Import-Module PSScriptAnalyzer -ErrorAction Stop; "
+    "$path = [System.Management.Automation.WildcardPattern]::Escape($env:JP_PSA_TARGET); "
+    "$found = @(Invoke-ScriptAnalyzer -Path $path | ForEach-Object { "
+    "[pscustomobject]@{ line = $_.Line; col = $_.Column; severity = [string]$_.Severity; "
+    "rule = $_.RuleName; message = $_.Message } }); "
+    "ConvertTo-Json -InputObject $found -Depth 3 -Compress"
+)
+
+
+def _pwsh() -> str | None:
+    """PowerShell 7 (pwsh) where it is installed, else Windows PowerShell."""
+    return shutil.which("pwsh") or shutil.which("powershell")
+
+
+def _pssa_missing(what: str, install: str) -> dict[str, Any]:
+    """The check did not run because WHAT is not installed. Reported under the
+    check's own name, psscriptanalyzer, whichever piece is missing
+    (docs/check-output.md: a reader looks a check up by it)."""
+    return {"tool": "psscriptanalyzer", "status": "unavailable", "issues": [],
+            "note": f"'{what}' not found: {install}"}
+
+
+def run_psscriptanalyzer(target: str) -> dict[str, Any]:
+    """PowerShell scripts, by PSScriptAnalyzer.
+
+    Severity maps like shellcheck's levels: Error, ParseError and Warning block;
+    Information is reported as a warning. Nothing is excluded: a script that
+    may use a rule's construct says so on its own lines, with a
+    SuppressMessageAttribute whose Justification directive-reason requires.
+    pwsh or the module missing is a check that did not run, never a pass.
+    tools/lab/psscriptanalyzer-sweep.py measures what the arm finds.
+    """
+    pwsh = _pwsh()
+    if pwsh is None:
+        return _pssa_missing("pwsh", "install PowerShell 7 (requirements-system.txt)")
+    result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", _PSSA_SCRIPT],
+                            capture_output=True, text=True, check=False,
+                            env={**_plain_env(), "JP_PSA_TARGET": target})
+    if result.returncode == _NO_MODULE:
+        return _pssa_missing("PSScriptAnalyzer", PSSA_INSTALL)
+    if result.returncode == _NO_TARGET:
+        return {"tool": "psscriptanalyzer", "status": "error", "issues": [],
+                "note": f"pwsh cannot see {target} as a file: nothing was analysed"}
+    try:
+        found = json.loads(result.stdout or "null")
+    except ValueError:
+        found = None   # reason: None is the "could not read its report" outcome, said below
+    if not isinstance(found, list):
+        why = strip_ansi(result.stderr).strip().splitlines()[-1:] or ["no report"]
+        return {"tool": "psscriptanalyzer", "status": "error", "issues": [],
+                "note": f"pwsh exit {result.returncode}: {why[0][:300]}"}
+    issues = [{
+        "file":     target,
+        "line":     int(f.get("line") or 0),
+        "col":      int(f.get("col") or 0),
+        "severity": "warning" if f.get("severity") == "Information" else "error",
+        "rule":     str(f.get("rule", "")),
+        "message":  str(f.get("message", "")),
+        "fixable":  False,
+        "fixable_unsafe": False,
+    } for f in found]
+    return {"tool": "psscriptanalyzer", "status": _status(issues), "issues": issues}

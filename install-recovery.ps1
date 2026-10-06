@@ -1,6 +1,8 @@
 # JP_TOOLS recovery tools installer (Windows)
 # Downloads and extracts Windows-native recovery and forensics tools.
 # Run from PowerShell (admin not required for download/extract).
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'an installer run by a person at a console: its coloured progress lines are for them')]
+param()
 
 $ErrorActionPreference = "Stop"
 $toolsDir = Join-Path $env:USERPROFILE "tools"

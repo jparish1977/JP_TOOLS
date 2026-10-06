@@ -17,11 +17,22 @@ else
 fi
 
 # Whether a requirements-system.txt entry is present: `php:EXT` is a PHP
-# extension, anything else a command on PATH.
+# extension, `pwsh:MODULE` a PowerShell module, anything else a command on PATH.
 present() {
     case "$1" in
         php:*) command -v php >/dev/null 2>&1 && php -m | grep -qix "${1#php:}" ;;
+        pwsh:*) command -v pwsh >/dev/null 2>&1 &&
+            pwsh -NoProfile -Command "if (Get-Module -ListAvailable '${1#pwsh:}') { exit 0 } else { exit 1 }" ;;
         *) command -v "$1" >/dev/null 2>&1 ;;
+    esac
+}
+
+# How to install an entry that is missing: a module from the PowerShell
+# Gallery at its pin, anything else from apt.
+how_to_install() {
+    case "$1" in
+        pwsh:*) echo "pwsh -c 'Install-Module ${1#pwsh:} -RequiredVersion $2 -Scope CurrentUser'" ;;
+        *) echo "sudo apt install $3" ;;
     esac
 }
 
@@ -33,9 +44,11 @@ report_system_tools() {
     while read -r tool min apt_pkg _win; do
         case "$tool" in ''|'#'*) continue ;; esac
         if ! present "$tool"; then
-            echo "    MISSING: $tool (tested on $min). Install: sudo apt install $apt_pkg"
+            echo "    MISSING: $tool (tested on $min). Install: $(how_to_install "$tool" "$min" "$apt_pkg")"
         elif [ "${tool#php:}" != "$tool" ]; then
             echo "    $tool: loaded (tested on PHP $min)"
+        elif [ "${tool#pwsh:}" != "$tool" ]; then
+            echo "    $tool: installed (pinned at $min)"
         else
             echo "    $tool: $("$tool" --version 2>/dev/null | head -n 2 | tail -n 1) (tested on $min)"
         fi

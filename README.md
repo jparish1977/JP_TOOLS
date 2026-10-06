@@ -276,6 +276,7 @@ the one place it is kept.
 | HTML | `.html`, `.htm` |
 | PHP | `.php` |
 | Shell | `.sh`, `.bash`, or a `#!` naming a shell |
+| PowerShell | `.ps1`, `.psm1`, `.psd1`, or a `#!` naming pwsh |
 | C / C++ | `.c`, `.cc`, `.cpp`, `.h`, `.hpp`, `.ino` |
 
 Skipped directories: `node_modules`, `vendor`, `__pycache__`, `.git`, `.venv`, `dist`, `build`

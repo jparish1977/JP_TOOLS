@@ -5,7 +5,9 @@ A suppression directive a linter honours fails unless its line says why.
 
 WHY
     shellcheck, cppcheck, phpstan, phpcs, eslint and stylelint each honour a
-    comment that turns a finding off, and none asks for a reason. Measured
+    comment that turns a finding off, and none asks for a reason; nor does
+    PSScriptAnalyzer's SuppressMessageAttribute, whose reason is its
+    Justification. Measured
     before this check: a C out-of-bounds write that fails the gate (exit 1)
     passed with `// cppcheck-suppress arrayIndexOutOfBounds` above it (exit 0);
     a PHP type error the same with `// @phpstan-ignore-next-line`; a
@@ -54,6 +56,11 @@ CASES = [
      ["/* eslint-disable -- generated file, not edited by hand */"]),
     ("css", "/* stylelint-disable-next-line color-no-hex */",
      ["/* stylelint-disable-next-line color-no-hex -- the brand colour */"]),
+    ("powershell", "[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '')]",
+     [("[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', "
+       "Justification = 'prints progress for a person')]"),
+      ("    [System.Diagnostics.CodeAnalysis.SuppressMessage('PSAvoidUsingWriteHost', '', "
+       'Justification="prints for a person")]')]),
 ]
 
 
@@ -81,6 +88,12 @@ REJECTED = [
     ("php", "    // phpcs:ignore Generic.PHP.NoSilencedErrors reason: may fail"),  # dropped
     ("js", "// eslint-disable-next-line no-eval reason: a user formula"),          # dropped
     ("css", "/* stylelint-disable color-no-hex reason: the brand colour */"),     # dropped
+    # PSScriptAnalyzer suppresses whatever the attribute says; the reason has
+    # to be its Justification, not a trailing comment.
+    ("powershell", ("[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '')]"
+                    "  # prints for a person")),
+    ("powershell", ("[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', "
+                    "Justification = '')]")),
 ]
 
 
@@ -99,6 +112,10 @@ def test_a_string_is_not_a_directive() -> None:
           one('const s = "eslint-disable-next-line no-eval";', "js"), [])
     check("control: a directive on a line of its own is found",
           len(one("  # shellcheck disable=SC2086", "shell")), 1)
+    check("powershell: an attribute split over lines is found, and reads unreasoned (fails closed)",
+          [d["reasoned"] for d in one("[Diagnostics.CodeAnalysis.SuppressMessageAttribute(\n"
+                                      "    'PSAvoidUsingWriteHost', '',\n    Justification = 'why')]",
+                                      "powershell")], [False])
 
 
 def test_a_separator_with_no_prose_is_no_reason() -> None:

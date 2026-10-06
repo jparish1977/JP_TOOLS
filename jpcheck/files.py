@@ -19,6 +19,8 @@ _EXT_TO_LANG = {
     ".hpp":  "cpp", ".cc":  "cpp", ".ino": "cpp",
     # Shell, backed by shellcheck.
     ".sh":   "shell", ".bash": "shell",
+    # PowerShell, backed by PSScriptAnalyzer: scripts, modules, manifests.
+    ".ps1":  "powershell", ".psm1": "powershell", ".psd1": "powershell",
 }
 
 # Interpreters shellcheck understands, as a #! line names them.
@@ -96,15 +98,16 @@ def _shebang_lang(p: Path) -> str | None:
 
 
 def _interpreter_lang(shebang: bytes) -> str | None:
-    """"python" or "shell" for the interpreter a #! line names, else None."""
+    """"python", "shell" or "powershell" for the interpreter a #! line names, else None."""
     if b"python" in shebang:
         return "python"
     words = shebang[2:].split()
     if words and words[0].endswith(b"/env"):
         words = [w for w in words[1:] if not w.startswith(b"-")]
-    if words and words[0].rsplit(b"/", 1)[-1] in _SHELL_INTERPRETERS:
+    name = words[0].rsplit(b"/", 1)[-1] if words else b""
+    if name in _SHELL_INTERPRETERS:
         return "shell"
-    return None
+    return "powershell" if name == b"pwsh" else None
 
 
 def _file_lang(p: Path) -> str | None:

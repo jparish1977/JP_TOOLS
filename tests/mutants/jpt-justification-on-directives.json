@@ -1,0 +1,15 @@
+{
+  "about": "PowerShell's SuppressMessageAttribute is reasoned only by its Justification. Run: mutate-on-target.py TREE jpcheck/directives.py tests/test_check_directive_reason.py tests/mutants/jpt-justification-on-directives.json",
+  "mutants": [
+    {
+      "name": "any text after the attribute counts as a reason",
+      "edits": [["                  r\"Justification\\s*=\\s*(?P<q>['\\\"])(?P<why>.*?)(?P=q)\")", "                  r\"(?P<why>.+)\")"]],
+      "target": "is found, unreasoned"
+    },
+    {
+      "name": "the attribute is not a directive",
+      "edits": [["    \"powershell\": [_PSSA],\n", ""]],
+      "target": "powershell: an attribute split over lines is found, and reads unreasoned"
+    }
+  ]
+}

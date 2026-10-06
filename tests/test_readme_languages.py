@@ -21,7 +21,7 @@ from jpcheck.files import _EXT_TO_LANG
 
 # The README's row label for each language check.py names.
 LABELS = {"python": "Python", "js": "JavaScript / TypeScript", "css": "CSS", "html": "HTML",
-          "php": "PHP", "shell": "Shell", "cpp": "C / C++"}
+          "php": "PHP", "shell": "Shell", "powershell": "PowerShell", "cpp": "C / C++"}
 
 
 def table(text: str) -> dict[str, set[str]]:
