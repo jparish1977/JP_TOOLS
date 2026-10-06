@@ -193,8 +193,8 @@ def test_specs_at_once() -> None:
 
 
 def test_specs_with_one_file_name() -> None:
-    """Two specs named code.json in different directories (another repo mirrors
-    its tests this way) each get their own output file and label, carrying
+    """Two specs named code.json in different directories (a repo that mirrors
+    its tests' layout in its specs has them) each get their own output file and label, carrying
     their own last line: one spec's mutant is killed, the other's survives."""
     tree, _, env = fixture("same-name-tree")
     specs = []

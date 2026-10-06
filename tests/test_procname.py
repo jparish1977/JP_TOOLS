@@ -53,7 +53,7 @@ def test_off_linux_libc_is_never_touched() -> None:
 
 
 def test_a_libc_that_will_not_load_is_never_fatal() -> None:
-    """TypeError is what CDLL(None) raises on Windows (measured on a Windows laptop)."""
+    """TypeError is what CDLL(None) raises on Windows (measured there)."""
     for error in (TypeError("LoadLibrary() argument 1 must be str, not None"),
                   OSError("no libc"), AttributeError("no prctl")):
         raised, calls = _with("linux", _Exploding(error))
