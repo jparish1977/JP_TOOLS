@@ -1,0 +1,15 @@
+{
+  "about": "noqa codes are upper-cased (ruff matches them case-insensitively); type: ignore codes are kept as written (mypy reads only its lower-case spelling). Run: mutate-on-target.py TREE jpcheck/suppressions.py tests/test_list_suppressions.py tests/mutants/jpt-code-case-on-suppressions.json",
+  "mutants": [
+    {
+      "name": "type: ignore codes upper-cased too, as before",
+      "edits": [["            \"codes\":  [c.upper() for c in codes] if kind == \"noqa\" else codes,", "            \"codes\":  [c.upper() for c in codes],"]],
+      "target": "each suppression, every language, with what it names and its reason"
+    },
+    {
+      "name": "noqa codes kept as written",
+      "edits": [["            \"codes\":  [c.upper() for c in codes] if kind == \"noqa\" else codes,", "            \"codes\":  codes,"]],
+      "target": "each suppression, every language, with what it names and its reason"
+    }
+  ]
+}

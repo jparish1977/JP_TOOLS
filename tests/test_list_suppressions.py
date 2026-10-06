@@ -8,7 +8,8 @@ check.py lets pass included.
 WHAT IS CHECKED
     - Python: a noqa with a reason, one without, a blanket one with and
       without a reason, and a `# type: ignore[...]`, each with its file, line,
-      codes and reason.
+      codes and reason. A noqa code is listed upper-case (ruff reads any
+      case); a type: ignore code as written (mypy reads only lower-case).
     - shell, C, PHP, JS, CSS: each language's directive, as written, with
       its reason; a reason in a form its tool does not honour shows as none.
     - Not listed: a marker inside a string, a sentence ABOUT noqa, a
@@ -38,7 +39,7 @@ LIST = load_script("list-suppressions.py")
 FILES = {
     "a.py": ("import os\nimport sys\nsys.path.insert(0, '.')\n"
              "import json  # noqa: E402 -- after the sys.path insert above\n"
-             "import re  # noqa: E402\n"
+             "import re  # noqa: e402\n"
              "x = os.sep  # noqa\n"
              "y: int = json.loads('1')  # type: ignore[no-any-return]\n"
              "z = 1  # noqa -- a reason, but no codes\n"
@@ -61,7 +62,7 @@ WANT = [
     ("a.py", 4, "noqa", ["E402"], "after the sys.path insert above"),
     ("a.py", 5, "noqa", ["E402"], ""),
     ("a.py", 6, "noqa", [], ""),
-    ("a.py", 7, "type-ignore", ["NO-ANY-RETURN"], ""),
+    ("a.py", 7, "type-ignore", ["no-any-return"], ""),
     ("a.py", 8, "noqa", [], "a reason, but no codes"),
     ("c.c", 2, "cppcheck-suppress", ["cppcheck-suppress unusedVariable"], ""),
     ("j.js", 1, "eslint-disable", ["eslint-disable-next-line no-eval"], "a user formula"),

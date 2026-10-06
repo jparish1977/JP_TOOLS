@@ -278,12 +278,15 @@ def _marker_from_comment(tok: tokenize.TokenInfo) -> dict[str, Any] | None:
         if m is None:
             continue
         why = _NOQA_REASON_RE.search(m.group("rest") or "")
+        # A noqa code is ruff's, matched case-insensitively, so it is kept
+        # upper-case to compare. A type: ignore code is mypy's, and kept as
+        # written: mypy's codes are lower-case and it reads no other spelling.
+        codes = [c.strip() for c in (m.group("codes") or "").split(",") if c.strip()]
         return {
             "kind":   kind,
             "line":   tok.start[0],
             "col":    tok.start[1] + 1,
-            "codes":  [c.strip().upper()
-                       for c in (m.group("codes") or "").split(",") if c.strip()],
+            "codes":  [c.upper() for c in codes] if kind == "noqa" else codes,
             "reason": why.group("why").strip() if why else "",
         }
     return None
