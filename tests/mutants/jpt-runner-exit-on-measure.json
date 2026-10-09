@@ -1,0 +1,15 @@
+{
+  "about": "_php_ast reads jp_php_ast.php's exit code: 2 is a source that does not parse, anything else is the runner failing, a missing tool and not a finding about the file. Run: mutate-on-target.py TREE jpcheck/measure.py tests/test_measure.py tests/mutants/jpt-runner-exit-on-measure.json",
+  "mutants": [
+    {
+      "name": "any runner failure read as a parse error",
+      "edits": [["    if r.returncode == 2:", "    if r.returncode != 0:"]],
+      "target": "php: a runner that cannot load php-parser is a missing tool"
+    },
+    {
+      "name": "a parse error read as the runner failing",
+      "edits": [["    if r.returncode == 2:", "    if False:"]],
+      "target": "php: a file that does not parse is refused, not measured empty"
+    }
+  ]
+}

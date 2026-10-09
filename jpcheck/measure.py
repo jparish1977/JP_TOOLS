@@ -26,7 +26,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-from jpcheck.common import _php_bin, _php_cmd
+from jpcheck.common import TOOLS_ROOT, _php_bin, _php_cmd, tool_roots
 
 Measure = tuple[int, dict[str, tuple[int, int, int]]]
 Funcs = dict[str, tuple[int, int, int]]
@@ -163,17 +163,33 @@ def _php_tool(name: str) -> list[str]:
     return [php, found]
 
 
+def _php_autoload() -> Path:
+    """The vendor/autoload.php that loads nikic/php-parser, from each tool root."""
+    for root in tool_roots():
+        vendor = root / "vendor"
+        if (vendor / "autoload.php").is_file() and (vendor / "nikic" / "php-parser").is_dir():
+            return vendor / "autoload.php"
+    raise ToolMissingError("php-parse (composer install in JP_TOOLS)")
+
+
 def _php_ast(src: str) -> list[dict[str, Any]]:
-    """php-parser's tree for SRC, as JSON. ValueError when it does not parse."""
-    with tempfile.TemporaryDirectory() as d:
-        path = Path(d) / "measured.php"
-        path.write_text(src, encoding="utf-8")
-        r = subprocess.run([*_php_tool("php-parse"), "-j", str(path)],
-                           capture_output=True, text=True, check=False)
-    start = r.stdout.find("[")
-    if r.returncode != 0 or "Syntax error" in r.stdout or start < 0:
-        raise ValueError(f"php-parse: {(r.stdout + r.stderr).strip()[-200:]}")
-    tree: list[dict[str, Any]] = json.loads(r.stdout[start:])
+    """php-parser's tree for SRC, as JSON, from jp_php_ast.php. ValueError when
+    it does not parse. The runner's exit code says which: 2 is the source, any
+    other failure (or output that is not a tree) is the runner itself."""
+    php = _php_cmd()
+    if not php:
+        raise ToolMissingError("php")
+    r = subprocess.run([php, str(TOOLS_ROOT / "jp_php_ast.php"), str(_php_autoload())],
+                       input=src, capture_output=True, text=True, encoding="utf-8",
+                       check=False)
+    if r.returncode == 2:
+        raise ValueError(f"php-parse: {r.stderr.strip()[-200:]}")
+    try:
+        tree: list[dict[str, Any]] = json.loads(r.stdout)
+    except ValueError:
+        # reason: no tree means the runner itself failed (php-parser not loadable, a crash)
+        raise ToolMissingError(
+            f"php-parse (jp_php_ast.php exit {r.returncode}: {r.stderr.strip()[-200:]})") from None
     return tree
 
 
@@ -243,7 +259,6 @@ def measure_php(src: str) -> Measure:
 # ── JS: ESLint's parser and its `complexity` rule, in jp_measure.mjs ──
 
 def measure_js(src: str) -> Measure:
-    from jpcheck.common import TOOLS_ROOT
     from jpcheck.js_tools import _resolve_args, _runner_env
     node = shutil.which("node") or shutil.which("node.exe")
     if not node:

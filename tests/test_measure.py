@@ -17,6 +17,9 @@ WHAT IS CHECKED
     measuring tool that cannot be run makes the smells check not run, never a
     warning about the file.
 
+    A PHP string literal that decodes to bytes that are not UTF-8 ("\\x89PNG")
+    measures like any other: the tree's JSON cannot fail on it.
+
     A tool that is not installed prints SKIP for its language: not a pass.
 
     python3 tests/test_measure.py
@@ -114,12 +117,47 @@ def test_a_file_that_does_not_parse_is_refused() -> None:
         check(f"{lang}: a file that does not parse is refused, not measured empty", refused, True)
 
 
+def test_php_non_utf8_literal_is_measured() -> None:
+    """A literal whose decoded bytes are not UTF-8 is measured, not refused as
+    a parse error. The control, without the \\x89, measures the same."""
+    if not ready("php"):
+        return
+    body = "<?php\n\nfunction f(): string\n{\n    return \"{}PNG\";\n}\n"
+    for label, escape in (("control, plain literal", ""), ("non-UTF-8 literal", "\\x89")):
+        src = body.replace("{}", escape)
+        try:
+            got: object = measure("php", src)[1]
+        except (ValueError, measure_module.ToolMissingError) as e:
+            got = f"not measured: {type(e).__name__}: {e}"
+        check(f"php: {label} is measured", got, {"f": (4, 1, 3)})
+
+
+def test_php_runner_failure_is_not_a_parse_error() -> None:
+    """php-parser that cannot be loaded makes the measure's tool missing, not a
+    'could not be parsed' about the file."""
+    if not ready("php"):
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        empty = Path(tmp) / "autoload.php"
+        empty.write_text("<?php\n", encoding="utf-8")
+        with mock.patch.object(measure_module, "_php_autoload", return_value=empty):
+            try:
+                measure("php", "<?php\n\nfunction f(): int\n{\n    return 1;\n}\n")
+                got = "measured"
+            except measure_module.ToolMissingError:
+                got = "tool missing"
+            except ValueError:
+                got = "refused as a parse error"
+    check("php: a runner that cannot load php-parser is a missing tool", got, "tool missing")
+
+
 def wrapper_proxies(tmp: Path) -> dict[str, str]:
-    """php-parse and phpcs proxies that are PHP scripts WITHOUT the executable
-    bit, each requiring the real one: what Windows sees in vendor/bin, where an
-    extensionless script cannot be executed directly (WinError 193)."""
+    """A phpcs proxy that is a PHP script WITHOUT the executable bit, requiring
+    the real one: what Windows sees in vendor/bin, where an extensionless
+    script cannot be executed directly (WinError 193). The tree comes from
+    jp_php_ast.php, which has no executable bit either."""
     out = {}
-    for name in ("php-parse", "phpcs"):
+    for name in ("phpcs",):
         w = tmp / name
         w.write_text(f"<?php\nrequire {str(_php_bin(name))!r};\n", encoding="utf-8")
         w.chmod(0o644)

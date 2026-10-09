@@ -1,0 +1,10 @@
+{
+  "about": "jp_php_ast.php encodes the tree with invalid UTF-8 substituted, so a string literal that decodes to bytes that are not UTF-8 is measured. Run: mutate-on-target.py TREE jp_php_ast.php tests/test_measure.py tests/mutants/jpt-non-utf8-on-php-ast.json",
+  "mutants": [
+    {
+      "name": "encoded without the substitute flag, as php-parse -j does",
+      "edits": [["JSON_PRETTY_PRINT | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR", "JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR"]],
+      "target": "php: non-UTF-8 literal is measured"
+    }
+  ]
+}

@@ -1,9 +1,9 @@
 {
-  "about": "The PHP measure runs its Composer tools through php, never their proxies directly. Run: mutate-on-target.py TREE jpcheck/measure.py tests/test_measure.py tests/mutants/jpt-php-via-php-on-measure.json",
+  "about": "The PHP measure runs its tools through php, never a script directly: phpcs's proxy and jp_php_ast.php. Run: mutate-on-target.py TREE jpcheck/measure.py tests/test_measure.py tests/mutants/jpt-php-via-php-on-measure.json",
   "mutants": [
     {
-      "name": "php-parse's proxy run directly, as before",
-      "edits": [["        r = subprocess.run([*_php_tool(\"php-parse\"), \"-j\", str(path)],", "        r = subprocess.run([_php_tool(\"php-parse\")[-1], \"-j\", str(path)],"]],
+      "name": "jp_php_ast.php run directly, not through php",
+      "edits": [["    r = subprocess.run([php, str(TOOLS_ROOT / \"jp_php_ast.php\"), str(_php_autoload())],", "    r = subprocess.run([str(TOOLS_ROOT / \"jp_php_ast.php\"), str(_php_autoload())],"]],
       "target": "php: proxies that cannot be executed directly still measure the sample, through php"
     },
     {
