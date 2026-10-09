@@ -30,6 +30,16 @@
       "name": "the Gallery trusted again",
       "edits": [["\"\\$ErrorActionPreference = 'Stop'; Install-Module", "\"\\$ErrorActionPreference = 'Stop'; Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module"]],
       "target": "pwsh present: the Gallery's trust setting is not touched"
+    },
+    {
+      "name": "an installed pin ignored, the Gallery reached every run",
+      "edits": [["    if [ \"$version\" = \"$pssa_version\" ]; then have=1; fi", "    :"]],
+      "target": "the pinned module already installed: no Install-Module, no Gallery"
+    },
+    {
+      "name": "any installed version taken for the pin",
+      "edits": [["    if [ \"$version\" = \"$pssa_version\" ]; then have=1; fi", "    if [ -n \"$version\" ]; then have=1; fi"]],
+      "target": "another version installed: the pin is installed"
     }
   ]
 }

@@ -13,6 +13,8 @@ WHAT IS CHECKED, against a fake pwsh and a fake curl:
     - a download whose sha256 is not the manifest's: exit 1, nothing unpacked,
       the module not installed.
     - the install never changes the Gallery's trust setting.
+    - the pinned module already installed: no install, so no Gallery; only
+      another version installed: the pin is installed.
     - a manifest without the lines: the script stops, naming the missing one.
 
     python3 tests/test_install_pwsh.py
@@ -143,9 +145,33 @@ def test_a_failed_module_install_fails_the_script() -> None:
                            env={**env, "HOME": str(work)})
         ran = calls(log)
     installs = [" ".join(c) for c in ran if "Install-Module" in " ".join(c)]
-    check("install fails: exit 1, the version query never run", (r.returncode, len(ran)), (1, 1))
+    # Two pwsh calls ran: the installed-modules query, then the failed
+    # install. The $PSVersionTable query after it never ran.
+    check("install fails: exit 1, the version query never run", (r.returncode, len(ran)), (1, 2))
     check_true("install fails: the command stops on any error",
                bool(installs) and "$ErrorActionPreference = 'Stop';" in installs[0])
+
+
+def module_installed(versions: str) -> list[str]:
+    """install-pwsh.sh with pwsh present and VERSIONS of PSScriptAnalyzer
+    installed (one per line); the Install-Module commands it ran."""
+    pwsh = ("if any('Get-Module' in a for a in sys.argv):\n"
+            f"    print({versions!r})\n"
+            "    sys.exit(0)\n" + FAKE_PWSH)
+    with fake_tools(keep_path=True, pwsh=pwsh, curl="sys.exit(9)\n") as (work, log):
+        script = jp_tools(Path(work) / "jp", MANIFEST)
+        r = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                           env={**os.environ, "HOME": str(work)})
+        ran = calls(log)
+    check(f"module {versions!r} installed: exit", r.returncode, 0)
+    return [" ".join(c) for c in ran if "Install-Module" in " ".join(c)]
+
+
+def test_the_pinned_module_already_installed() -> None:
+    check("the pinned module already installed: no Install-Module, no Gallery",
+          module_installed("1.24.0\n1.25.0"), [])
+    check("another version installed: the pin is installed",
+          len(module_installed("1.24.0")), 1)
 
 
 def test_a_manifest_without_the_lines() -> None:
