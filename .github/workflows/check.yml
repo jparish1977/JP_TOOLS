@@ -212,14 +212,18 @@ jobs:
       # running (a tool that crashes and reads as a skip) lets its mutants
       # survive, so this fails too. One line per spec; a spec that is not all
       # killed on target has its whole output printed after. CI_WORKERS runs
-      # at once, as the other steps.
+      # at once, as the other steps. The copies go in a temporary directory:
+      # the job runs as fleet-ci, which cannot write the checkout's parent.
       - name: Mutant specs
         if: always()
         shell: bash
         run: |
           out=$(mktemp -d)
+          copies=$(mktemp -d)
+          shopt -s nullglob
           set +e
-          MUTATE_OUT_DIR="$out" python mutate-spec.py --jobs "$CI_WORKERS" . tests/mutants/*.json
+          MUTATE_OUT_DIR="$out" MUTATE_COPY_DIR="$copies" \
+            python mutate-spec.py --jobs "$CI_WORKERS" . tests/mutants/*.json
           rc=$?
           for f in "$out"/*.mutate.out; do
             case "$(tail -n 1 "$f")" in

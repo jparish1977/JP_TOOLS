@@ -1,0 +1,10 @@
+{
+  "about": "mutate-spec makes its copies in $MUTATE_COPY_DIR when it is set, for a ROOT whose parent cannot be written. Run: mutate-on-target.py TREE mutate-spec.py tests/test_mutate_on_target.py tests/mutants/jpt-copy-dir-on-mutate-spec.json",
+  "mutants": [
+    {
+      "name": "MUTATE_COPY_DIR ignored, copies beside ROOT",
+      "edits": [["                            dir=os.environ.get(\"MUTATE_COPY_DIR\") or os.path.dirname(root))", "                            dir=os.path.dirname(root))"]],
+      "target": "MUTATE_COPY_DIR: every run's copy made there, none beside ROOT"
+    }
+  ]
+}

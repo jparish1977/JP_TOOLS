@@ -34,7 +34,9 @@ finished ones after it. It is a file for reading once the run is over.
 The runner mutates its tree in place and refuses a tree another run holds,
 so every run, control or mutant, gets its OWN copy of ROOT, made beside ROOT
 (a test that finds a sibling repository beside this one still finds it) and
-removed afterwards. ROOT itself is never mutated. Each run's XDG_CACHE_HOME
+removed afterwards; $MUTATE_COPY_DIR, when set, is where the copies go
+instead, for a ROOT whose parent the user cannot write (a CI checkout as a
+non-root user). ROOT itself is never mutated. Each run's XDG_CACHE_HOME
 is inside its copy, so whatever its tools cache goes with the copy and never
 touches the user's own cache. A copy holds ROOT's own files: ROOT's vendor/
 and node_modules/, which runs only read, are links to ROOT's, and its .git is
@@ -154,7 +156,8 @@ def run_in_copy(root: str, stem: str, args: list[str]) -> tuple[int, str]:
     """The runner on a private copy of ROOT: (rc, its output)."""
     if STOP.is_set():
         return 143, "mutate-spec: stopped (SIGTERM) before this run started\n"
-    work = tempfile.mkdtemp(prefix=f".mutate-{stem}-", dir=os.path.dirname(root))
+    work = tempfile.mkdtemp(prefix=f".mutate-{stem}-",
+                            dir=os.environ.get("MUTATE_COPY_DIR") or os.path.dirname(root))
     tree = os.path.join(work, os.path.basename(root))
     gitdir = None
     try:

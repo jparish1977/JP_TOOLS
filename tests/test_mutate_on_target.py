@@ -448,6 +448,28 @@ def test_spec_a_copy_shares_tools_and_git() -> None:
 SHARED_DIRS = ("vendor", "node_modules")
 
 
+def test_spec_copies_where_mutate_copy_dir_says() -> None:
+    """$MUTATE_COPY_DIR set: every run's copy is made there, not beside ROOT."""
+    tree, spec, env = fixture("copy-dir", new="VALUE = 2")
+    with open(os.path.join(tree, "test.py"), "w", encoding="utf-8") as fh:
+        fh.write(CACHE_TEST)
+    with open(spec, "w", encoding="utf-8") as fh:
+        json.dump({"about": "Run: mutate-on-target.py TREE t.py test.py SPEC.",
+                   "mutants": [{"name": "two", "edits": [["VALUE = 1", "VALUE = 2"]],
+                                "target": "value is one"}]}, fh)
+    elsewhere, seen = os.path.join(TMP, "copies-here"), os.path.join(TMP, "copy-dir-seen")
+    outdir = os.path.join(TMP, "copy-dir-out")
+    for d in (elsewhere, seen, outdir):
+        os.makedirs(d)
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(RUNNER), "mutate-spec.py"),
+                        tree, spec], capture_output=True, text=True, check=False, timeout=120,
+                       env=dict(env, MUTATE_OUT_DIR=outdir, SEEN=seen, MUTATE_COPY_DIR=elsewhere))
+    caches = read_seen(os.path.join(seen, "cache"))
+    check("MUTATE_COPY_DIR: every run's copy made there, none beside ROOT",
+          (r.returncode, len(caches), all(c.startswith(elsewhere + os.sep) for c in caches)),
+          (0, 2, True))
+
+
 CACHE_TEST = """import os, sys
 with open(os.path.join(os.environ["SEEN"], "cache"), "a") as fh:
     fh.write(os.environ.get("XDG_CACHE_HOME", "") + "\\n")
