@@ -14,7 +14,8 @@ on:
 # existed and grew, and warns on one that existed and did not grow. The base
 # is the PR's, or on a push the commit before it;
 # a first push has none (all zeros), which falls back to HEAD and says so,
-# since against HEAD a new smell only warns.
+# since against HEAD a new smell only warns. So does a base the clone does not
+# have: after a force-push, the commit before it is no longer in the history.
 
 jobs:
   python:
@@ -102,6 +103,10 @@ jobs:
         run: |
           base="$SMELLS_BASE"
           case "$base" in *[!0]*) ;; *) base="" ;; esac
+          if [ -n "$base" ] && ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "Base commit $base is not in this clone's history (a force-push?)."
+            base=""
+          fi
           if [ -z "$base" ]; then
             echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
             base=HEAD
@@ -210,6 +215,10 @@ jobs:
         run: |
           base="$SMELLS_BASE"
           case "$base" in *[!0]*) ;; *) base="" ;; esac
+          if [ -n "$base" ] && ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "Base commit $base is not in this clone's history (a force-push?)."
+            base=""
+          fi
           if [ -z "$base" ]; then
             echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
             base=HEAD
