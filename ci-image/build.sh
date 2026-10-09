@@ -14,9 +14,10 @@
 # force_pull false, so the local image is used). Pass --no-current to build
 # and tag only the commit, for proving a new image before it serves jobs.
 #
-# After it builds, it reads every pinned tool back inside the new image:
-# check-pins.py's php and powershell arms, shellcheck, cppcheck, rg,
-# pdftotext and ss. Exit 0 only when the build and every read-back pass.
+# After it builds, it reads back inside the new image: that it runs as ci,
+# not root, and that ci cannot sudo; then every pinned tool (check-pins.py's
+# powershell arm, the PHP extensions, composer, shellcheck, cppcheck, rg,
+# pdftotext, ss). Exit 0 only when the build and every read-back pass.
 printf '%s' jpt-ci-image > /proc/$$/comm 2>/dev/null
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -36,6 +37,10 @@ tar -C "$here" -cf - check-pins.py requirements-system.txt requirements-dev.txt 
         jpcheck platformtools jpexit \
     | sudo -n docker exec -i "$dind" docker run -i --rm "$tag" bash -c '
         set -e; mkdir /tmp/r && cd /tmp/r && tar -xf -
+        if [ "$(id -u)" = 0 ]; then echo "FAIL: the image runs as root" >&2; exit 1; fi
+        echo "user: $(id -un) uid $(id -u), not root"
+        if sudo -n true 2>/dev/null; then echo "FAIL: ci can sudo" >&2; exit 1; fi
+        echo "sudo: refused"
         python3 check-pins.py powershell
         php -m | grep -qx gd && php -m | grep -qx sqlite3 && php -m | grep -qx pdo_sqlite && echo "php extensions: gd sqlite3 pdo_sqlite"
         composer --version

@@ -31,7 +31,19 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
         ripgrep poppler-utils iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
-# PowerShell and PSScriptAnalyzer at their pins, for root, as jobs run.
+# Jobs run as ci, never root. The base image's user is root, so every job
+# was root in its container: a larger escape surface, and a test of file
+# permissions read a mode-000 file anyway and skipped, so CI never ran those
+# cases. ci has no sudo: what a job used to install as root is already here.
+# setup-python and pip write the tool cache, so ci owns it.
+RUN useradd --create-home --uid 1001 --shell /bin/bash ci \
+    && mkdir -p /opt/hostedtoolcache \
+    && chown -R ci:ci /opt/hostedtoolcache
+
+# PowerShell and PSScriptAnalyzer at their pins, installed for ci, who runs
+# the jobs.
 COPY requirements-system.txt install-pwsh.sh /opt/fleet-ci/
+USER ci
+WORKDIR /home/ci
 RUN bash /opt/fleet-ci/install-pwsh.sh
-ENV PATH=/root/.local/pwsh:$PATH
+ENV PATH=/home/ci/.local/pwsh:$PATH
