@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -259,8 +260,14 @@ def main() -> int:
     tests = [fn for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]
     for fn in tests:
+        # A test that raises is its own failure and the rest still run, as in
+        # tests/_harness.py: a crash must not hide the checks after it.
         with tempfile.TemporaryDirectory() as d:
-            fn(Path(d))
+            try:
+                fn(Path(d))
+            except Exception as e:  # noqa: BLE001 -- reason: a crash is that test's failure, the run goes on
+                traceback.print_exc()
+                FAILURES.append(f"{fn.__name__} raised {type(e).__name__}: {e}")
     if FAILURES:
         print(f"FAILED ({len(FAILURES)})")
         for f in FAILURES:
