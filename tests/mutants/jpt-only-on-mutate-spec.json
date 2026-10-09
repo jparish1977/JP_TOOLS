@@ -7,8 +7,8 @@
       "target": "mutate-spec --only nine: exit, and only the spec that has it ran"
     },
     {
-      "name": "the names are not passed to the runner",
-      "edits": [["            chosen = [a for name in only or [] for a in (\"--only\", name)]", "            chosen: list[str] = []"]],
+      "name": "the names are ignored, every mutant of the spec runs",
+      "edits": [["    chosen = only or every", "    chosen = every"]],
       "target": "mutate-spec --only nine: one of its two mutants"
     },
     {

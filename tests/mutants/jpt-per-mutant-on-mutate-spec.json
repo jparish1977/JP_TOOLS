@@ -1,0 +1,40 @@
+{
+  "about": "mutate-spec runs a spec's control once, then each of its mutants at once in a copy of its own, and a copy of a git worktree gets an index and HEAD of its own. Run: mutate-on-target.py TREE mutate-spec.py tests/test_mutate_on_target.py tests/mutants/jpt-per-mutant-on-mutate-spec.json",
+  "mutants": [
+    {
+      "name": "every mutant run repeats the control",
+      "edits": [["[*run, \"--no-control\", \"--only\", n]", "[*run, \"--only\", n]"]],
+      "target": "one spec: the control ran once, not once per mutant"
+    },
+    {
+      "name": "one run at a time, whatever --jobs says",
+      "edits": [["concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool", "concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool"]],
+      "target": "one spec: its three mutants ran at once, each saw all three"
+    },
+    {
+      "name": "a worktree copy keeps the .git file, sharing ROOT's index and branch HEAD",
+      "edits": [["        gitdir = own_git(root, tree)\n", "        pass\n"]],
+      "target": "a worktree ROOT: every mutant killed on target, each copy's git as ROOT's, detached"
+    },
+    {
+      "name": "the copy's HEAD stays on ROOT's branch",
+      "edits": [["(\"HEAD\", sha)", "(\"HEAD\", \"ref: \" + _git(root, \"symbolic-ref\", \"HEAD\"))"]],
+      "target": "a worktree ROOT: every mutant killed on target, each copy's git as ROOT's, detached"
+    },
+    {
+      "name": "the copy starts with an empty index",
+      "edits": [["    if os.path.exists(index):\n", "    if not os.path.exists(index):\n"]],
+      "target": "a worktree ROOT: every mutant killed on target, each copy's git as ROOT's, detached"
+    },
+    {
+      "name": "the copy's gitdir is left in the repository",
+      "edits": [["        if gitdir:\n            shutil.rmtree(gitdir, ignore_errors=True)\n", ""]],
+      "target": "a worktree ROOT: no copy's gitdir left in the repository"
+    },
+    {
+      "name": "the mutants' output is left out of the spec's output file",
+      "edits": [["            fh.write(text)\n        of = ", "            del text\n        of = "]],
+      "target": "one spec: the output file holds the control and every mutant, in spec order"
+    }
+  ]
+}
