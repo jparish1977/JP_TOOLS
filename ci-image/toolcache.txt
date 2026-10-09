@@ -1,0 +1,13 @@
+# The runner's shared tool cache (the toolcache volume, mounted into every
+# job at /opt/hostedtoolcache), filled once by ci-image/build.sh, never by a
+# job. setup-python and setup-node take a cached release that satisfies the
+# workflow's version ('3.12', '22') and download only when none does; two jobs
+# filling the same release at once race, one deleting what the other copies
+# (CI run 308, 2026-10-09). Filled here, serially, jobs only read it.
+#
+# One per line: TOOL VERSION SHA256 URL. SHA256 is the published digest of
+# that file (python-versions' release asset digest; nodejs.org's
+# SHASUMS256.txt); build.sh refuses a download that does not match.
+
+python 3.12.15 fcb672b0437c2d8df5565b7cc250b2b0d7455e2b8d6a4a107cfa6f2efe4f7ed8 https://github.com/actions/python-versions/releases/download/3.12.15-36805895057/python-3.12.15-linux-24.04-x64.tar.gz
+node   22.23.3 df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-x64.tar.xz

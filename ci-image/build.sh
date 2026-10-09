@@ -23,7 +23,8 @@
 # (iteration8_server forgejo-runner): pip-cache (PIP_CACHE_DIR), npm-cache
 # (npm_config_cache), composer-cache (COMPOSER_CACHE_DIR), and toolcache at
 # /opt/hostedtoolcache, where setup-python and setup-node look before they
-# download, so a Python or Node release is fetched once, not every job.
+# download. build.sh fills toolcache from ci-image/toolcache.txt, so jobs
+# only read it: jobs filling it raced and failed (CI run 308).
 #
 # After it builds, it reads back inside the new image: that it runs as the
 # host's fleet-ci uid, not root, and cannot sudo; then every pinned tool
@@ -78,6 +79,33 @@ for vol in pip-cache npm-cache composer-cache toolcache; do
         || { echo "FAIL: $vol is not writable by fleet-ci" >&2; exit 1; }
     echo "  $vol: writable by fleet-ci"
 done
+
+echo "ci-image: the tool cache, filled from ci-image/toolcache.txt"
+# Each release once, as fleet-ci, into the toolcache volume, in the layout
+# setup-python and setup-node read (TOOL/VERSION/x64 and x64.complete); one
+# already complete is left alone.
+while read -r tool version sha url; do
+    case "$tool" in ''|'#'*) continue ;; esac
+    sudo -n docker exec "$dind" docker run --rm -v toolcache:/opt/hostedtoolcache \
+        -e TOOL="$tool" -e VERSION="$version" -e SHA="$sha" -e URL="$url" "$tag" bash -c '
+        set -euo pipefail
+        name=$TOOL; [ "$TOOL" = python ] && name=Python
+        dest=/opt/hostedtoolcache/$name/$VERSION
+        if [ -f "$dest/x64.complete" ]; then echo "  $TOOL $VERSION: already cached"; exit 0; fi
+        rm -rf "$dest"
+        w=$(mktemp -d); cd "$w"
+        curl -fsSL "$URL" -o pkg
+        echo "$SHA  pkg" | sha256sum --check --strict --quiet \
+            || { echo "FAIL: $TOOL $VERSION does not match its sha256" >&2; exit 1; }
+        case "$TOOL" in
+            python) mkdir x && tar -xzf pkg -C x && cd x && ./setup.sh >/dev/null ;;
+            node) mkdir -p "$dest/x64" && tar -xJf pkg -C "$dest/x64" --strip-components=1 \
+                  && touch "$dest/x64.complete" ;;
+            *) echo "FAIL: no way to cache $TOOL" >&2; exit 1 ;;
+        esac
+        [ -f "$dest/x64.complete" ] || { echo "FAIL: $TOOL $VERSION not marked complete" >&2; exit 1; }
+        echo "  $TOOL $VERSION: cached"'
+done < "$here/ci-image/toolcache.txt"
 
 if [ "$current" = 1 ]; then
     sudo -n docker exec "$dind" docker tag "$tag" fleet-ci:current
