@@ -71,7 +71,9 @@ TMP = tempfile.mkdtemp(prefix="t-mut-on-target-")
 
 def fixture(name: str, new: str = "VALUE = 2") -> tuple[str, str, dict[str, str]]:
     """A tree with t.py (CRLF) and test.py, a one-mutant spec, and an env
-    whose cache is private to this fixture."""
+    whose cache is private to this fixture. The env drops the mutate-spec
+    settings of whatever runs this suite (CI's mutant step sets
+    MUTATE_COPY_DIR and MUTATE_OUT_DIR), so a test sets its own or none."""
     tree = os.path.join(TMP, name)
     os.makedirs(tree)
     with open(os.path.join(tree, "t.py"), "wb") as fh:
@@ -82,7 +84,8 @@ def fixture(name: str, new: str = "VALUE = 2") -> tuple[str, str, dict[str, str]
     with open(spec, "w", encoding="utf-8") as fh:
         json.dump({"mutants": [{"name": "value", "edits": [["VALUE = 1", new]],
                                 "target": "value is one"}]}, fh)
-    env = dict(os.environ, XDG_CACHE_HOME=os.path.join(TMP, name + "-cache"))
+    env = {k: v for k, v in os.environ.items() if k not in ("MUTATE_COPY_DIR", "MUTATE_OUT_DIR")}
+    env["XDG_CACHE_HOME"] = os.path.join(TMP, name + "-cache")
     return tree, spec, env
 
 
