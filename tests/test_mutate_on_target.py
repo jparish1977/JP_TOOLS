@@ -24,6 +24,8 @@ WHAT IS CHECKED
     - ROOT a git worktree: a mutant's `git add` stays in its own copy; the
       copy is ROOT's commit detached, in ROOT's repository with its refs and
       index; no copy's gitdir is left behind.
+    - A SIGTERM to mutate-spec.py mid-run exits 143 and leaves neither a copy
+      nor a copy's gitdir.
     - --only NAME (both tools) runs those mutants alone and says how many of
       the spec's ran; a name nothing has is refused, exit 2; --list names
       each mutant and its target and touches nothing.
@@ -330,6 +332,57 @@ def test_a_worktree_copy_has_its_own_index() -> None:
                          env=genv, check=True).stdout.split(), ["t.py", "test.py"])
     check("a worktree ROOT: no copy's gitdir left in the repository",
           sorted(os.listdir(os.path.join(repo, ".git", "worktrees"))), ["git-wt"])
+
+
+def test_spec_a_sigterm_leaves_nothing() -> None:
+    """ROOT a git worktree, a mutant whose test hangs: a SIGTERM to mutate-spec
+    while it runs ends the run with 143 and leaves no copy beside ROOT and no
+    copy's gitdir in the repository."""
+    repo = os.path.join(TMP, "term-repo")
+    tree, spec, env = fixture("term-wt-src", new="VALUE = 3")
+    shutil.move(tree, repo)
+    genv = dict(env, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    for a in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "fixture"]):
+        subprocess.run(["git", "-C", repo, *a], capture_output=True, env=genv, check=True)
+    tree = os.path.join(TMP, "term-wt")
+    subprocess.run(["git", "-C", repo, "worktree", "add", "-q", "-b", "side", tree],
+                   capture_output=True, env=genv, check=True)
+    with open(spec, "w", encoding="utf-8") as fh:
+        json.dump({"about": "Run: mutate-on-target.py TREE t.py test.py SPEC.",
+                   "mutants": [{"name": "hang", "edits": [["VALUE = 1", "VALUE = 3"]],
+                                "target": "value is one"}]}, fh)
+    outdir = os.path.join(TMP, "term-wt-out")
+    os.makedirs(outdir)
+
+    def copies() -> list[str]:
+        return [d for d in os.listdir(TMP) if d.startswith(".mutate-term-wt-src-")]
+
+    def mutant_in_place() -> bool:
+        for d in copies():
+            t = os.path.join(TMP, d, "term-wt")
+            if os.path.exists(os.path.join(t, "t.py")) and b"VALUE = 3" in target_bytes(t):
+                return True
+        return False
+
+    p = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(RUNNER), "mutate-spec.py"),
+                          tree, spec], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         env=dict(genv, MUTATE_OUT_DIR=outdir))
+    deadline = time.time() + 60
+    while not mutant_in_place() and time.time() < deadline:
+        time.sleep(0.1)
+    in_place = mutant_in_place()
+    time.sleep(0.5)
+    p.send_signal(signal.SIGTERM)
+    try:
+        p.communicate(timeout=30)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+    check_true("a SIGTERM to mutate-spec: the mutant was running in its copy when it went", in_place)
+    check("a SIGTERM to mutate-spec: exit 143, no copy beside ROOT, no copy's gitdir left",
+          (p.returncode, copies(), sorted(os.listdir(os.path.join(repo, ".git", "worktrees")))),
+          (143, [], ["term-wt"]))
 
 
 def test_specs_with_one_file_name() -> None:

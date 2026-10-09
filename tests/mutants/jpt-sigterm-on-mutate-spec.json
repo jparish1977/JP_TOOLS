@@ -1,0 +1,15 @@
+{
+  "about": "mutate-spec cleans up on SIGTERM: its handler passes the TERM to the runners still going and exits, so every copy and gitdir is removed. Run: mutate-on-target.py TREE mutate-spec.py tests/test_mutate_on_target.py tests/mutants/jpt-sigterm-on-mutate-spec.json",
+  "mutants": [
+    {
+      "name": "no SIGTERM handler, as before",
+      "edits": [["    signal.signal(signal.SIGTERM, _on_term)\n", ""]],
+      "target": "a SIGTERM to mutate-spec: exit 143, no copy beside ROOT, no copy's gitdir left"
+    },
+    {
+      "name": "the TERM not passed on to the runners",
+      "edits": [["            child.terminate()", "            pass"]],
+      "target": "a SIGTERM to mutate-spec: exit 143, no copy beside ROOT, no copy's gitdir left"
+    }
+  ]
+}

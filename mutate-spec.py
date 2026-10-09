@@ -45,6 +45,11 @@ at ROOT's commit (on ROOT's branch, a commit in a copy would move it). It
 still shares the repository's refs and objects, as any worktree does, so the
 main checkout's tools (vendor/, node_modules/) are found from it as from
 ROOT. Its gitdir is removed with the copy. A .git directory is copied whole.
+
+A SIGTERM (a job manager's cancel) ends the run without leaving a copy or a
+gitdir behind: the runners still going are sent TERM (the runner restores and
+exits 143), runs not yet started do not start, every copy is removed as its
+run returns, and mutate-spec exits 143.
 """
 
 from __future__ import annotations
@@ -55,9 +60,11 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import NoReturn
 
@@ -68,6 +75,20 @@ from platformtools.procname import name_process
 
 RUNNER = Path(__file__).resolve().parent / "mutate-on-target.py"
 RUN_LINE = re.compile(r"mutate-on-target\.py\s+\S+\s+(\S+)\s+(\S+)")
+
+# Set by SIGTERM: no new run starts. RUNNING holds the runners still going,
+# so the handler can pass the TERM on to them.
+STOP = threading.Event()
+RUNNING: set[subprocess.Popen[str]] = set()
+RUNNING_LOCK = threading.Lock()
+
+
+def _on_term(*_: object) -> None:
+    STOP.set()
+    with RUNNING_LOCK:
+        for child in RUNNING:
+            child.terminate()
+    sys.exit(143)
 
 
 def spec_stem(spec: str, base: str) -> str:
@@ -108,15 +129,26 @@ def own_git(root: str, tree: str) -> str | None:
 
 def run_in_copy(root: str, stem: str, args: list[str]) -> tuple[int, str]:
     """The runner on a private copy of ROOT: (rc, its output)."""
+    if STOP.is_set():
+        return 143, "mutate-spec: stopped (SIGTERM) before this run started\n"
     work = tempfile.mkdtemp(prefix=f".mutate-{stem}-", dir=os.path.dirname(root))
     tree = os.path.join(work, os.path.basename(root))
     gitdir = None
     try:
         shutil.copytree(root, tree, symlinks=True)
         gitdir = own_git(root, tree)
-        p = subprocess.run([sys.executable, str(RUNNER), tree, *args], stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, text=True, check=False)
-        return p.returncode, p.stdout
+        p = subprocess.Popen([sys.executable, str(RUNNER), tree, *args], stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True)
+        with RUNNING_LOCK:
+            RUNNING.add(p)
+            if STOP.is_set():
+                p.terminate()
+        try:
+            out, _ = p.communicate()
+        finally:
+            with RUNNING_LOCK:
+                RUNNING.discard(p)
+        return p.returncode, out
     except (OSError, subprocess.CalledProcessError) as e:
         return 2, f"mutate-spec: could not make a private copy of {root}: {e}\n"
     finally:
@@ -205,6 +237,7 @@ def main(argv: list[str]) -> int:
     p.add_argument("specs", nargs="+")
     args = p.parse_args(argv)
     name_process("mutate-spec")
+    signal.signal(signal.SIGTERM, _on_term)
     root, specs, jobs = os.path.abspath(args.root), args.specs, max(1, args.jobs)
     base = os.path.commonpath([os.path.dirname(os.path.abspath(sp)) for sp in specs])
     if args.list:
