@@ -179,8 +179,11 @@ def _php_ast(src: str) -> list[dict[str, Any]]:
     php = _php_cmd()
     if not php:
         raise ToolMissingError("php")
-    r = subprocess.run([php, str(TOOLS_ROOT / "jp_php_ast.php"), str(_php_autoload())],
-                       input=src, capture_output=True, text=True, encoding="utf-8",
+    # PHP's own diagnostics (a deprecation raised while the autoloader loads)
+    # go to stderr, so stdout carries the tree alone.
+    cmd = [php, "-d", "display_errors=stderr", str(TOOLS_ROOT / "jp_php_ast.php"),
+           str(_php_autoload())]
+    r = subprocess.run(cmd, input=src, capture_output=True, text=True, encoding="utf-8",
                        check=False)
     if r.returncode == 2:
         raise ValueError(f"php-parse: {r.stderr.strip()[-200:]}")

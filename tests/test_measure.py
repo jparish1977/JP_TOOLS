@@ -18,14 +18,17 @@ WHAT IS CHECKED
     warning about the file.
 
     A PHP string literal that decodes to bytes that are not UTF-8 ("\\x89PNG")
-    measures like any other: the tree's JSON cannot fail on it.
+    measures like any other: the tree's JSON cannot fail on it. A deprecation
+    PHP prints while loading php-parser goes to stderr, not into the tree.
 
     A tool that is not installed prints SKIP for its language: not a pass.
 
     python3 tests/test_measure.py
 """
 
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -34,7 +37,7 @@ from unittest import mock
 from _harness import ROOT, check, run
 from jpcheck import measure as measure_module
 from jpcheck import smells as smells_module
-from jpcheck.common import _php_bin, node_module_roots
+from jpcheck.common import _php_bin, _php_cmd, node_module_roots
 from jpcheck.measure import TOP_LEVEL, file_complexity, measure
 from jpcheck.smells import run_smells
 
@@ -111,10 +114,12 @@ def test_a_file_that_does_not_parse_is_refused() -> None:
             continue
         try:
             measure(lang, src)
-            refused = False
+            got = "measured"
         except (SyntaxError, ValueError):
-            refused = True
-        check(f"{lang}: a file that does not parse is refused, not measured empty", refused, True)
+            got = "refused"
+        except Exception as e:  # noqa: BLE001 -- reason: any other failure is this check's value, so the run goes on
+            got = f"{type(e).__name__}: {e}"
+        check(f"{lang}: a file that does not parse is refused, not measured empty", got, "refused")
 
 
 def test_php_non_utf8_literal_is_measured() -> None:
@@ -176,10 +181,40 @@ def test_php_tools_run_through_php() -> None:
             mock.patch.object(measure_module, "_php_bin", wrapper_proxies(Path(tmp)).get):
         try:
             got: object = measure(lang, src)[1]
-        except OSError as e:
+        except Exception as e:  # noqa: BLE001 -- reason: any failure is this check's value, so the run goes on
             got = f"{type(e).__name__}: {e}"
     check("php: proxies that cannot be executed directly still measure the sample, through php",
           got, want)
+
+
+def test_php_diagnostics_stay_off_the_tree() -> None:
+    """A deprecation PHP prints while the autoloader loads goes to stderr, not
+    ahead of the tree on stdout. PHP_INI_SCAN_DIR adds an ini that displays
+    every error, as a box with display_errors=1 does; the control shows the
+    fixture's deprecation does print when nothing redirects it."""
+    if not ready("php"):
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        ini_dir = Path(tmp) / "ini"
+        ini_dir.mkdir()
+        (ini_dir / "display.ini").write_text("display_errors=1\nerror_reporting=-1\n",
+                                             encoding="utf-8")
+        noisy = Path(tmp) / "autoload.php"
+        noisy.write_text("<?php\ntrigger_error('fixture deprecation', E_USER_DEPRECATED);\n"
+                         f"return require {str(measure_module._php_autoload())!r};\n",
+                         encoding="utf-8")
+        env = dict(os.environ, PHP_INI_SCAN_DIR=os.pathsep + str(ini_dir))
+        control = subprocess.run([_php_cmd() or "php", str(noisy)],
+                                 capture_output=True, text=True, check=False, env=env)
+        check("php: control, the fixture's deprecation prints on stdout undirected",
+              "fixture deprecation" in control.stdout, True)
+        with mock.patch.dict(os.environ, {"PHP_INI_SCAN_DIR": env["PHP_INI_SCAN_DIR"]}), \
+                mock.patch.object(measure_module, "_php_autoload", return_value=noisy):
+            try:
+                got: object = measure("php", "<?php\n\nfunction f(): int\n{\n    return 1;\n}\n")[1]
+            except Exception as e:  # noqa: BLE001 -- reason: any failure is this check's value
+                got = f"{type(e).__name__}: {e}"
+    check("php: a deprecation from the autoloader does not reach the tree", got, {"f": (4, 1, 3)})
 
 
 def test_a_tool_that_cannot_run_is_not_a_finding() -> None:

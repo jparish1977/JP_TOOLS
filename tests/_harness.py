@@ -16,6 +16,7 @@ cached copy of the original.
 import importlib.util
 import shutil
 import sys
+import traceback
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -65,10 +66,19 @@ def check_true(label: str, value: bool) -> None:
 
 
 def run(tests: dict[str, Any], label: str) -> int:
-    """Run every test_* in TESTS (a module's globals), then report FAILURES."""
+    """Run every test_* in TESTS (a module's globals), then report FAILURES.
+
+    A test that raises is one failure under its own name, with the traceback on
+    stderr, and the tests after it still run: otherwise one crash hides every
+    check sorted after it, and a mutant aimed at one of those reads as caught
+    by the crash instead."""
     for name, fn in sorted(tests.items()):
         if name.startswith("test_") and callable(fn):
-            fn()
+            try:
+                fn()
+            except Exception as e:  # noqa: BLE001 -- reason: a crash is that test's failure, the run goes on
+                traceback.print_exc()
+                FAILURES.append(f"{name} raised {type(e).__name__}: {e}")
     if FAILURES:
         print(f"FAILED ({len(FAILURES)})")
         for f in FAILURES:

@@ -3,7 +3,7 @@
   "mutants": [
     {
       "name": "jp_php_ast.php run directly, not through php",
-      "edits": [["    r = subprocess.run([php, str(TOOLS_ROOT / \"jp_php_ast.php\"), str(_php_autoload())],", "    r = subprocess.run([str(TOOLS_ROOT / \"jp_php_ast.php\"), str(_php_autoload())],"]],
+      "edits": [["    cmd = [php, \"-d\", \"display_errors=stderr\", str(TOOLS_ROOT / \"jp_php_ast.php\"),", "    cmd = [str(TOOLS_ROOT / \"jp_php_ast.php\"),"]],
       "target": "php: proxies that cannot be executed directly still measure the sample, through php"
     },
     {

@@ -1,0 +1,10 @@
+{
+  "about": "_harness.run records a test that raises as that test's failure and runs the rest, so one crash cannot hide the checks after it. Run: mutate-on-target.py TREE tests/_harness.py tests/test_harness.py tests/mutants/jpt-crash-on-harness.json",
+  "mutants": [
+    {
+      "name": "a crash ends the run, as before",
+      "edits": [["                FAILURES.append(f\"{name} raised {type(e).__name__}: {e}\")", "                raise"]],
+      "target": "a crashing test: exit 1, its own FAIL line, and the next test's check still reported"
+    }
+  ]
+}
