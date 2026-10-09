@@ -17,7 +17,11 @@
 #       --env PATH=/home/joe/.local/pwsh:/home/joe/.local/share/jp-tools-venv/bin:/usr/local/bin:/usr/bin:/bin \
 #       -- bash tools/lab/i8-proof.sh
 #
-# TESTED AGAINST: not yet run.
+# TESTED AGAINST: iteration8, i8jobs, 2026-10-09: head 929fa2e passed, 73
+#   suites rc=0, 68 specs killed on target, 0 skips, exit 0, 4m19s
+#   (20261009T204445.617Z-887865). Head 4140f74, with one spec off target
+#   (jpt-pins-on-install-pwsh), printed that spec's output and exited 1
+#   (20261009T202852.371Z-794bc7).
 #
 # NOT TESTED AGAINST: any box but iteration8; a tree without composer's global
 #   repositories config (iteration8/core and utilities), where composer install
