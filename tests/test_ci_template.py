@@ -54,7 +54,22 @@ WORKFLOWS = (ROOT / ".github" / "workflows" / "check.yml", TEMPLATE)
 REPOSITORY = "${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}"
 TOKEN = "${{ secrets.JP_TOOLS_TOKEN || github.token }}"
 INTERNAL = ("iteration8", "ts.net", "joe/", ":3000", ":2222")
-BEFORE = "9f948e2"      # master before the template took its source from a variable
+# The controls read the template at a past master commit. A history rewrite
+# gives every commit a new id, so these must be remapped after one; a commit
+# that is not in the clone fails the control rather than skipping it.
+BEFORE = "7e00ba9"      # master before the template took its source from a variable
+BEFORE_TESTS_JOB = "93fc0d4"  # master before #140 added the tests job
+
+
+def template_at(commit: str) -> str | None:
+    """The template's text at COMMIT, or None, recorded as a failure, when the
+    clone does not have it."""
+    r = subprocess.run(["git", "-C", str(ROOT), "show", f"{commit}:templates/ci-check.yml"],
+                       capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        check(f"control: {commit} is in this clone's history", r.stderr.strip(), "")
+        return None
+    return r.stdout
 
 
 def actionlint(path: Path) -> tuple[int, str]:
@@ -120,12 +135,10 @@ def test_the_template_is_forge_neutral() -> None:
 
 
 def test_control_master_before_the_change_fails() -> None:
-    r = subprocess.run(["git", "-C", str(ROOT), "show", f"{BEFORE}:templates/ci-check.yml"],
-                       capture_output=True, text=True, check=False)
-    if r.returncode != 0:
-        print(f"SKIP: {BEFORE} is not in this clone's history; the control cannot run")
+    old_text = template_at(BEFORE)
+    if old_text is None:
         return
-    wrong = findings(r.stdout)
+    wrong = findings(old_text)
     check_true("control: the old template's fixed GitHub clone is caught",
                "a fixed JP_TOOLS clone URL" in wrong)
     check_true("control: the old template's setup-php is caught",
@@ -134,7 +147,7 @@ def test_control_master_before_the_change_fails() -> None:
                "no step stops the job when JP_TOOLS_REPOSITORY is unset off GitHub" in wrong)
     with tempfile.TemporaryDirectory() as td:
         old = Path(td) / "ci-check.yml"
-        old.write_text(r.stdout, encoding="utf-8")
+        old.write_text(old_text, encoding="utf-8")
         rc, out = actionlint(old)
     check_true("control: actionlint reports the old template's SC2086", rc == 1 and "SC2086" in out)
 
@@ -397,9 +410,9 @@ def test_the_template_runs_tests() -> None:
 
 
 def test_control_master_before_the_change_has_no_tests_job() -> None:
-    old = subprocess.run(["git", "-C", str(ROOT), "show", "7cd8c09:templates/ci-check.yml"],
-                         capture_output=True, text=True, check=False)
-    check("control: the template before #140 has no tests job", tests_job(old.stdout), {})
+    old_text = template_at(BEFORE_TESTS_JOB)
+    if old_text is not None:
+        check("control: the template before #140 has no tests job", tests_job(old_text), {})
 
 
 if __name__ == "__main__":
