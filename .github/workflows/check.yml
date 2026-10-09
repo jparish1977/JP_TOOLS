@@ -20,6 +20,13 @@ on:
 # fleet-ci is the fleet CI image (ci-image/), served by iteration8's runner:
 # the job image with every system tool below already installed, so the
 # install steps find them in place and check-pins.py confirms their pins.
+#
+# CI_WORKERS is how many files or suites a step runs at once. Not nproc: a
+# job container sees all of iteration8's cores (32), and the runner takes
+# three jobs at a time, so nproc-wide steps in each oversubscribe the box
+# (load 38.5 on 32 cores measured 2026-10-09, with CI jobs running).
+env:
+  CI_WORKERS: 8
 
 jobs:
   python:
@@ -101,7 +108,7 @@ jobs:
       # place (METHODOLOGY 7.9).
       - name: Tools installed at their pins
         run: python check-pins.py python php powershell
-      # Every file is checked on its own, by one worker per core, each taking
+      # Every file is checked on its own, by CI_WORKERS workers, each taking
       # every Nth file in turn. Each file writes its own log, printed
       # afterwards in file order, so the output reads as a serial run's would.
       # Each worker has its own mypy cache: mypy processes sharing one cache
@@ -125,7 +132,7 @@ jobs:
           fi
           out=$(mktemp -d)
           mapfile -t files < <(git ls-files '*.py' '*.sh' '*.bash' '*.php' '*.ps1' '*.psm1' '*.psd1')
-          workers=$(nproc)
+          workers=$CI_WORKERS
           for ((w = 0; w < workers; w++)); do
             ( set +e
               for ((i = w; i < ${#files[@]}; i += workers)); do
@@ -154,7 +161,7 @@ jobs:
           echo "import coverage; coverage.process_startup()" > "$site/zz-subprocess-coverage.pth"
           export COVERAGE_PROCESS_START="$PWD/.coveragerc"
           rm -f .coverage .coverage.*
-          # Every core at once. .coveragerc's parallel = True gives each
+          # CI_WORKERS at once. .coveragerc's parallel = True gives each
           # process its own data file, combined below. Each suite writes its
           # own log, printed afterwards in suite order. Each job runs with
           # `set +e`, as in the step above, so a failing suite is recorded
@@ -171,7 +178,7 @@ jobs:
                 *.sh) PYTHON=python bash "$t" > "$out/$i.log" 2>&1 ;;
               esac
               echo $? > "$out/$i.rc" ) &
-            while [ "$(jobs -rp | wc -l)" -ge "$(nproc)" ]; do wait -n; done
+            while [ "$(jobs -rp | wc -l)" -ge "$CI_WORKERS" ]; do wait -n; done
           done
           wait
           rc=0
