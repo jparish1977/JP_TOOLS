@@ -211,20 +211,15 @@ jobs:
       # it pins is broken, on the check it is aimed at. A test that stopped
       # running (a tool that crashes and reads as a skip) lets its mutants
       # survive, so this fails too. One line per spec; a spec that is not all
-      # killed on target has its whole output printed after.
-      # At most 8 runs at once: a job container sees all of iteration8's
-      # cores in nproc (32), and the runner takes 3 jobs at a time, so
-      # nproc-wide specs in each would ask for 96 runs and slow every job and
-      # every other user of the box.
+      # killed on target has its whole output printed after. CI_WORKERS runs
+      # at once, as the other steps.
       - name: Mutant specs
         if: always()
         shell: bash
         run: |
           out=$(mktemp -d)
-          jobs=$(nproc)
-          [ "$jobs" -gt 8 ] && jobs=8
           set +e
-          MUTATE_OUT_DIR="$out" python mutate-spec.py --jobs "$jobs" . tests/mutants/*.json
+          MUTATE_OUT_DIR="$out" python mutate-spec.py --jobs "$CI_WORKERS" . tests/mutants/*.json
           rc=$?
           for f in "$out"/*.mutate.out; do
             case "$(tail -n 1 "$f")" in
@@ -254,7 +249,7 @@ jobs:
       - run: npm install
       - name: Tools installed at their pins
         run: python check-pins.py js
-      # As the Python job's gate step: one worker per core, each taking every
+      # As the Python job's gate step: CI_WORKERS workers, each taking every
       # Nth file, each file's log printed afterwards in file order, and each
       # worker with `set +e` so a finding is recorded rather than fatal.
       - name: Check every JS file
@@ -274,7 +269,7 @@ jobs:
           fi
           out=$(mktemp -d)
           mapfile -t files < <(git ls-files '*.js' '*.mjs' '*.cjs')
-          workers=$(nproc)
+          workers=$CI_WORKERS
           for ((w = 0; w < workers; w++)); do
             ( set +e
               for ((i = w; i < ${#files[@]}; i += workers)); do
