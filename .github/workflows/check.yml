@@ -26,6 +26,14 @@ jobs:
     name: Python and shell (ruff, mypy, shellcheck, suites, coverage)
     runs-on: fleet-ci
     steps:
+      # A job as root reads a mode-000 file anyway, so the permission tests
+      # skip and nothing says so; and root widens any escape from the job's
+      # container. The fleet CI image runs jobs as ci; this fails a run that
+      # is root, on whatever label.
+      - name: CI does not run as root
+        run: |
+          echo "user: $(id -un) uid $(id -u)"
+          if [ "$(id -u)" = 0 ]; then echo "CI is running as root: use the fleet-ci label" >&2; exit 1; fi
       # Full history: the smells arm reads the base commit.
       - uses: actions/checkout@v6
         with:
@@ -197,6 +205,10 @@ jobs:
     name: JS (eslint, prettier)
     runs-on: fleet-ci
     steps:
+      - name: CI does not run as root
+        run: |
+          echo "user: $(id -un) uid $(id -u)"
+          if [ "$(id -u)" = 0 ]; then echo "CI is running as root: use the fleet-ci label" >&2; exit 1; fi
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
