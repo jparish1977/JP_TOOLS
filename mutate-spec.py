@@ -23,7 +23,13 @@ PARALLEL BY DEFAULT, PER MUTANT: each spec's control runs once (the runner's
 passes, each of that spec's mutants runs on its own (--no-control --only
 NAME). Runs from every spec share one pool of --jobs at once (default: the
 CPU count), so one spec of slow mutants no longer runs them one after
-another. --jobs 1 is serial.
+another. --jobs 1 is serial. A mutant name given twice, or shared by two of
+a spec's mutants, is one run. A spec that cannot be read gets its own failing
+line, and the other specs still run.
+
+<stem>.mutate.out is written as the runs come back, in spec order: the
+control, then each mutant's output, so one slow mutant holds back the
+finished ones after it. It is a file for reading once the run is over.
 
 The runner mutates its tree in place and refuses a tree another run holds,
 so every run, control or mutant, gets its OWN copy of ROOT, made beside ROOT
@@ -124,13 +130,21 @@ def run_spec(root: str, spec: str, outdir: str, base: str, only: list[str] | Non
     """One spec, all its mutants or just ONLY's: its control once, then each
     mutant in its own copy, all through POOL. (stem, rc, the last line)."""
     stem = spec_stem(spec, base)
-    with open(spec, encoding="utf-8") as fh:
-        m = RUN_LINE.search(json.load(fh).get("about", ""))
+    # A spec that cannot be read is this spec's failure, reported on its own
+    # line; raised, it would stop main before the other specs' lines.
+    try:
+        with open(spec, encoding="utf-8") as fh:
+            m = RUN_LINE.search(json.load(fh).get("about", ""))
+        every = [n for n, _ in names(spec)]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        return stem, 1, f"{type(e).__name__}: {e}"
     if not m:
         return stem, 1, "NO RUN LINE in about"
     run = [m.group(1).rstrip(".,;"), m.group(2).rstrip(".,;"), os.path.abspath(spec)]
-    every = [n for n, _ in names(spec)]
-    chosen = only or every
+    # Each name once, in order: --only X runs every mutant named X, so a name
+    # given twice, or two mutants of one name, must still be one run.
+    chosen = list(dict.fromkeys(only or every))
+    ran = sum(n in chosen for n in every)
     out = os.path.join(outdir, stem + ".mutate.out")
     rc, text = pool.submit(run_in_copy, root, stem,
                            [*run, "--control-only", *(a for n in chosen for a in ("--only", n))]).result()
@@ -145,7 +159,7 @@ def run_spec(root: str, spec: str, outdir: str, base: str, only: list[str] | Non
             mrc, text = fut.result()
             rcs.append(mrc)
             fh.write(text)
-        of = f"{len(chosen)} of {len(every)} mutant(s) (--only)" if only else f"{len(chosen)} mutant(s)"
+        of = f"{ran} of {len(every)} mutant(s) (--only)" if only else f"{ran} mutant(s)"
         bad = sum(r != 0 for r in rcs)
         last = f"mutate-spec: {of}, one control, " + (
             "every one killed on target" if not bad else f"{bad} wrong")

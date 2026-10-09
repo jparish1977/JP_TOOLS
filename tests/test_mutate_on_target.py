@@ -27,6 +27,9 @@ WHAT IS CHECKED
     - --only NAME (both tools) runs those mutants alone and says how many of
       the spec's ran; a name nothing has is refused, exit 2; --list names
       each mutant and its target and touches nothing.
+    - mutate-spec.py: a spec it cannot read fails on its own line while the
+      others still run; a name given twice, or two mutants of one name, is
+      still one run per mutant.
     Not checked: exit 3, a restore that does not read back; nothing short of
     a second writer racing the restore produces it.
 
@@ -193,15 +196,16 @@ sys.exit(1)
 def meet_run(name: str, specs: list[str], tree: str, env: dict[str, str],
              n: int) -> tuple[subprocess.CompletedProcess[str], str, str]:
     """mutate-spec on SPECS with MEET_TEST in TREE, waiting for N mutants:
-    (the run, the meeting dir, the control counter)."""
+    (the run, the meeting dir, the control counter). --jobs N, so the N
+    meet whatever the box's CPU count."""
     with open(os.path.join(tree, "test.py"), "w", encoding="utf-8") as fh:
         fh.write(MEET_TEST)
     meet, count, outdir = (os.path.join(TMP, f"{name}-{x}") for x in ("meet", "count", "out"))
     os.makedirs(meet)
     os.makedirs(outdir)
     r = subprocess.run([sys.executable, os.path.join(os.path.dirname(RUNNER), "mutate-spec.py"),
-                        tree, *specs], capture_output=True, text=True, check=False, timeout=120,
-                       env=dict(env, MUTATE_OUT_DIR=outdir, MEET=meet, MEET_N=str(n), COUNT=count))
+                        "--jobs", str(n), tree, *specs], capture_output=True, text=True, check=False,
+                       timeout=120, env=dict(env, MUTATE_OUT_DIR=outdir, MEET=meet, MEET_N=str(n), COUNT=count))
     return r, meet, count
 
 
@@ -422,6 +426,52 @@ def test_spec_only_and_list() -> None:
           (0, ["spec-only-other: three\t-> value is one", "spec-only: nine\t-> value is one",
                "spec-only: two\t-> value is one"]))
     check("mutate-spec --list and the refusal: TARGET untouched", target_bytes(tree), ORIGINAL)
+
+
+def test_spec_a_bad_spec_beside_a_good_one() -> None:
+    """A spec with no mutants key fails on its own line; the good spec beside
+    it still runs and reports, and the run exits 1."""
+    tree, spec, env = two_mutant_spec("bad-spec")
+    bad = os.path.join(TMP, "bad-spec-bad.json")
+    with open(bad, "w", encoding="utf-8") as fh:
+        json.dump({"about": "Run: mutate-on-target.py TREE t.py test.py SPEC."}, fh)
+    outdir = os.path.join(TMP, "bad-spec-out")
+    os.makedirs(outdir)
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(RUNNER), "mutate-spec.py"),
+                        tree, spec, bad], capture_output=True, text=True,
+                       env=dict(env, MUTATE_OUT_DIR=outdir), check=False, timeout=120)
+    by_label = {line.split(":")[0]: line for line in r.stdout.splitlines()}
+    check("a bad spec: exit 1, a line for each spec", (r.returncode, sorted(by_label)),
+          (1, ["bad-spec", "bad-spec-bad"]))
+    check_true("a bad spec: its line names the error", "rc=1 KeyError: 'mutants'" in by_label.get("bad-spec-bad", ""))
+    check_true("a bad spec: the good spec's mutants still killed",
+               "every one killed on target" in by_label.get("bad-spec", ""))
+    check("a bad spec: no traceback", "Traceback" in r.stderr, False)
+
+
+def test_spec_a_name_twice_is_one_run() -> None:
+    """--only X given twice runs X once; two mutants named X run in one copy,
+    each once, not once per name."""
+    tree, spec, env = two_mutant_spec("dup")
+    outdir = os.path.join(TMP, "dup-out")
+    os.makedirs(outdir)
+    spec_py = os.path.join(os.path.dirname(RUNNER), "mutate-spec.py")
+
+    def mutant_lines(*extra: str) -> tuple[int, list[str]]:
+        r = subprocess.run([sys.executable, spec_py, tree, spec, *extra], capture_output=True,
+                           text=True, env=dict(env, MUTATE_OUT_DIR=outdir), check=False, timeout=120)
+        with open(os.path.join(outdir, "dup.mutate.out"), encoding="utf-8") as fh:
+            names = [ln.split()[0] for ln in fh.read().splitlines() if ln.startswith("  ")]
+        return r.returncode, names
+
+    check("--only two --only two: the control and two, once",
+          mutant_lines("--only", "two", "--only", "two"), (0, ["control", "two"]))
+    with open(spec, "w", encoding="utf-8") as fh:
+        json.dump({"about": "Run: mutate-on-target.py TREE t.py test.py SPEC.",
+                   "mutants": [{"name": "twin", "edits": [["VALUE = 1", v]], "target": "value is one"}
+                               for v in ("VALUE = 2", "VALUE = 9")]}, fh)
+    check("two mutants named twin: each runs once",
+          mutant_lines(), (0, ["control", "twin", "twin"]))
 
 
 if __name__ == "__main__":
