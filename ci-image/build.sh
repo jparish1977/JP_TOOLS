@@ -13,8 +13,8 @@
 # the runner's label serves (`fleet-ci:docker://fleet-ci:current`, with
 # force_pull false, so the local image is used). Pass --no-current to build
 # and tag only the commit, for proving a new image before it serves jobs.
-# After tagging current it runs reap.sh, which keeps current and the image
-# before it and removes older fleet-ci tags.
+# Tagging current first tags the image it replaces fleet-ci:previous, then
+# runs reap.sh, which removes every other fleet-ci tag.
 #
 # Jobs run as fleet-ci, the HOST's account of that name (a system user on
 # iteration8, nologin, no other groups): the runner's daemon does not remap
@@ -109,9 +109,18 @@ while read -r tool version sha url; do
         echo "  $TOOL $VERSION: cached"'
 done < "$here/ci-image/toolcache.txt"
 
-if [ "$current" = 1 ]; then
+# The image current replaces becomes fleet-ci:previous, for rollback; reap.sh
+# keeps those two and removes every other fleet-ci tag.
+promote() {
+    local old new
+    old=$(sudo -n docker exec "$dind" docker image inspect -f '{{.Id}}' fleet-ci:current 2>/dev/null || true)
+    new=$(sudo -n docker exec "$dind" docker image inspect -f '{{.Id}}' "$tag")
+    if [ -n "$old" ] && [ "$old" != "$new" ]; then
+        sudo -n docker exec "$dind" docker tag fleet-ci:current fleet-ci:previous
+        echo "ci-image: the image it replaces is now fleet-ci:previous"
+    fi
     sudo -n docker exec "$dind" docker tag "$tag" fleet-ci:current
     echo "ci-image: $tag is now fleet-ci:current"
-    # The tag it replaced is kept for rollback; older ones go (reap.sh).
     bash "$here/ci-image/reap.sh"
-fi
+}
+if [ "$current" = 1 ]; then promote; fi

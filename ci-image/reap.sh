@@ -9,16 +9,16 @@
 # and nothing removes it; one that dies mid-run can leave it "Exited". Each such
 # container keeps two volumes the runner made for it, <hash> (the workspace)
 # and <hash>-env (/var/run/act, the job's environment, which may hold the
-# job's credentials, so they are removed and never read). They are named volumes, so neither
-# `docker rm -v` nor `docker volume prune` removes them.
+# job's credentials, so they are removed and never read). They are named
+# volumes, so neither `docker rm -v` nor `docker volume prune` removes them.
 #
 # What it removes, in order:
 #   1. FORGEJO-ACTIONS-TASK-* containers that are not running and were created
 #      more than REAP_AGE_HOURS ago (default 24), then the hash-named volumes
 #      each of them mounted. The shared caches (pip-cache, npm-cache,
 #      composer-cache, toolcache) are named otherwise and are never touched.
-#   2. fleet-ci image tags other than fleet-ci:current and the newest other
-#      image, which is kept for rollback.
+#   2. fleet-ci image tags whose image is neither fleet-ci:current nor
+#      fleet-ci:previous (the one build.sh replaced, kept for rollback).
 #   3. Images that no runner label names (labels read from the runner's
 #      config.yml) and that are not fleet-ci. An image a container still uses
 #      is refused by docker and left.
@@ -80,17 +80,16 @@ reap_containers() {
     for v in "${vols[@]}"; do act volume rm "$v"; done
 }
 
-# `docker images` lists newest first, so the first image that is not current
-# is the one before it.
+# build.sh names the image it replaced fleet-ci:previous. Creation times
+# cannot say which came last: builds that reuse every cached layer share one.
 reap_fleet_ci_tags() {
-    local current previous='' tag full
-    echo "reap: fleet-ci tags but current and one previous"
+    local current previous tag full
+    echo "reap: fleet-ci tags but current and previous"
     current=$(d image inspect -f '{{.Id}}' fleet-ci:current 2>/dev/null)
+    previous=$(d image inspect -f '{{.Id}}' fleet-ci:previous 2>/dev/null)
     while read -r tag; do
         full=$(d image inspect -f '{{.Id}}' "fleet-ci:$tag")
-        [ "$full" = "$current" ] && continue
-        [ -z "$previous" ] && previous=$full
-        [ "$full" = "$previous" ] && continue
+        [ "$full" = "$current" ] || [ "$full" = "$previous" ] && continue
         act rmi "fleet-ci:$tag"
     done < <(d images fleet-ci --format '{{.Tag}}')
 }
