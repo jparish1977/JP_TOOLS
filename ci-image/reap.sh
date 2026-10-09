@@ -22,6 +22,10 @@
 #   3. Images that no runner label names (labels read from the runner's
 #      config.yml) and that are not fleet-ci. An image a container still uses
 #      is refused by docker and left.
+# Environment: RUNNER_CONFIG (the runner's rendered config.yml), CLAUDE_JOB
+# (claude-config's bin/claude-job), REAP_AGE_HOURS. The first two default under
+# $HOME, which is joe's.
+#
 # Each removal is printed. --dry-run prints the same list and removes nothing.
 # Exit 0 when every removal it tried succeeded.
 #
@@ -36,7 +40,16 @@ age_h=${REAP_AGE_HOURS:-24}
 dry=0
 [ "${1:-}" = "--dry-run" ] && dry=1
 fail=0
-job=$HOME/projects/claude-config/bin/claude-job
+# CLAUDE_JOB: iteration8_server runs this as a root system unit (its #25), and
+# root's HOME holds no claude-config checkout.
+job=${CLAUDE_JOB:-$HOME/projects/claude-config/bin/claude-job}
+# A missing claude-job is not a halt. Without this check, `start` failing to
+# run reads as "the fleet is halted" below and every run exits 0 having
+# removed nothing.
+if [ "$dry" = 0 ] && [ ! -x "$job" ]; then
+    echo "reap: no claude-job at $job (set CLAUDE_JOB); removing nothing" >&2
+    exit 1
+fi
 if [ "$dry" = 0 ] && ! "$job" start fleet-ci-reap --writes iteration8:runner-dind --every 1440; then
     echo "reap: the fleet is halted; removing nothing" >&2
     exit 0
