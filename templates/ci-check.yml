@@ -54,7 +54,7 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: fleet-ci
     strategy:
       fail-fast: false
       matrix:
@@ -237,7 +237,7 @@ jobs:
   # half; this is the other. See "--- Tests ---" at the top for what a
   # project provides.
   tests:
-    runs-on: ubuntu-latest
+    runs-on: fleet-ci
     steps:
       - uses: actions/checkout@v6
 

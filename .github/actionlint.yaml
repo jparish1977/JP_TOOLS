@@ -1,0 +1,5 @@
+# Runner labels actionlint does not know: fleet-ci is the fleet CI image
+# (ci-image/), served by iteration8's Forgejo runner.
+self-hosted-runner:
+  labels:
+    - fleet-ci

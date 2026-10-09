@@ -17,10 +17,14 @@ on:
 # since against HEAD a new smell only warns. So does a base the clone does not
 # have: after a force-push, the commit before it is no longer in the history.
 
+# fleet-ci is the fleet CI image (ci-image/), served by iteration8's runner:
+# the job image with every system tool below already installed, so the
+# install steps find them in place and check-pins.py confirms their pins.
+
 jobs:
   python:
     name: Python and shell (ruff, mypy, shellcheck, suites, coverage)
-    runs-on: ubuntu-latest
+    runs-on: fleet-ci
     steps:
       # Full history: the smells arm reads the base commit.
       - uses: actions/checkout@v6
@@ -191,7 +195,7 @@ jobs:
 
   js:
     name: JS (eslint, prettier)
-    runs-on: ubuntu-latest
+    runs-on: fleet-ci
     steps:
       - uses: actions/checkout@v6
         with:
