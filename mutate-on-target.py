@@ -2,13 +2,20 @@
 """Mutation control: each mutant must fail the ONE check aimed at it.
 
 Usage:
-    python mutate-on-target.py TREE TARGET TEST SPEC.json [--only NAME ...] [--list]
+    python mutate-on-target.py TREE TARGET TEST SPEC.json [--only NAME ...]
+                               [--list | --control-only | --no-control]
 
 --list prints each mutant's name and target, and touches nothing. --only NAME
 (repeatable, the name exactly) runs the control and those mutants alone, so
 re-anchoring one mutant costs one mutant's run; a NAME no mutant has is
 refused, never run as nothing, and the summary says how many of the spec's
 mutants ran.
+
+--control-only checks that every chosen mutant anchors, runs the control, and
+stops. --no-control runs the mutants without it: only for a caller that has
+already seen the control pass with --control-only in a byte-identical copy of
+TREE (mutate-spec.py does this, so a spec's control runs once while its
+mutants run in copies of their own).
 
 TREE is a checkout whose TARGET (a path inside it) is mutated in place and
 restored whatever happens; TEST (also inside TREE) is run from TREE after each
@@ -203,8 +210,8 @@ def verdict(rc: int, out: str, label: str) -> tuple[str, bool]:
     return "SURVIVED", False
 
 
-def mutate_all(r: Run, original: bytes, mutants: list[dict[str, Any]]) -> int:
-    """Run the control, then each mutant; the number not killed on target."""
+def run_control(r: Run, original: bytes) -> None:
+    """The unmutated test, which must pass, or the run refuses."""
     write(r, original)
     rc, out = run_test(r)
     last = out.strip().splitlines()[-1] if out.strip() else "no output"
@@ -212,6 +219,13 @@ def mutate_all(r: Run, original: bytes, mutants: list[dict[str, Any]]) -> int:
           f"{'passes, as it must' if rc == 0 else 'FAILED: control broken'} ({last})")
     if rc != 0:
         refuse("the control does not pass; no mutant can mean anything")
+
+
+def mutate_all(r: Run, original: bytes, mutants: list[dict[str, Any]], control: bool) -> int:
+    """Run the control unless CONTROL is false, then each mutant; the number
+    not killed on target."""
+    if control:
+        run_control(r, original)
     bad = 0
     for m in mutants:
         data = original
@@ -236,7 +250,10 @@ def parse(argv: list[str]) -> argparse.Namespace:
     for name in ("tree", "target", "test", "spec"):
         p.add_argument(name)
     p.add_argument("--only", action="append", default=[], metavar="NAME")
-    p.add_argument("--list", action="store_true")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--list", action="store_true")
+    mode.add_argument("--control-only", action="store_true")
+    mode.add_argument("--no-control", action="store_true")
     return p.parse_args(argv)
 
 
@@ -267,7 +284,11 @@ def main(argv: list[str]) -> int:
     with open(r.saved, "wb") as fh:
         fh.write(original)
     try:
-        bad = mutate_all(r, original, mutants)
+        if args.control_only:
+            run_control(r, original)
+            bad = 0
+        else:
+            bad = mutate_all(r, original, mutants, control=not args.no_control)
     finally:
         write(r, original)
         with open(r.target, "rb") as fh:
@@ -279,6 +300,9 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(f"mutate: {r.target} did NOT read back as the original after "
                          f"the restore; the original is in {r.saved}\n")
         return 3
+    if args.control_only:
+        print(f"mutate-on-target: {of} anchor, the control passes")
+        return 0
     print(f"mutate-on-target: {of}, "
           f"{'every one killed on target' if not bad else f'{bad} wrong'}")
     return 1 if bad else 0

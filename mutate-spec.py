@@ -18,11 +18,27 @@ the stem is the spec's path under the directory all the given specs share,
 '/' as '__' (pb/books/code.json is pb__books__code); specs in one directory
 keep their file names.
 
-PARALLEL BY DEFAULT: every spec at once, up to --jobs (default: the CPU
-count). The runner mutates its tree in place and refuses a tree another run
-holds, so each spec runs in its OWN copy of ROOT, made beside ROOT (a test
-that finds a sibling repository beside this one still finds it) and removed
-afterwards. ROOT itself is never mutated. --jobs 1 is serial.
+PARALLEL BY DEFAULT, PER MUTANT: each spec's control runs once (the runner's
+--control-only, which also checks that every chosen mutant anchors); once it
+passes, each of that spec's mutants runs on its own (--no-control --only
+NAME). Runs from every spec share one pool of --jobs at once (default: the
+CPU count), so one spec of slow mutants no longer runs them one after
+another. --jobs 1 is serial.
+
+The runner mutates its tree in place and refuses a tree another run holds,
+so every run, control or mutant, gets its OWN copy of ROOT, made beside ROOT
+(a test that finds a sibling repository beside this one still finds it) and
+removed afterwards. ROOT itself is never mutated.
+
+OWN INDEX AND HEAD PER COPY. In a git worktree (or a submodule) .git is a
+file naming a gitdir elsewhere, so a plain copy would share that worktree's
+index and HEAD with ROOT and every other copy: a test that runs `git add` in
+one copy writes ROOT's index. Such a copy is registered as a linked worktree
+of ROOT's repository instead, with a copy of ROOT's index and HEAD detached
+at ROOT's commit (on ROOT's branch, a commit in a copy would move it). It
+still shares the repository's refs and objects, as any worktree does, so the
+main checkout's tools (vendor/, node_modules/) are found from it as from
+ROOT. Its gitdir is removed with the copy. A .git directory is copied whole.
 """
 
 from __future__ import annotations
@@ -57,31 +73,84 @@ def spec_stem(spec: str, base: str) -> str:
     return rel.removesuffix(".json").replace(os.sep, "__")
 
 
-def run_spec(root: str, spec: str, outdir: str, base: str,
-             only: list[str] | None = None) -> tuple[str, int, str]:
-    """One spec in a private copy of ROOT, all its mutants or just ONLY's:
-    (stem, rc, the runner's last line)."""
+def _git(root: str, *args: str) -> str:
+    return subprocess.run(["git", "-C", root, *args], capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def own_git(root: str, tree: str) -> str | None:
+    """When ROOT's .git is a file, make TREE, a copy of ROOT, a linked worktree
+    of ROOT's repository (see OWN INDEX AND HEAD PER COPY above), and return
+    its gitdir for removal; else None."""
+    if not os.path.isfile(os.path.join(tree, ".git")):
+        return None
+    common = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    index = _git(root, "rev-parse", "--path-format=absolute", "--git-path", "index")
+    sha = _git(root, "rev-parse", "--verify", "HEAD")
+    os.makedirs(os.path.join(common, "worktrees"), exist_ok=True)
+    gitdir = tempfile.mkdtemp(prefix="mutate-", dir=os.path.join(common, "worktrees"))
+    for name, text in (("commondir", common), ("gitdir", os.path.join(tree, ".git")),
+                       ("HEAD", sha)):
+        with open(os.path.join(gitdir, name), "w", encoding="utf-8") as fh:
+            fh.write(text + "\n")
+    if os.path.exists(index):
+        shutil.copyfile(index, os.path.join(gitdir, "index"))
+    with open(os.path.join(tree, ".git"), "w", encoding="utf-8") as fh:
+        fh.write(f"gitdir: {gitdir}\n")
+    return gitdir
+
+
+def run_in_copy(root: str, stem: str, args: list[str]) -> tuple[int, str]:
+    """The runner on a private copy of ROOT: (rc, its output)."""
+    work = tempfile.mkdtemp(prefix=f".mutate-{stem}-", dir=os.path.dirname(root))
+    tree = os.path.join(work, os.path.basename(root))
+    gitdir = None
+    try:
+        shutil.copytree(root, tree, symlinks=True)
+        gitdir = own_git(root, tree)
+        p = subprocess.run([sys.executable, str(RUNNER), tree, *args], stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, text=True, check=False)
+        return p.returncode, p.stdout
+    except (OSError, subprocess.CalledProcessError) as e:
+        return 2, f"mutate-spec: could not make a private copy of {root}: {e}\n"
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        if gitdir:
+            shutil.rmtree(gitdir, ignore_errors=True)
+
+
+def run_spec(root: str, spec: str, outdir: str, base: str, only: list[str] | None,
+             pool: concurrent.futures.Executor) -> tuple[str, int, str]:
+    """One spec, all its mutants or just ONLY's: its control once, then each
+    mutant in its own copy, all through POOL. (stem, rc, the last line)."""
     stem = spec_stem(spec, base)
     with open(spec, encoding="utf-8") as fh:
         m = RUN_LINE.search(json.load(fh).get("about", ""))
     if not m:
         return stem, 1, "NO RUN LINE in about"
-    target, test = m.group(1).rstrip(".,;"), m.group(2).rstrip(".,;")
-    work = tempfile.mkdtemp(prefix=f".mutate-{stem}-", dir=os.path.dirname(root))
-    tree = os.path.join(work, os.path.basename(root))
+    run = [m.group(1).rstrip(".,;"), m.group(2).rstrip(".,;"), os.path.abspath(spec)]
+    every = [n for n, _ in names(spec)]
+    chosen = only or every
     out = os.path.join(outdir, stem + ".mutate.out")
-    try:
-        shutil.copytree(root, tree, symlinks=True)
-        with open(out, "w", encoding="utf-8") as fh:
-            chosen = [a for name in only or [] for a in ("--only", name)]
-            rc = subprocess.run([sys.executable, str(RUNNER), tree, target, test,
-                                 os.path.abspath(spec), *chosen],
-                                stdout=fh, stderr=subprocess.STDOUT, check=False).returncode
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-    with open(out, encoding="utf-8") as fh:
-        last = (fh.read().strip().splitlines() or ["(no output)"])[-1]
-    return stem, rc, last
+    rc, text = pool.submit(run_in_copy, root, stem,
+                           [*run, "--control-only", *(a for n in chosen for a in ("--only", n))]).result()
+    with open(out, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    if rc != 0:
+        return stem, rc, (text.strip().splitlines() or ["(no output)"])[-1]
+    runs = [pool.submit(run_in_copy, root, stem, [*run, "--no-control", "--only", n]) for n in chosen]
+    rcs = []
+    with open(out, "a", encoding="utf-8") as fh:
+        for fut in runs:
+            mrc, text = fut.result()
+            rcs.append(mrc)
+            fh.write(text)
+        of = f"{len(chosen)} of {len(every)} mutant(s) (--only)" if only else f"{len(chosen)} mutant(s)"
+        bad = sum(r != 0 for r in rcs)
+        last = f"mutate-spec: {of}, one control, " + (
+            "every one killed on target" if not bad else f"{bad} wrong")
+        fh.write(last + "\n")
+    return stem, max(rcs, default=0), last
 
 
 def names(spec: str) -> list[tuple[str, str]]:
@@ -132,8 +201,11 @@ def main(argv: list[str]) -> int:
     runs = chosen(specs, args.only)
     outdir = os.environ.get("MUTATE_OUT_DIR", ".")
     bad = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(jobs, len(runs))) as pool:
-        futures = [pool.submit(run_spec, root, sp, outdir, base, only) for sp, only in runs.items()]
+    # Each spec is a waiting thread of its own; only POOL's runs count against --jobs.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool, \
+            concurrent.futures.ThreadPoolExecutor(max_workers=len(runs)) as specs_at_once:
+        futures = [specs_at_once.submit(run_spec, root, sp, outdir, base, only, pool)
+                   for sp, only in runs.items()]
         for fut in concurrent.futures.as_completed(futures):
             stem, rc, last = fut.result()
             print(f"{stem}: rc={rc} {last[:140]}", flush=True)

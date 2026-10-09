@@ -1,0 +1,15 @@
+{
+  "about": "mutate-on-target --control-only runs the control and no mutant, and --no-control runs the mutants without it. Run: mutate-on-target.py TREE mutate-on-target.py tests/test_mutate_on_target.py tests/mutants/jpt-control-modes-on-mutate-on-target.json",
+  "mutants": [
+    {
+      "name": "--control-only runs the mutants as well",
+      "edits": [["        if args.control_only:\n            run_control(r, original)", "        if False:\n            run_control(r, original)"]],
+      "target": "one spec: the output file holds the control and every mutant, in spec order"
+    },
+    {
+      "name": "--no-control runs the control anyway",
+      "edits": [["control=not args.no_control", "control=True"]],
+      "target": "one spec: the control ran once, not once per mutant"
+    }
+  ]
+}
