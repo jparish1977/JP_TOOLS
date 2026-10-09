@@ -17,9 +17,13 @@
 # Jobs run as fleet-ci, the HOST's account of that name (a system user on
 # iteration8, nologin, no other groups): the runner's daemon does not remap
 # users, so the image takes that account's uid and gid. Without the account
-# it stops. The runner's shared cache volumes (pip-cache, npm-cache) are
-# owned by the same uid, so jobs can write them; a volume created afresh is
-# root's and would silently stop caching.
+# it stops. The runner's shared cache volumes are owned by the same uid, so
+# jobs can write them; a volume created afresh is root's and would silently
+# stop caching. Each is mounted into every job by the runner's config
+# (iteration8_server forgejo-runner): pip-cache (PIP_CACHE_DIR), npm-cache
+# (npm_config_cache), composer-cache (COMPOSER_CACHE_DIR), and toolcache at
+# /opt/hostedtoolcache, where setup-python and setup-node look before they
+# download, so a Python or Node release is fetched once, not every job.
 #
 # After it builds, it reads back inside the new image: that it runs as the
 # host's fleet-ci uid, not root, and cannot sudo; then every pinned tool
@@ -67,7 +71,7 @@ tar -C "$here" -cf - check-pins.py requirements-system.txt requirements-dev.txt 
         ss -V'
 
 echo "ci-image: the runner's cache volumes, owned by fleet-ci"
-for vol in pip-cache npm-cache; do
+for vol in pip-cache npm-cache composer-cache toolcache; do
     sudo -n docker exec "$dind" docker volume create "$vol" >/dev/null
     sudo -n docker exec "$dind" docker run --rm --user 0 -v "$vol:/v" "$tag" chown -R "$uid:$gid" /v
     sudo -n docker exec "$dind" docker run --rm -v "$vol:/v" "$tag" sh -c 'touch /v/.w && rm /v/.w' \
