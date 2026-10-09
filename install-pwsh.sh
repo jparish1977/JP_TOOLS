@@ -64,7 +64,9 @@ if ! command -v pwsh >/dev/null 2>&1; then
 fi
 
 echo "install-pwsh: PSScriptAnalyzer $pssa_version"
+# Left alone when that version is already installed (the fleet CI image has
+# it), so a job on that image reaches no Gallery.
 pwsh -NoProfile -NonInteractive -Command \
-    "\$ErrorActionPreference = 'Stop'; Install-Module PSScriptAnalyzer -RequiredVersion $pssa_version -Scope CurrentUser -Force"
+    "\$ErrorActionPreference = 'Stop'; if (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object { \$_.Version -eq [version]'$pssa_version' }) { 'install-pwsh: already installed' } else { Install-Module PSScriptAnalyzer -RequiredVersion $pssa_version -Scope CurrentUser -Force }"
 # shellcheck disable=SC2016  # $PSVersionTable is PowerShell's, so it is single-quoted on purpose
 pwsh -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()'
