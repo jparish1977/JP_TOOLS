@@ -385,6 +385,15 @@ def test_spec_a_sigterm_leaves_nothing() -> None:
           (143, [], ["term-wt"]))
 
 
+def read_seen(path: str) -> list[str]:
+    """The lines a fixture test wrote to PATH, none when no run reached it:
+    a run that never started is the check's failing value, not a crash."""
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as fh:
+        return fh.read().splitlines()
+
+
 SHARE_TEST = """import os, subprocess, sys
 def git(*a):
     return subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
@@ -427,8 +436,7 @@ def test_spec_a_copy_shares_tools_and_git() -> None:
     r = subprocess.run([sys.executable, os.path.join(os.path.dirname(RUNNER), "mutate-spec.py"),
                         repo, spec], capture_output=True, text=True, check=False, timeout=120,
                        env=dict(genv, MUTATE_OUT_DIR=outdir, SEEN=seen))
-    with open(os.path.join(seen, "share"), encoding="utf-8") as fh:
-        rows = fh.read().splitlines()
+    rows = read_seen(os.path.join(seen, "share"))
     common = os.path.realpath(os.path.join(repo, ".git"))
     check("a copy of a plain clone: tools linked, a worktree of ROOT's repository, every run",
           (r.returncode, rows), (0, [repr([True, True, True, common])] * 2))
@@ -467,8 +475,7 @@ def test_spec_a_copy_has_its_own_cache() -> None:
     r = subprocess.run([sys.executable, os.path.join(os.path.dirname(RUNNER), "mutate-spec.py"),
                         tree, spec], capture_output=True, text=True, check=False, timeout=120,
                        env=dict(env, MUTATE_OUT_DIR=outdir, SEEN=seen))
-    with open(os.path.join(seen, "cache"), encoding="utf-8") as fh:
-        caches = fh.read().split()
+    caches = read_seen(os.path.join(seen, "cache"))
     copies = os.path.join(TMP, ".mutate-own-cache-")
     check("a copy's cache: every run's inside its own copy, one copy each, none left",
           (r.returncode, len(caches), all(c.startswith(copies) for c in caches),
