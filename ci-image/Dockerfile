@@ -31,19 +31,29 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
         ripgrep poppler-utils iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Jobs run as ci, never root. The base image's user is root, so every job
-# was root in its container: a larger escape surface, and a test of file
+# Jobs run as fleet-ci, never root. The base image's user is root, so every
+# job was root in its container: a larger escape surface, and a test of file
 # permissions read a mode-000 file anyway and skipped, so CI never ran those
-# cases. ci has no sudo: what a job used to install as root is already here.
-# setup-python and pip write the tool cache, so ci owns it.
-RUN useradd --create-home --uid 1001 --shell /bin/bash ci \
+# cases. fleet-ci has no sudo: what a job used to install as root is already
+# here. setup-python and pip write the tool cache, so fleet-ci owns it.
+#
+# The uid and gid are the HOST's fleet-ci account (a system user on
+# iteration8, nologin, no other groups), passed in by build.sh: the runner's
+# daemon does not remap users, so a job's uid is that uid on the host. A uid
+# picked here could be someone's on the host (1001 was the web deploy
+# account); the host's own fleet-ci account reserves it and names it in ps.
+ARG CI_UID
+ARG CI_GID
+RUN test -n "$CI_UID" && test -n "$CI_GID" \
+    && groupadd --gid "$CI_GID" fleet-ci \
+    && useradd --create-home --uid "$CI_UID" --gid "$CI_GID" --shell /bin/bash fleet-ci \
     && mkdir -p /opt/hostedtoolcache \
-    && chown -R ci:ci /opt/hostedtoolcache
+    && chown -R fleet-ci:fleet-ci /opt/hostedtoolcache
 
-# PowerShell and PSScriptAnalyzer at their pins, installed for ci, who runs
-# the jobs.
+# PowerShell and PSScriptAnalyzer at their pins, installed for fleet-ci, who
+# runs the jobs.
 COPY requirements-system.txt install-pwsh.sh /opt/fleet-ci/
-USER ci
-WORKDIR /home/ci
+USER fleet-ci
+WORKDIR /home/fleet-ci
 RUN bash /opt/fleet-ci/install-pwsh.sh
-ENV PATH=/home/ci/.local/pwsh:$PATH
+ENV PATH=/home/fleet-ci/.local/pwsh:$PATH
