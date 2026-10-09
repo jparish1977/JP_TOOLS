@@ -98,7 +98,7 @@ while read -r tool version sha url; do
         echo "$SHA  pkg" | sha256sum --check --strict --quiet \
             || { echo "FAIL: $TOOL $VERSION does not match its sha256" >&2; exit 1; }
         case "$TOOL" in
-            python) mkdir x && tar -xzf pkg -C x && cd x && ./setup.sh >/dev/null ;;
+            python) mkdir x && tar -xzf pkg -C x && cd x && bash ./setup.sh >/dev/null ;;
             node) mkdir -p "$dest/x64" && tar -xJf pkg -C "$dest/x64" --strip-components=1 \
                   && touch "$dest/x64.complete" ;;
             *) echo "FAIL: no way to cache $TOOL" >&2; exit 1 ;;
