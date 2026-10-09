@@ -385,6 +385,61 @@ def test_spec_a_sigterm_leaves_nothing() -> None:
           (143, [], ["term-wt"]))
 
 
+SHARE_TEST = """import os, subprocess, sys
+def git(*a):
+    return subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
+seen = [os.path.islink("vendor"), os.path.islink("node_modules"), os.path.isfile(".git"),
+        os.path.realpath(git("rev-parse", "--path-format=absolute", "--git-common-dir"))]
+with open(os.path.join(os.environ["SEEN"], "share"), "a") as fh:
+    fh.write(repr(seen) + "\\n")
+if b"VALUE = 1" in open("t.py", "rb").read():
+    print("  ok    value is one")
+    sys.exit(0)
+print("  FAIL  value is one")
+sys.exit(1)
+"""
+
+
+def test_spec_a_copy_shares_tools_and_git() -> None:
+    """ROOT a plain clone (.git a directory) with vendor/ and node_modules/:
+    each copy links those to ROOT's, and is a linked worktree of ROOT's
+    repository rather than a copy of its .git; nothing is left in it after."""
+    repo = os.path.join(TMP, "share-repo")
+    tree, spec, env = fixture("share-src")
+    shutil.move(tree, repo)
+    with open(os.path.join(repo, "test.py"), "w", encoding="utf-8") as fh:
+        fh.write(SHARE_TEST)
+    for d in SHARED_DIRS:
+        os.makedirs(os.path.join(repo, d))
+        with open(os.path.join(repo, d, "tool"), "w", encoding="utf-8") as fh:
+            fh.write("x\n")
+    genv = dict(env, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    for a in (["init", "-q"], ["add", "t.py", "test.py"], ["commit", "-qm", "fixture"]):
+        subprocess.run(["git", "-C", repo, *a], capture_output=True, env=genv, check=True)
+    with open(spec, "w", encoding="utf-8") as fh:
+        json.dump({"about": "Run: mutate-on-target.py TREE t.py test.py SPEC.",
+                   "mutants": [{"name": "two", "edits": [["VALUE = 1", "VALUE = 2"]],
+                                "target": "value is one"}]}, fh)
+    seen, outdir = os.path.join(TMP, "share-seen"), os.path.join(TMP, "share-out")
+    os.makedirs(seen)
+    os.makedirs(outdir)
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(RUNNER), "mutate-spec.py"),
+                        repo, spec], capture_output=True, text=True, check=False, timeout=120,
+                       env=dict(genv, MUTATE_OUT_DIR=outdir, SEEN=seen))
+    with open(os.path.join(seen, "share"), encoding="utf-8") as fh:
+        rows = fh.read().splitlines()
+    common = os.path.realpath(os.path.join(repo, ".git"))
+    check("a copy of a plain clone: tools linked, a worktree of ROOT's repository, every run",
+          (r.returncode, rows), (0, [repr([True, True, True, common])] * 2))
+    check("a copy of a plain clone: no copy's gitdir left in the repository",
+          os.path.exists(os.path.join(repo, ".git", "worktrees"))
+          and os.listdir(os.path.join(repo, ".git", "worktrees")), [])
+
+
+SHARED_DIRS = ("vendor", "node_modules")
+
+
 CACHE_TEST = """import os, sys
 with open(os.path.join(os.environ["SEEN"], "cache"), "a") as fh:
     fh.write(os.environ.get("XDG_CACHE_HOME", "") + "\\n")

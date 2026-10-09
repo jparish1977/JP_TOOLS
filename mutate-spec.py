@@ -36,17 +36,19 @@ so every run, control or mutant, gets its OWN copy of ROOT, made beside ROOT
 (a test that finds a sibling repository beside this one still finds it) and
 removed afterwards. ROOT itself is never mutated. Each run's XDG_CACHE_HOME
 is inside its copy, so whatever its tools cache goes with the copy and never
-touches the user's own cache.
+touches the user's own cache. A copy holds ROOT's own files: ROOT's vendor/
+and node_modules/, which runs only read, are links to ROOT's, and its .git is
+not copied (below).
 
-OWN INDEX AND HEAD PER COPY. In a git worktree (or a submodule) .git is a
-file naming a gitdir elsewhere, so a plain copy would share that worktree's
-index and HEAD with ROOT and every other copy: a test that runs `git add` in
-one copy writes ROOT's index. Such a copy is registered as a linked worktree
-of ROOT's repository instead, with a copy of ROOT's index and HEAD detached
-at ROOT's commit (on ROOT's branch, a commit in a copy would move it). It
-still shares the repository's refs and objects, as any worktree does, so the
-main checkout's tools (vendor/, node_modules/) are found from it as from
-ROOT. Its gitdir is removed with the copy. A .git directory is copied whole.
+OWN INDEX AND HEAD PER COPY. A copy is registered as a linked worktree of
+ROOT's repository, whether ROOT's .git is a directory or (in a worktree or a
+submodule) a file naming a gitdir elsewhere, with a copy of ROOT's index and
+HEAD detached at ROOT's commit. A plain copy of a .git file would share ROOT's
+index and HEAD with every copy, so a test that runs `git add` in one wrote
+ROOT's index; a copied .git directory cost a whole history per run. On ROOT's
+branch a commit in a copy would move it, hence detached. A copy shares the
+repository's refs and objects, as any worktree does. Its gitdir is removed
+with the copy.
 
 A SIGTERM (a job manager's cancel) ends the run without leaving a copy or a
 gitdir behind: the runners still going are sent TERM (the runner restores and
@@ -107,11 +109,30 @@ def _git(root: str, *args: str) -> str:
                           check=True).stdout.strip()
 
 
+# ROOT's installed tool directories: only read, never mutated, so a copy
+# links to ROOT's rather than copying them.
+SHARED = ("vendor", "node_modules")
+
+
+def _copy_tree(root: str, tree: str) -> None:
+    """TREE as a copy of ROOT's own files. ROOT's .git is left out (own_git
+    gives the copy its git state) and SHARED are links to ROOT's: those were
+    most of a copy's size and time (a JP_TOOLS clone with them, 4.5 s per
+    copy inside the CI image; without, 0.9 s)."""
+    skip = {".git", *SHARED}
+    shutil.copytree(root, tree, symlinks=True,
+                    ignore=lambda src, names: [n for n in names if n in skip and src == root])
+    for name in SHARED:
+        if os.path.isdir(os.path.join(root, name)):
+            os.symlink(os.path.join(root, name), os.path.join(tree, name))
+
+
 def own_git(root: str, tree: str) -> str | None:
-    """When ROOT's .git is a file, make TREE, a copy of ROOT, a linked worktree
-    of ROOT's repository (see OWN INDEX AND HEAD PER COPY above), and return
-    its gitdir for removal; else None."""
-    if not os.path.isfile(os.path.join(tree, ".git")):
+    """When ROOT is a git checkout (its .git a directory, or a file in a
+    worktree), make TREE, a copy of ROOT without .git, a linked worktree of
+    ROOT's repository (see OWN INDEX AND HEAD PER COPY above), and return its
+    gitdir for removal; else None."""
+    if not os.path.exists(os.path.join(root, ".git")):
         return None
     common = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
     index = _git(root, "rev-parse", "--path-format=absolute", "--git-path", "index")
@@ -137,7 +158,7 @@ def run_in_copy(root: str, stem: str, args: list[str]) -> tuple[int, str]:
     tree = os.path.join(work, os.path.basename(root))
     gitdir = None
     try:
-        shutil.copytree(root, tree, symlinks=True)
+        _copy_tree(root, tree)
         gitdir = own_git(root, tree)
         # Caches inside the copy: what a test or its tools cache (pwsh's
         # startup profile, say) is removed with it, and runs at once, or one
