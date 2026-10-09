@@ -34,7 +34,9 @@ finished ones after it. It is a file for reading once the run is over.
 The runner mutates its tree in place and refuses a tree another run holds,
 so every run, control or mutant, gets its OWN copy of ROOT, made beside ROOT
 (a test that finds a sibling repository beside this one still finds it) and
-removed afterwards. ROOT itself is never mutated.
+removed afterwards. ROOT itself is never mutated. Each run's XDG_CACHE_HOME
+is inside its copy, so whatever its tools cache goes with the copy and never
+touches the user's own cache.
 
 OWN INDEX AND HEAD PER COPY. In a git worktree (or a submodule) .git is a
 file naming a gitdir elsewhere, so a plain copy would share that worktree's
@@ -137,8 +139,12 @@ def run_in_copy(root: str, stem: str, args: list[str]) -> tuple[int, str]:
     try:
         shutil.copytree(root, tree, symlinks=True)
         gitdir = own_git(root, tree)
+        # Caches inside the copy: what a test or its tools cache (pwsh's
+        # startup profile, say) is removed with it, and runs at once, or one
+        # killed mid-write, cannot corrupt the user's own.
         p = subprocess.Popen([sys.executable, str(RUNNER), tree, *args], stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True)
+                             stderr=subprocess.STDOUT, text=True,
+                             env=dict(os.environ, XDG_CACHE_HOME=os.path.join(work, ".cache")))
         with RUNNING_LOCK:
             RUNNING.add(p)
             if STOP.is_set():

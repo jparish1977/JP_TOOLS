@@ -3,6 +3,7 @@
 import json
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -164,9 +165,16 @@ def run_psscriptanalyzer(target: str) -> dict[str, Any]:
     pwsh = _pwsh()
     if pwsh is None:
         return _pssa_missing("pwsh", "install PowerShell 7 (requirements-system.txt)")
-    result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", _PSSA_SCRIPT],
-                            capture_output=True, text=True, check=False,
-                            env={**_plain_env(), "JP_PSA_TARGET": target})
+    # A cache of its own, removed after: pwsh rewrites a startup profile in
+    # its cache directory on every run, so runs at once, or one killed
+    # mid-write, would corrupt the user's shared copy, and every pwsh after
+    # that crashes at startup. XDG_CACHE_HOME is where pwsh keeps it on
+    # Linux and macOS; Windows does not read it.
+    with tempfile.TemporaryDirectory(prefix="jp-pwsh-cache-") as cache:
+        result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", _PSSA_SCRIPT],
+                                capture_output=True, text=True, check=False,
+                                env={**_plain_env(), "JP_PSA_TARGET": target,
+                                     "XDG_CACHE_HOME": cache})
     if result.returncode == _NO_MODULE:
         return _pssa_missing("PSScriptAnalyzer", PSSA_INSTALL)
     if result.returncode == _NO_TARGET:

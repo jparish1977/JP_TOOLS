@@ -1,0 +1,10 @@
+{
+  "about": "run_psscriptanalyzer gives pwsh a cache directory of its own, so the user's shared startup profile is never written. Run: mutate-on-target.py TREE jpcheck/native_tools.py tests/test_check_powershell.py tests/mutants/jpt-pwsh-cache-on-native-tools.json",
+  "mutants": [
+    {
+      "name": "pwsh writes the user's cache, as before",
+      "edits": [["                                     \"XDG_CACHE_HOME\": cache})", "                                     })"]],
+      "target": "pwsh's cache: a directory of its own, not the user's, gone after the run"
+    }
+  ]
+}

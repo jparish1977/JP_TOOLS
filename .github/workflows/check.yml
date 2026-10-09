@@ -207,6 +207,26 @@ jobs:
           echo
           echo "Suppressions, every language, the ones check.py lets pass included:"
           python list-suppressions.py . || true
+      # Every mutant spec in tests/mutants: each test must fail when the code
+      # it pins is broken, on the check it is aimed at. A test that stopped
+      # running (a tool that crashes and reads as a skip) lets its mutants
+      # survive, so this fails too. One line per spec; a spec that is not all
+      # killed on target has its whole output printed after.
+      - name: Mutant specs
+        if: always()
+        shell: bash
+        run: |
+          out=$(mktemp -d)
+          set +e
+          MUTATE_OUT_DIR="$out" python mutate-spec.py --jobs "$(nproc)" . tests/mutants/*.json
+          rc=$?
+          for f in "$out"/*.mutate.out; do
+            case "$(tail -n 1 "$f")" in
+              *"every one killed on target"*) ;;
+              *) echo "--- $f ---"; cat "$f" ;;
+            esac
+          done
+          exit $rc
 
   js:
     name: JS (eslint, prettier)

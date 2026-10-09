@@ -13,7 +13,9 @@ WHAT A MISSING TOOL MUST DO
     No pwsh, or no PSScriptAnalyzer module, is a check that did not run
     (exit 2), naming what to install, never a pass. Those cases, and how the
     report is read, run everywhere against a fake pwsh. The real-tool cases
-    need pwsh and the module, and print SKIP without them.
+    need pwsh and the module, and print SKIP without them; a pwsh that is
+    installed but crashes fails here instead. Each pwsh run gets a cache
+    directory of its own, so a corrupted shared startup profile cannot happen.
 
     python3 tests/test_check_powershell.py
 """
@@ -111,20 +113,62 @@ def test_how_the_report_is_read() -> None:
     check("a report that is not JSON: error, never a pass", r["status"], "error")
 
 
-def real_tool() -> str | None:
-    """Why the real-tool cases cannot run here, or None when they can."""
+def test_pwsh_gets_a_cache_of_its_own() -> None:
+    """Each pwsh run has a cache directory of its own, removed afterwards, so
+    runs at once, or one killed mid-write, cannot corrupt the user's shared
+    startup profile, which makes every pwsh after it crash."""
+    with tempfile.TemporaryDirectory() as seen_dir:
+        seen = Path(seen_dir) / "seen"
+        os.environ["JP_TEST_SEEN"] = str(seen)
+        try:
+            r = fake_run("import os\nwith open(os.environ['JP_TEST_SEEN'], 'w') as fh:\n"
+                         "    fh.write(os.environ.get('XDG_CACHE_HOME', ''))\nprint('[]')\n")
+        finally:
+            del os.environ["JP_TEST_SEEN"]
+        cache = seen.read_text(encoding="utf-8") if seen.exists() else ""
+    users = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    check("pwsh's cache: a directory of its own, not the user's, gone after the run",
+          (r["status"], cache not in ("", users), bool(cache) and os.path.exists(cache)),
+          ("pass", True, False))
+
+
+def real_tool() -> tuple[str | None, str | None]:
+    """(why the real-tool cases cannot run here, why pwsh is broken). Not
+    installed is a skip; a pwsh that is installed but cannot run is a failure,
+    never a skip reading as "the module is not installed"."""
     pwsh = shutil.which("pwsh")
     if pwsh is None:
-        return "pwsh is not installed"
-    r = subprocess.run([pwsh, "-NoProfile", "-Command", "Get-Module -ListAvailable PSScriptAnalyzer"],
-                       capture_output=True, text=True, check=False)
-    return None if "PSScriptAnalyzer" in r.stdout else "the PSScriptAnalyzer module is not installed"
+        return "pwsh is not installed", None
+    with tempfile.TemporaryDirectory() as cache:
+        r = subprocess.run([pwsh, "-NoProfile", "-Command", "Get-Module -ListAvailable PSScriptAnalyzer"],
+                           capture_output=True, text=True, check=False,
+                           env=dict(os.environ, XDG_CACHE_HOME=cache))
+    if r.returncode != 0:
+        tail = (r.stderr.strip().splitlines() or ["no output"])[0]
+        return None, f"pwsh exit {r.returncode}: {tail[:200]}"
+    return (None if "PSScriptAnalyzer" in r.stdout else "the PSScriptAnalyzer module is not installed"), None
+
+
+def test_a_crashing_pwsh_is_not_a_skip() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        install(Path(tmp), "pwsh", "sys.stderr.write('Unhandled exception.\\n'); sys.exit(134)\n")
+        old = os.environ.copy()
+        os.environ.update(PATH=tmp, FAKE_LOG=str(Path(tmp) / "log"))
+        try:
+            got = real_tool()
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+    check("a pwsh that crashes: broken, not skipped", got,
+          (None, "pwsh exit 134: Unhandled exception."))
 
 
 def test_the_real_tool() -> None:
-    why = real_tool()
-    if why:
-        print(f"SKIP: the real-tool cases: {why}")
+    why, broken = real_tool()
+    check("the real tool: an installed pwsh runs", broken, None)
+    if why or broken:
+        if why:
+            print(f"SKIP: the real-tool cases: {why}")
         return
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp)

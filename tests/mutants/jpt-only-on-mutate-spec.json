@@ -8,7 +8,7 @@
     },
     {
       "name": "the names are ignored, every mutant of the spec runs",
-      "edits": [["    chosen = only or every", "    chosen = every"]],
+      "edits": [["    chosen = list(dict.fromkeys(only or every))", "    chosen = list(dict.fromkeys(every))"]],
       "target": "mutate-spec --only nine: one of its two mutants"
     },
     {

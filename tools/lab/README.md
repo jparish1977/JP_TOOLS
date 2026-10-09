@@ -27,6 +27,7 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `spool-audit-containment-fixtures.py` | can `--purge` reach outside the directory it was told about |
 | `forged-verdict-probe.py` | can a filename or symlink target forge a line in the report |
 | `run-suites.sh` | did any suite change outcome between two trees |
+| `i8-proof.sh` | does this head pass every suite and every mutant spec, with nothing skipped, on iteration8 (one i8jobs job) |
 | `test-against-ref.sh` | does a new test fail on the code before the fix |
 | `ci-job-fields.py` | what did check.py report inside a CI job, per file; exits 1 on an empty log |
 | `file-sizes.py` | how many source files pass a line threshold, and how much of each is prose |

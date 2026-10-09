@@ -385,6 +385,42 @@ def test_spec_a_sigterm_leaves_nothing() -> None:
           (143, [], ["term-wt"]))
 
 
+CACHE_TEST = """import os, sys
+with open(os.path.join(os.environ["SEEN"], "cache"), "a") as fh:
+    fh.write(os.environ.get("XDG_CACHE_HOME", "") + "\\n")
+if b"VALUE = 1" in open("t.py", "rb").read():
+    print("  ok    value is one")
+    sys.exit(0)
+print("  FAIL  value is one")
+sys.exit(1)
+"""
+
+
+def test_spec_a_copy_has_its_own_cache() -> None:
+    """Each run's XDG_CACHE_HOME is inside its own copy, so what its tools
+    cache is removed with it and never reaches the user's cache."""
+    tree, spec, env = fixture("own-cache")
+    with open(os.path.join(tree, "test.py"), "w", encoding="utf-8") as fh:
+        fh.write(CACHE_TEST)
+    with open(spec, "w", encoding="utf-8") as fh:
+        json.dump({"about": "Run: mutate-on-target.py TREE t.py test.py SPEC.",
+                   "mutants": [{"name": "two", "edits": [["VALUE = 1", "VALUE = 2"]],
+                                "target": "value is one"}]}, fh)
+    seen, outdir = os.path.join(TMP, "own-cache-seen"), os.path.join(TMP, "own-cache-out")
+    os.makedirs(seen)
+    os.makedirs(outdir)
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(RUNNER), "mutate-spec.py"),
+                        tree, spec], capture_output=True, text=True, check=False, timeout=120,
+                       env=dict(env, MUTATE_OUT_DIR=outdir, SEEN=seen))
+    with open(os.path.join(seen, "cache"), encoding="utf-8") as fh:
+        caches = fh.read().split()
+    copies = os.path.join(TMP, ".mutate-own-cache-")
+    check("a copy's cache: every run's inside its own copy, one copy each, none left",
+          (r.returncode, len(caches), all(c.startswith(copies) for c in caches),
+           len({c.split(os.sep)[-2] for c in caches}), any(os.path.exists(c) for c in caches)),
+          (0, 2, True, 2, False))
+
+
 def test_specs_with_one_file_name() -> None:
     """Two specs named code.json in different directories (a repo that mirrors
     its tests' layout in its specs has them) each get their own output file and label, carrying

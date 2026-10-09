@@ -1,0 +1,10 @@
+{
+  "about": "mutate-spec puts each run's XDG_CACHE_HOME inside its own copy, so a cache its tools write is removed with it. Run: mutate-on-target.py TREE mutate-spec.py tests/test_mutate_on_target.py tests/mutants/jpt-cache-on-mutate-spec.json",
+  "mutants": [
+    {
+      "name": "the user's cache, as before",
+      "edits": [["                             env=dict(os.environ, XDG_CACHE_HOME=os.path.join(work, \".cache\")))", "                             env=dict(os.environ))"]],
+      "target": "a copy's cache: every run's inside its own copy, one copy each, none left"
+    }
+  ]
+}
