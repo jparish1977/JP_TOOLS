@@ -212,13 +212,19 @@ jobs:
       # running (a tool that crashes and reads as a skip) lets its mutants
       # survive, so this fails too. One line per spec; a spec that is not all
       # killed on target has its whole output printed after.
+      # At most 8 runs at once: a job container sees all of iteration8's
+      # cores in nproc (32), and the runner takes 3 jobs at a time, so
+      # nproc-wide specs in each would ask for 96 runs and slow every job and
+      # every other user of the box.
       - name: Mutant specs
         if: always()
         shell: bash
         run: |
           out=$(mktemp -d)
+          jobs=$(nproc)
+          [ "$jobs" -gt 8 ] && jobs=8
           set +e
-          MUTATE_OUT_DIR="$out" python mutate-spec.py --jobs "$(nproc)" . tests/mutants/*.json
+          MUTATE_OUT_DIR="$out" python mutate-spec.py --jobs "$jobs" . tests/mutants/*.json
           rc=$?
           for f in "$out"/*.mutate.out; do
             case "$(tail -n 1 "$f")" in
