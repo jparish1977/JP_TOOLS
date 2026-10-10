@@ -129,9 +129,10 @@ def _identified_note(identified: list[Entry], purge_failed: frozenset[str]) -> l
     lines = [
         "",
         f"  {len(identified)} of these carry a print-data signature",
-        "  (PostScript, PDF or PJL), so they ARE document content by",
-        "  evidence, not a maybe. They carry no job id, so they cannot be",
-        "  targeted by job number, so `cancel` cannot reach them.",
+        "  (PostScript, PDF, PJL, PCL or raster), so they ARE document",
+        "  content by evidence, not a maybe. They carry no job id, so",
+        "  they cannot be targeted by job number, so `cancel` cannot",
+        "  reach them.",
     ]
     # A run with purge failures does not get to promise what --purge does.
     if not purge_failed:

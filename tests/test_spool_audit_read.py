@@ -350,6 +350,10 @@ def test_head_reads_a_prefix_and_never_raises() -> None:
         head = _head(f)
         check_true("and the default reads enough to recognise a format",
                    head is not None and head.startswith("%!PS-Adobe"))
+        raster = root / "page"
+        raster.write_bytes(b"RaSt" + b"m" * 63 + b"\x00" + b"\x01" * 64)
+        check("the default reaches the end of a raster MediaClass field",
+              _head(raster), "RaSt" + "m" * 63 + "\x00")
 
         empty = root / "empty"
         empty.touch()

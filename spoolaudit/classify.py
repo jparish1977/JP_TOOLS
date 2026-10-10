@@ -9,6 +9,8 @@ from spoolaudit.model import (
     CONTROL,
     DOCUMENT,
     DOCUMENT_MAGIC,
+    RASTER_MEDIA_CLASS,
+    RASTER_SYNC,
     Audit,
     Entry,
     Kind,
@@ -60,7 +62,10 @@ def identified_as_print(f: TempFile) -> bool:
     "Not recognised as harmless" is not evidence of anything, and must never
     put a file in a delete set.
     """
-    return any(f.head.startswith(m) for m in DOCUMENT_MAGIC)
+    if any(f.head.startswith(m) for m in DOCUMENT_MAGIC):
+        return True
+    return (f.head[:4] in RASTER_SYNC
+            and "\x00" in f.head[4:4 + RASTER_MEDIA_CLASS])
 
 
 def is_harmless_temp(f: TempFile, in_tempdir: bool = True) -> bool:

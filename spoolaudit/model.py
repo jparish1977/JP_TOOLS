@@ -30,11 +30,24 @@ MAX_TEMP_DEPTH = 8
 
 # Print-job formats. Content beats location: a file whose first bytes say it is
 # a document is counted even if it sits somewhere caches normally live.
-# The last eight are CUPS raster, the sync words cups/raster.h defines (v3,
-# v1, v2 and Apple, each in both byte orders): the rasterised page a filter
-# chain writes, which under tmp/.cache/ would otherwise be exempted by name.
+# The last is Apple raster (image/urf), whose files start with these 8 bytes.
 DOCUMENT_MAGIC = ("%!PS", "%PDF", "\x1b%-12345X", "\x04%!", "@PJL", "\x1b*",
-                  "RaS3", "3SaR", "RaSt", "tSaR", "RaS2", "2SaR", "UNIR", "RINU")
+                  "UNIRAST\x00")
+
+# CUPS raster, the rasterised page a filter chain writes, which under
+# tmp/.cache/ would otherwise be exempted by name. A stream starts with one of
+# the sync words cups/raster.h defines (v3, v1, v2, each in both byte orders;
+# PWG raster is v2 followed by "PwgRaster\0"), then the page header, whose
+# first field is MediaClass, a NUL-terminated string in 64 bytes. The four
+# ASCII bytes alone would count a text file that starts "RaSt...", and a count
+# here is what --purge deletes, so a sync word counts only with a NUL in the
+# 64 bytes after it. Text has none; every header libcups writes does.
+RASTER_SYNC = ("RaS3", "3SaR", "RaSt", "tSaR", "RaS2", "2SaR")
+RASTER_MEDIA_CLASS = 64
+
+# Bytes of a file read to recognise it: enough for a raster sync word and the
+# MediaClass field after it.
+HEAD_BYTES = 4 + RASTER_MEDIA_CLASS
 
 
 class Verdict(Enum):

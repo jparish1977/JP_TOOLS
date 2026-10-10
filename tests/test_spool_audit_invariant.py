@@ -48,12 +48,17 @@ from _harness import FAILURES, ROOT, run
 TOOL = ROOT / "spool-audit.py"
 
 # Independent of the tool's DOCUMENT_MAGIC on purpose.
-MAGIC = (b"%!PS", b"%PDF", b"\x1b%-12345X", b"@PJL", b"\x1b*",
-         # CUPS raster sync words, from cups/raster.h's hex values
-         (0x52615333).to_bytes(4, "big"), (0x52615333).to_bytes(4, "little"),
-         (0x52615374).to_bytes(4, "big"), (0x52615374).to_bytes(4, "little"),
-         (0x52615332).to_bytes(4, "big"), (0x52615332).to_bytes(4, "little"),
-         (0x554E4952).to_bytes(4, "big"), (0x554E4952).to_bytes(4, "little"))
+MAGIC = (b"%!PS", b"%PDF", b"\x1b%-12345X", b"@PJL", b"\x1b*", b"UNIRAST\x00")
+# CUPS raster sync words, from cups/raster.h's hex values. A raster stream
+# has the page header next, whose MediaClass is a C string in 64 bytes.
+SYNC = tuple(w.to_bytes(4, order) for w in (0x52615333, 0x52615374, 0x52615332)
+             for order in ("big", "little"))
+
+
+def _is_print(head: bytes) -> bool:
+    if any(head.startswith(m) for m in MAGIC):
+        return True
+    return head[:4] in SYNC and b"\x00" in head[4:68]
 DOCNAME = re.compile(r"^d\d+-\d+$")
 PDF = b"%PDF-1.7\n"
 PS = b"%!PS-Adobe-3.0\n"
@@ -69,13 +74,13 @@ def oracle(spool: Path) -> list[str]:
             continue
         rel = str(p.relative_to(spool))
         try:
-            head = p.open("rb").read(16)
+            head = p.open("rb").read(68)
         except OSError:
             # reason: unreadable cannot be ruled out, so it counts; the tool
             # must not claim success over something neither could read
             hits.append(rel)
             continue
-        if any(head.startswith(m) for m in MAGIC) or DOCNAME.match(p.name):
+        if _is_print(head) or DOCNAME.match(p.name):
             hits.append(rel)
     return hits
 
@@ -319,6 +324,17 @@ def test_purge_under_cache_is_evidence_driven() -> None:
                   "tmp__.cache__planted.ps": PS}) as s:
         invariant("purge under .cache is evidence-driven", s, "--purge",
                   expect=0, removed=("tmp/.cache/planted.ps",))
+
+
+def test_purge_takes_raster_and_not_text_that_looks_like_it() -> None:
+    """A raster page goes; text whose first word starts with a sync word does
+    not, under .cache/ or in tmp/ itself."""
+    with spool(**{"tmp__.cache__page": b"3SaR" + b"\x00" * 64 + b"\x01bitmap",
+                  "tmp__.cache__list.txt": b"RaStafarian playlist\n"}) as s:
+        invariant("purge raster, keep text", s, "--purge",
+                  expect=0, removed=("tmp/.cache/page",))
+    with spool(**{"tmp__notes.txt": b"UNIRONED notes, plain text\n"}) as s:
+        invariant("UNIR text is not purged", s, "--purge", expect=1)
 
 
 def test_purge_handles_a_hostile_name() -> None:

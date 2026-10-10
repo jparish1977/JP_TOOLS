@@ -20,6 +20,11 @@
       "name": "names in directory order",
       "edits": [["    return sorted(q.name for q in p.iterdir())", "    return [q.name for q in p.iterdir()]"]],
       "target": "names, sorted"
+    },
+    {
+      "name": "the old 32-byte head, too short for a raster MediaClass",
+      "edits": [["def _head(path: Path, n: int = HEAD_BYTES)", "def _head(path: Path, n: int = 32)"]],
+      "target": "the default reaches the end of a raster MediaClass field"
     }
   ]
 }

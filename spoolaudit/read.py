@@ -8,7 +8,15 @@ from collections.abc import Callable
 from pathlib import Path
 
 from spoolaudit.classify import classify_top, safe_name, temp_child_note
-from spoolaudit.model import MAX_TEMP_DEPTH, TEMP_SUBDIR, Listing, TempFile, TopEntry, Verdict
+from spoolaudit.model import (
+    HEAD_BYTES,
+    MAX_TEMP_DEPTH,
+    TEMP_SUBDIR,
+    Listing,
+    TempFile,
+    TopEntry,
+    Verdict,
+)
 
 # --- I/O boundary ----------------------------------------------------------
 # Thin wrappers over privileged operations, kept free of logic so everything
@@ -21,7 +29,7 @@ _HEAD_FLAGS = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOL
                | getattr(os, "O_CLOEXEC", 0))
 
 
-def _head(path: Path, n: int = 32) -> str | None:
+def _head(path: Path, n: int = HEAD_BYTES) -> str | None:
     """First bytes of a regular file, decoded lossily, or None when the file
     could not be read or is not a regular file. Used only to recognise known
     harmless formats such as PPDs. Never printed, never logged.

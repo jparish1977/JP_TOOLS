@@ -12,7 +12,14 @@ import sys
 
 from _harness import check, check_true, run
 from spool_audit_support import spool
-from spoolaudit.classify import classify, classify_top, is_harmless_temp, parse_entry, purgeable
+from spoolaudit.classify import (
+    classify,
+    classify_top,
+    identified_as_print,
+    is_harmless_temp,
+    parse_entry,
+    purgeable,
+)
 from spoolaudit.model import TEMP_SUBDIR, Kind, Listing, TempFile, TopDecision, TopEntry, Verdict
 from spoolaudit.render import render
 
@@ -263,12 +270,27 @@ def test_xdg_cache_under_tempdir_is_not_content() -> None:
     pdf = TempFile(name=".cache/x", size=64, head="%PDF-1.7")
     check_true("PDF too", not is_harmless_temp(pdf))
 
-    # CUPS raster, the page a filter chain has already rasterised, in every
-    # sync word cups/raster.h defines. Under .cache/ the name rule would
-    # exempt it, so only its own bytes can count it.
-    for sync in ("RaS3", "3SaR", "RaSt", "tSaR", "RaS2", "2SaR", "UNIR", "RINU"):
-        raster = TempFile(name=".cache/page", size=4096, head=sync + "\x00PwgRaster")
+    # Raster, the page a filter chain has already rasterised. Under .cache/
+    # the name rule would exempt it, so only its own bytes can count it. The
+    # heads are what cupsfilter writes: CUPS raster is a sync word then a
+    # MediaClass field of NULs, PWG is "RaS2PwgRaster\0", Apple "UNIRAST\0".
+    for sync in ("RaS3", "3SaR", "RaSt", "tSaR", "RaS2", "2SaR"):
+        raster = TempFile(name=".cache/page", size=4096, head=sync + "\x00" * 64)
         check_true(f"CUPS raster {sync} under .cache is counted", not is_harmless_temp(raster))
+    pwg = TempFile(name=".cache/page", size=4096, head="RaS2PwgRaster\x00" + "\x00" * 54)
+    check_true("PWG raster under .cache is counted", not is_harmless_temp(pwg))
+    urf = TempFile(name=".cache/page", size=4096, head="UNIRAST\x00\x00\x00\x00\x00\x18\x01")
+    check_true("Apple raster under .cache is counted", not is_harmless_temp(urf))
+
+    # Four ASCII bytes are not raster: a count is what --purge deletes, so
+    # text that happens to start with a sync word stays out of it.
+    text = TempFile(name=".cache/list.txt", size=21, head="RaStafarian playlist\n")
+    check_true("text starting with a sync word is not raster", is_harmless_temp(text))
+    notes = TempFile(name="notes.txt", size=27, head="UNIRONED notes, plain text\n")
+    check_true("text starting UNIR is not Apple raster", not identified_as_print(notes))
+    long_class = TempFile(name=".cache/page", size=4096, head="RaSt" + "A" * 64 + "\x00")
+    check_true("a sync word with no NUL in the 64 bytes after it is not raster",
+               is_harmless_temp(long_class))
 
     # The exemption is for a .cache DIRECTORY component, not any path that
     # happens to contain the string. This decoy carries no document magic, so
