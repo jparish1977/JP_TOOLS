@@ -615,8 +615,10 @@ def ratchet_cases(tmp: Path) -> None:
     committed = git(repo, "show", "HEAD:quality-baseline.json").stdout
     check("  and the commit carries the lowered count",
           '"errors": 1' in committed and committed != recorded, committed)
-    check("  leaving nothing unstaged", git(repo, "status", "--porcelain").stdout == "",
-          git(repo, "status", "--porcelain").stdout)
+    # Tracked files only: under CI's coverage, each check.py subprocess leaves
+    # a .coverage.* data file in its cwd, which is untracked and not the hook's.
+    tracked = git(repo, "status", "--porcelain", "--untracked-files=no").stdout
+    check("  leaving nothing unstaged", tracked == "", tracked)
 
     r = commit_file(repo, "fresh.py", CLEAN_PY)
     check("a clean new file commits and leaves the baseline alone",
