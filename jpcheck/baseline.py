@@ -61,7 +61,8 @@ BASELINE_VERSION = 1
 # the runner finds it: PATH's eslint read while the gate loads node_modules'
 # would match or differ by accident. Every tool the registry can run is in
 # _VERSION_CMD, _NODE_PACKAGES or _INTERNAL_CHECKS, and
-# tests/test_check_baseline.py holds that for the next tool added.
+# tests/test_baseline_versions.py (test_every_tool_has_a_version_source)
+# holds that for the next tool added.
 
 
 def _on_path(*names: str) -> list[str] | None:
