@@ -85,7 +85,8 @@ so the check is our own, and small.
 
 ## Where it stands
 
-`spool-audit.py` with `spoolaudit/`: **97%** with branch coverage (569
+`spool-audit.py` with `spoolaudit/`: **97%** with branch coverage (581
 statements, 15 uncovered, all error branches in `spoolaudit/read.py` and
-`spoolaudit/purge.py`). One exemption remains: `_list_names`, a one-line,
-branch-free listing wrapper.
+`spoolaudit/purge.py`), measured with `tools/lab/coverage-like-ci.sh`. No
+exemptions remain: `_list_names`, the last, is tested against a real
+directory.

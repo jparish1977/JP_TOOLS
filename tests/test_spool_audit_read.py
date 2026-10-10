@@ -12,13 +12,14 @@ import os
 import pathlib
 import sys
 import tempfile
+import threading
 from collections.abc import Callable
 from unittest import mock
 
 from _harness import check, check_true, run
 from spoolaudit.classify import classify, temp_child_note
 from spoolaudit.model import Listing, TempFile, Verdict
-from spoolaudit.read import _head, _walk_temp, read_spool
+from spoolaudit.read import _head, _list_names, _walk_temp, read_spool
 from spoolaudit.render import render
 
 
@@ -366,6 +367,63 @@ def test_head_reads_a_prefix_and_never_raises() -> None:
         binary.write_bytes(b"\xff\xfe\x00garbage")
         check_true("undecodable bytes are replaced, not raised",
                    isinstance(_head(binary), str))
+
+
+def test_head_reads_only_a_regular_file() -> None:
+    """`_head` protects itself rather than relying on its callers' lstat.
+
+    A caller that hands it a fifo must not hang the run (as root, on a live
+    machine, silently); a fifo or a directory is not "read nothing"; and a
+    file swapped for a symlink after the caller's lstat is not followed. A
+    hang is caught by running the read in a thread with a deadline.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        target = root / "doc.ps"
+        target.write_bytes(b"%!PS-Adobe-3.0\n")
+        link = root / "link"
+        link.symlink_to(target)
+        check("a symlink to a document is not followed", _head(link), None)
+
+        sub = root / "sub"
+        sub.mkdir()
+        check("a directory gives None", _head(sub), None)
+
+        # A regular file that opens and then fails to read (EIO on a bad
+        # disk) is "could not read" too, never a crash of the whole listing.
+        with mock.patch("spoolaudit.read.os.read", side_effect=OSError(5, "I/O error")):
+            check("a read error after the open gives None", _head(target), None)
+
+        if not hasattr(os, "mkfifo"):
+            print("  note: no mkfifo on this platform, fifo checks skipped")
+            return
+        fifo = root / "fifo"
+        os.mkfifo(fifo)
+        got: list[str | None] = []
+        reader = threading.Thread(target=lambda: got.append(_head(fifo)), daemon=True)
+        reader.start()
+        reader.join(5)
+        check_true("a fifo with no writer does not hang the read", not reader.is_alive())
+        check("a fifo gives None, not ''", got, [None])
+
+
+def test_list_names_is_sorted_and_raises() -> None:
+    """The real lister, not a fake: names only, sorted, so the listing is the
+    same on every run, and a listing failure reaches read_spool as the error
+    it is, which maps it to a verdict."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        for name in ("d00085-001", "c00085", "tmp", "Z-upper"):
+            (root / name).touch()
+        check("names, sorted", _list_names(root),
+              ["Z-upper", "c00085", "d00085-001", "tmp"])
+        try:
+            _list_names(root / "not-there")
+            check_true("a missing directory raises", False)
+        except FileNotFoundError:
+            check_true("a missing directory raises", True)
+        check("and read_spool calls it MISSING",
+              read_spool(str(root / "not-there")).verdict, Verdict.MISSING)
 
 
 if __name__ == "__main__":

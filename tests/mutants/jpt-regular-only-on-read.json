@@ -1,0 +1,25 @@
+{
+  "about": "_head reads only a regular file, without following a symlink or hanging on a fifo, and _list_names returns the names sorted. Run: mutate-on-target.py TREE spoolaudit/read.py tests/test_spool_audit_read.py tests/mutants/jpt-regular-only-on-read.json",
+  "mutants": [
+    {
+      "name": "opened without O_NONBLOCK, so a fifo blocks the open",
+      "edits": [["_HEAD_FLAGS = (os.O_RDONLY | getattr(os, \"O_NONBLOCK\", 0) | getattr(os, \"O_NOFOLLOW\", 0)", "_HEAD_FLAGS = (os.O_RDONLY | getattr(os, \"O_NOFOLLOW\", 0)"]],
+      "target": "a fifo with no writer does not hang the read"
+    },
+    {
+      "name": "no type check, so a fifo reads as empty",
+      "edits": [["        if not stat.S_ISREG(os.fstat(fd).st_mode):\n            return None\n", ""]],
+      "target": "a fifo gives None, not ''"
+    },
+    {
+      "name": "opened without O_NOFOLLOW, so a symlink is followed",
+      "edits": [["| getattr(os, \"O_NOFOLLOW\", 0)\n", "\n"]],
+      "target": "a symlink to a document is not followed"
+    },
+    {
+      "name": "names in directory order",
+      "edits": [["    return sorted(q.name for q in p.iterdir())", "    return [q.name for q in p.iterdir()]"]],
+      "target": "names, sorted"
+    }
+  ]
+}

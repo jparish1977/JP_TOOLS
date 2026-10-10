@@ -263,6 +263,13 @@ def test_xdg_cache_under_tempdir_is_not_content() -> None:
     pdf = TempFile(name=".cache/x", size=64, head="%PDF-1.7")
     check_true("PDF too", not is_harmless_temp(pdf))
 
+    # CUPS raster, the page a filter chain has already rasterised, in every
+    # sync word cups/raster.h defines. Under .cache/ the name rule would
+    # exempt it, so only its own bytes can count it.
+    for sync in ("RaS3", "3SaR", "RaSt", "tSaR", "RaS2", "2SaR", "UNIR", "RINU"):
+        raster = TempFile(name=".cache/page", size=4096, head=sync + "\x00PwgRaster")
+        check_true(f"CUPS raster {sync} under .cache is counted", not is_harmless_temp(raster))
+
     # The exemption is for a .cache DIRECTORY component, not any path that
     # happens to contain the string. This decoy carries no document magic, so
     # only the anchoring can save it -- an unanchored match would wrongly
@@ -270,9 +277,9 @@ def test_xdg_cache_under_tempdir_is_not_content() -> None:
     decoy = TempFile(name="job.cache-backup/blob", size=4096, head="\x00\x01binary")
     check_true("substring in a name is not a cache dir", not is_harmless_temp(decoy))
 
-    # A file whose content could NOT be read: _head() returns "" on any OSError,
-    # so a mode-000 file has a real size and an empty header. Location must not
-    # excuse it.
+    # A real size with an empty header. The reader lists an unreadable file
+    # as unexamined and never builds one of these, but if one arrives,
+    # location must not excuse it.
     unread = TempFile(name=".cache/deep/leak.ps", size=4096, head="")
     check_true("unreadable content under .cache is NOT harmless", not is_harmless_temp(unread))
     unread_ppd = TempFile(name="ppd", size=10917, head="")

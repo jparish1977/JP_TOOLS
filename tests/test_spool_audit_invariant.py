@@ -48,7 +48,12 @@ from _harness import FAILURES, ROOT, run
 TOOL = ROOT / "spool-audit.py"
 
 # Independent of the tool's DOCUMENT_MAGIC on purpose.
-MAGIC = (b"%!PS", b"%PDF", b"\x1b%-12345X", b"@PJL", b"\x1b*")
+MAGIC = (b"%!PS", b"%PDF", b"\x1b%-12345X", b"@PJL", b"\x1b*",
+         # CUPS raster sync words, from cups/raster.h's hex values
+         (0x52615333).to_bytes(4, "big"), (0x52615333).to_bytes(4, "little"),
+         (0x52615374).to_bytes(4, "big"), (0x52615374).to_bytes(4, "little"),
+         (0x52615332).to_bytes(4, "big"), (0x52615332).to_bytes(4, "little"),
+         (0x554E4952).to_bytes(4, "big"), (0x554E4952).to_bytes(4, "little"))
 DOCNAME = re.compile(r"^d\d+-\d+$")
 PDF = b"%PDF-1.7\n"
 PS = b"%!PS-Adobe-3.0\n"
@@ -206,6 +211,10 @@ def test_tempdir_and_nested_cache() -> None:
         invariant("tempdir report", s, expect=1)
     with spool(**{"tmp__.cache__leak.ps": PS}) as s:
         invariant("cache report", s, expect=1)
+    # A rasterised page under .cache/, where the name rule exempts anything
+    # its content does not identify.
+    with spool(**{"tmp__.cache__page": b"RaS2" + b"PwgRaster\x00" * 8}) as s:
+        invariant("cache raster report", s, expect=1)
 
 
 def test_an_unreadable_file_is_unexamined() -> None:

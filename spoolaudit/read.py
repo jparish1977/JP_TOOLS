@@ -15,21 +15,41 @@ from spoolaudit.model import MAX_TEMP_DEPTH, TEMP_SUBDIR, Listing, TempFile, Top
 # above stays testable without a printer, a spool or root.
 
 
+# POSIX open flags, 0 where the platform has none, so the module imports
+# everywhere; CUPS spools only exist where they are real.
+_HEAD_FLAGS = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+               | getattr(os, "O_CLOEXEC", 0))
+
+
 def _head(path: Path, n: int = 32) -> str | None:
-    """First bytes of a file, decoded lossily, or None when the file could
-    not be read. Used only to recognise known harmless formats such as PPDs.
-    Never printed, never logged.
+    """First bytes of a regular file, decoded lossily, or None when the file
+    could not be read or is not a regular file. Used only to recognise known
+    harmless formats such as PPDs. Never printed, never logged.
 
     None, not "": "could not read" and "read nothing" are different facts. A
     caller has to decide what an unreadable file is, and both callers list it
-    as unexamined rather than classify it."""
+    as unexamined rather than classify it.
+
+    The guards are here, not in the callers: opened O_NONBLOCK so a fifo
+    cannot hang the run, O_NOFOLLOW so a file swapped for a symlink after the
+    caller's lstat is not followed, and fstat'd so only a regular file is
+    read. A fifo opens fine non-blocking and reads as empty, which would be
+    "read nothing" for something that was never read."""
     try:
-        with path.open("rb") as fh:
-            return fh.read(n).decode("utf-8", "replace")
+        fd = os.open(path, _HEAD_FLAGS)
     except OSError:
         # reason: None IS the recorded outcome, "could not read", and both
         # callers list such a file as unexamined rather than classify it
         return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        return os.read(fd, n).decode("utf-8", "replace")
+    except OSError:
+        # reason: as above; a read that fails is "could not read"
+        return None
+    finally:
+        os.close(fd)
 
 
 def _readlink(path: Path) -> str:
@@ -118,7 +138,8 @@ def _walk_child(f: Path, label: str, name: str, found: list[TempFile],
         unexamined.append(note)
 
 
-def _list_names(p: Path) -> list[str]:  # pragma: no cover
+def _list_names(p: Path) -> list[str]:
+    """The names in directory P, sorted so the listing is the same on every run."""
     return sorted(q.name for q in p.iterdir())
 
 

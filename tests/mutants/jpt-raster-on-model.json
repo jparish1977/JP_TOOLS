@@ -1,0 +1,15 @@
+{
+  "about": "CUPS raster is identified as print data by its sync word, so a raster under tmp/.cache/ is counted rather than exempted by name. Run: mutate-on-target.py TREE spoolaudit/model.py tests/test_spool_audit_classify.py tests/mutants/jpt-raster-on-model.json",
+  "mutants": [
+    {
+      "name": "no raster sync words",
+      "edits": [["\"\\x1b*\",\n                  \"RaS3\", \"3SaR\", \"RaSt\", \"tSaR\", \"RaS2\", \"2SaR\", \"UNIR\", \"RINU\")", "\"\\x1b*\")"]],
+      "target": "CUPS raster RaS2 under .cache is counted"
+    },
+    {
+      "name": "big-endian sync words only",
+      "edits": [["\"RaS3\", \"3SaR\", \"RaSt\", \"tSaR\", \"RaS2\", \"2SaR\", \"UNIR\", \"RINU\")", "\"RaS3\", \"RaSt\", \"RaS2\", \"UNIR\")"]],
+      "target": "CUPS raster 2SaR under .cache is counted"
+    }
+  ]
+}

@@ -30,7 +30,11 @@ MAX_TEMP_DEPTH = 8
 
 # Print-job formats. Content beats location: a file whose first bytes say it is
 # a document is counted even if it sits somewhere caches normally live.
-DOCUMENT_MAGIC = ("%!PS", "%PDF", "\x1b%-12345X", "\x04%!", "@PJL", "\x1b*")
+# The last eight are CUPS raster, the sync words cups/raster.h defines (v3,
+# v1, v2 and Apple, each in both byte orders): the rasterised page a filter
+# chain writes, which under tmp/.cache/ would otherwise be exempted by name.
+DOCUMENT_MAGIC = ("%!PS", "%PDF", "\x1b%-12345X", "\x04%!", "@PJL", "\x1b*",
+                  "RaS3", "3SaR", "RaSt", "tSaR", "RaS2", "2SaR", "UNIR", "RINU")
 
 
 class Verdict(Enum):
