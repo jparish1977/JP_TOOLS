@@ -1,17 +1,30 @@
 """Recording a per-file baseline and comparing a run against it."""
 
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import jpexit
-from jpcheck.common import _VERDICTS, _rel, _repo_root
+from jpcheck.common import (
+    _VERDICTS,
+    _node_bin,
+    _php_bin,
+    _php_cmd,
+    _rel,
+    _repo_root,
+    node_module_roots,
+)
 from jpcheck.files import _collect_files, _detect_lang, _drop_ignored, ignored_by, load_ignores
+from jpcheck.native_tools import _pwsh
+from jpcheck.php_tools import _composer_cmd
 from jpcheck.registry import AUDIT_TOOLS, DEFAULT_TOOLS, _run_tools, _summarize
 
 # ── baseline ──────────────────────────────────────────────────────────────────
@@ -44,29 +57,104 @@ from jpcheck.registry import AUDIT_TOOLS, DEFAULT_TOOLS, _run_tools, _summarize
 
 BASELINE_VERSION = 1
 
-_VERSION_CMD = {
-    "ruff":      ["ruff", "--version"],
-    "mypy":      ["mypy", "--version"],
-    "eslint":    ["eslint", "--version"],
-    "stylelint": ["stylelint", "--version"],
-    "prettier":  ["prettier", "--version"],
-    "cppcheck":  ["cppcheck", "--version"],
+# A version is read from the copy of the tool its runner runs, found the way
+# the runner finds it: PATH's eslint read while the gate loads node_modules'
+# would match or differ by accident. Every tool the registry can run is in
+# _VERSION_CMD, _NODE_PACKAGES or _INTERNAL_CHECKS, and
+# tests/test_check_baseline.py holds that for the next tool added.
+
+
+def _on_path(*names: str) -> list[str] | None:
+    exe = next((p for p in map(shutil.which, names) if p), None)
+    return [exe, "--version"] if exe else None
+
+
+def _through_php(name: str) -> list[str] | None:
+    """A Composer tool, run as `php BIN` the way its runner runs it."""
+    php, bin_ = _php_cmd(), _php_bin(name)
+    return [php, bin_, "--version"] if php and bin_ else None
+
+
+def _composer() -> list[str] | None:
+    """composer, invoked the way run_composer_audit invokes it."""
+    cmd = _composer_cmd(_php_cmd(), shutil.which("composer") or shutil.which("composer.bat"))
+    return [*cmd[:-2], "--version"] if cmd else None
+
+
+def _prettier() -> list[str] | None:
+    exe = _node_bin("prettier")
+    return [exe, "--version"] if exe else None
+
+
+# The highest installed version, which is the one Import-Module loads.
+_PSSA_VERSION = ("(Get-Module -ListAvailable PSScriptAnalyzer | Sort-Object Version "
+                 "-Descending | Select-Object -First 1).Version.ToString()")
+
+
+def _pssa() -> list[str] | None:
+    pwsh = _pwsh()
+    return [pwsh, "-NoProfile", "-NonInteractive", "-Command", _PSSA_VERSION] if pwsh else None
+
+
+_VERSION_CMD: dict[str, Callable[[], list[str] | None]] = {
+    "ruff":             lambda: _on_path("ruff"),
+    "mypy":             lambda: _on_path("mypy"),
+    "cppcheck":         lambda: _on_path("cppcheck"),
+    "shellcheck":       lambda: _on_path("shellcheck"),
+    "pip-audit":        lambda: _on_path("pip-audit", "pip-audit.exe"),
+    "npm-audit":        lambda: _on_path("npm", "npm.cmd"),
+    "prettier":         _prettier,
+    "phpstan":          lambda: _through_php("phpstan"),
+    "phpcs":            lambda: _through_php("phpcs"),
+    "rector":           lambda: _through_php("rector"),
+    "composer-audit":   _composer,
+    "psscriptanalyzer": _pssa,
 }
+
+# eslint and stylelint run inside JP_TOOLS' node runners, which import the
+# package from the first tool root's node_modules that has it. That copy's
+# package.json says its version; there is no binary to ask.
+_NODE_PACKAGES = ("eslint", "stylelint")
+
+# JP_TOOLS' own checks, not separate tools: their version is this checkout's.
+# "" is recorded for them, so their counts are always compared.
+_INTERNAL_CHECKS = frozenset({"directive-reason", "no-cover", "noqa", "smells",
+                              "suppress-reason"})
+
 _VERSION_RE = re.compile(r"\d+\.\d+(?:\.\d+)?")
+
+
+def _node_package_version(name: str) -> str:
+    for modules in node_module_roots():
+        manifest = modules / name / "package.json"
+        if manifest.is_file():
+            try:
+                version = json.loads(manifest.read_text(encoding="utf-8")).get("version")
+            except (OSError, ValueError, AttributeError):
+                # reason: "" is "cannot tell", which never refuses a comparison
+                return ""
+            return version if isinstance(version, str) else ""
+    return ""
 
 
 def _tool_version(name: str) -> str:
     """Best-effort version string, or "" meaning "cannot tell"."""
-    cmd = _VERSION_CMD.get(name)
-    if not cmd or not shutil.which(cmd[0]):
+    if name in _NODE_PACKAGES:
+        return _node_package_version(name)
+    resolve = _VERSION_CMD.get(name)
+    cmd = resolve() if resolve else None
+    if not cmd:
         return ""
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True,
-                           check=False, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        # reason: no version to print; the tool's row shows without one, and
-        # the tool's own run reports what is wrong with it
-        return ""
+    # A cache of its own, as run_psscriptanalyzer has: a pwsh killed mid-write
+    # corrupts a shared cache, and every pwsh after it crashes at startup.
+    with tempfile.TemporaryDirectory(prefix="jp-version-cache-") as cache:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30,
+                               env={**os.environ, "XDG_CACHE_HOME": cache})
+        except (OSError, subprocess.SubprocessError):
+            # reason: no version to print; the tool's row shows without one, and
+            # the tool's own run reports what is wrong with it
+            return ""
     m = _VERSION_RE.search(f"{r.stdout} {r.stderr}")
     return m.group(0) if m else ""
 

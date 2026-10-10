@@ -1,0 +1,30 @@
+{
+  "about": "A baseline records a version for every tool, read from the copy the gate runs. Run: mutate-on-target.py TREE jpcheck/baseline.py tests/test_baseline_versions.py tests/mutants/jpt-versions-on-baseline.json",
+  "mutants": [
+    {
+      "name": "no version command for shellcheck, as before",
+      "edits": [["    \"shellcheck\":       lambda: _on_path(\"shellcheck\"),\n", ""]],
+      "target": "shellcheck's version is recorded"
+    },
+    {
+      "name": "an internal check left out of every source",
+      "edits": [["_INTERNAL_CHECKS = frozenset({\"directive-reason\", \"no-cover\", \"noqa\", \"smells\",", "_INTERNAL_CHECKS = frozenset({\"directive-reason\", \"no-cover\", \"noqa\","]],
+      "target": "every registry tool has a version source"
+    },
+    {
+      "name": "eslint asked on PATH, where the gate does not load it from",
+      "edits": [["    if name in _NODE_PACKAGES:\n        return _node_package_version(name)\n", ""]],
+      "target": "eslint's version is the first root's copy"
+    },
+    {
+      "name": "the last tool root's copy instead of the first",
+      "edits": [["    for modules in node_module_roots():", "    for modules in reversed(node_module_roots()):"]],
+      "target": "eslint's version is the first root's copy"
+    },
+    {
+      "name": "a PHP tool run directly, not through php",
+      "edits": [["    return [php, bin_, \"--version\"] if php and bin_ else None", "    return [bin_, \"--version\"] if php and bin_ else None"]],
+      "target": "phpstan's version, via php"
+    }
+  ]
+}
