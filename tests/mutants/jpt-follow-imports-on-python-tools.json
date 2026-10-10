@@ -1,0 +1,20 @@
+{
+  "about": "check.py's mypy reports only the target's own errors, with imports still analysed. Run: mutate-on-target.py TREE jpcheck/python_tools.py tests/test_check_mypy_scope.py tests/mutants/jpt-follow-imports-on-python-tools.json",
+  "mutants": [
+    {
+      "name": "imports followed normally, as before #208",
+      "edits": [["\"--ignore-missing-imports\", \"--follow-imports=silent\",", "\"--ignore-missing-imports\","]],
+      "target": "a.py's check carries none of lib.py's"
+    },
+    {
+      "name": "the same mutation, seen by the baseline",
+      "edits": [["\"--ignore-missing-imports\", \"--follow-imports=silent\",", "\"--ignore-missing-imports\","]],
+      "target": "lib.py is recorded at its own count, not once per importer"
+    },
+    {
+      "name": "imports skipped, not silenced: their types stop resolving",
+      "edits": [["\"--follow-imports=silent\"", "\"--follow-imports=skip\""]],
+      "target": "a wrong argument to lib.h is reported in a.py"
+    }
+  ]
+}

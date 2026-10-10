@@ -129,8 +129,14 @@ def run_mypy(target: str) -> dict[str, Any]:
     result = subprocess.run(
         # --show-traceback: a crash then ends on its exception, which the
         # note carries, rather than on a hint to rerun with this flag.
+        # --follow-imports=silent: imported modules are still analysed, so
+        # their types resolve, but only TARGET's own errors are reported.
+        # Followed normally, a file's check carried every error in every
+        # module it imports, and a per-file baseline counted an imported
+        # module's errors once more for each file importing it.
         ["mypy", "--show-error-codes", "--no-error-summary", "--show-traceback",
-         "--ignore-missing-imports", *_mypy_config_args(target), target],
+         "--ignore-missing-imports", "--follow-imports=silent",
+         *_mypy_config_args(target), target],
         capture_output=True, text=True, check=False, env=_plain_env(),
     )
     issues = []
