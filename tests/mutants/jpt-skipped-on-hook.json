@@ -28,7 +28,7 @@
     },
     {
       "name": "a failing file not failing the commit",
-      "edits": [["        if [ \"$file_rc\" -ne 0 ]; then\n            rc=1", "        if false; then\n            rc=1"]],
+      "edits": [["        elif [ \"$file_rc\" -ne 0 ]; then\n            rc=1", "        elif false; then\n            rc=1"]],
       "target": "a staged file with errors is blocked"
     },
     {
