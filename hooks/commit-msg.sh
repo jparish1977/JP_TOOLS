@@ -15,6 +15,8 @@
 # below it `git commit -v` puts the staged diff, which git cuts off before
 # the message is saved, so a change to a file that mentions such a link is
 # not refused for it.
+#
+# Also reads a LINT-DEBT-OK line for files the pre-commit hook held; see below.
 
 TEMPLATE_API=1
 
@@ -56,4 +58,46 @@ if [ -n "$found" ]; then
     echo "====================================="
     exit 1
 fi
+
+# LINT-DEBT-OK. hooks/pre-commit.sh holds a file that is no worse but fixed
+# none of its recorded findings, and records the hold (see its LINT-DEBT-OK
+# note): the index's tree, the baseline blob staged before it ran, the paths.
+# A line 'LINT-DEBT-OK: <reason>' in the message lets them through, and the
+# reason stays in the history. Without one the commit is refused and the
+# baseline put back as it was staged, as a failing pre-commit does. A hold
+# for another tree was left by a commit that never reached its message.
+refuse_lint_debt() {
+    top=$(git rev-parse --show-toplevel)
+    if [ -n "$prior" ]; then
+        git cat-file blob "$prior" > "$top/quality-baseline.json" \
+            && git add -- "$top/quality-baseline.json"
+    fi
+    echo ""
+    echo "====================================="
+    echo " JP_TOOLS: commit REFUSED: these changed and fixed none of their"
+    echo " recorded findings, and the message gives no reason:"
+    echo "$held" | sed 's/^/   /'
+    echo " Fix: fix at least one finding in each, or add a line to the message:"
+    echo "   LINT-DEBT-OK: <why this change cannot fix one>"
+    echo "====================================="
+    exit 1
+}
+
+check_lint_debt() {
+    debt_file=$(git rev-parse --git-path jp-tools-lint-debt)
+    [ -f "$debt_file" ] || return 0
+    held_tree=$(head -n 1 "$debt_file")
+    prior=$(head -n 2 "$debt_file" | tail -n 1)
+    held=$(tail -n +3 "$debt_file")
+    rm -f "$debt_file"
+    [ "$held_tree" = "$(git write-tree 2>/dev/null)" ] || return 0
+    if sed '/^. -\{24\} >8 -\{24\}$/,$d' "$msg_file" | grep -q -E '^LINT-DEBT-OK:[[:space:]]*[^[:space:]]'; then
+        echo "JP_TOOLS: LINT-DEBT-OK in the message; committed without fixing a finding in:"
+        echo "$held" | sed 's/^/   /'
+        return 0
+    fi
+    refuse_lint_debt
+}
+
+check_lint_debt
 exit 0

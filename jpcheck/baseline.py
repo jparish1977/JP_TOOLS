@@ -477,7 +477,8 @@ def _touched_verdict(source: str, doc: dict[str, Any], path: str, now: dict[str,
         print(f"baseline: {path} was changed and still has {after} of its {before} "
               f"recorded finding(s). A commit that changes a file with findings "
               f"fixes at least one (mypy and phpstan are not counted: other "
-              f"files move them).", file=sys.stderr)
+              f"files move them). If it cannot this time, say why in the "
+              f"commit message: a line 'LINT-DEBT-OK: <reason>'.", file=sys.stderr)
         return False
     lowered = _lock_in(source, doc, path, now, skip)
     if lowered:
@@ -492,6 +493,7 @@ def compare_baseline(checks: list[dict[str, Any]], target: str,
     """jpexit.OK no worse, FINDINGS worse, NOT_RUN cannot compare.
 
     With TOUCHED, TARGET is one file a commit changes: see _CROSS_FILE.
+    NOT_LOWERED when it is no worse but fixed none of its recorded findings.
     """
     doc = _read_baseline(source, mode)
     if doc is None:
@@ -510,5 +512,5 @@ def compare_baseline(checks: list[dict[str, Any]], target: str,
     if worse:
         return jpexit.FINDINGS
     if touched and not _touched_verdict(source, doc, _rel(target, root), now, skip):
-        return jpexit.FINDINGS
+        return jpexit.NOT_LOWERED
     return jpexit.OK

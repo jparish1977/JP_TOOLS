@@ -17,7 +17,9 @@
 #
 # Two limits, stated because neither is visible when it bites:
 #   - It checks the file in the WORKING TREE, not the staged blob. With a
-#     partial stage (git add -p) those differ.
+#     partial stage (git add -p) those differ. Where quality-baseline.json
+#     exists the count is also written into it, so there a file with unstaged
+#     changes as well is refused rather than measured.
 #   - The file list is split on newlines, so a filename containing a literal
 #     newline is not handled. Spaces are.
 
@@ -121,8 +123,10 @@ if isinstance(doc, dict) and isinstance(doc.get("skipped"), str):
     print(doc["skipped"].split(":")[0])'
 }
 
-# Each staged file through check.py; sets rc (1 on any failure), checked, and
-# skipped, one reason per line for each file check.py skipped.
+# Each staged file through check.py; sets rc (1 on any failure), checked,
+# skipped, one reason per line for each file check.py skipped, and held, one
+# path per line for each file check.py found no worse but not lowered
+# (jpexit.NOT_LOWERED, 3), which the commit message decides: see LINT-DEBT-OK below.
 #
 # Split on newlines only, so paths with spaces survive.
 #
@@ -137,8 +141,22 @@ check_staged() {
     rc=0
     checked=0
     skipped=""
+    held=""
     for f in $STAGED; do
         [ -f "$f" ] || continue     # staged then removed from the tree
+        # The working copy is what is measured, and with a baseline its count
+        # is written back and committed: with unstaged changes as well, that
+        # would be a count the committed file does not have.
+        if [ -f "$BASELINE_FILE" ] && ! git diff --quiet -- "$f"; then
+            echo ""
+            echo " REFUSED $f: it has unstaged changes as well as staged ones. The gate"
+            echo " measures the working copy and writes its count into quality-baseline.json,"
+            echo " so it would commit a count this commit's $f does not have."
+            echo " Fix: stage all of it, or set the rest aside first:"
+            echo "   git stash push --keep-index && git commit ... && git stash pop"
+            rc=1
+            continue
+        fi
         # --skip-unsupported: a staged README or JSON file exits 0 rather than 2,
         # and says it was skipped, which is how it is told from a checked file.
         if [ -f "$BASELINE_FILE" ]; then
@@ -149,7 +167,10 @@ check_staged() {
         file_rc=$?
         printf '%s\n' "$out"
         why=""
-        if [ "$file_rc" -ne 0 ]; then
+        if [ "$file_rc" -eq 3 ]; then
+            held="$held$f
+"
+        elif [ "$file_rc" -ne 0 ]; then
             rc=1
         else
             why=$(skip_reason "$out")
@@ -186,16 +207,62 @@ skipped_summary() {
 # afterwards is only what check.py wrote, never someone's own unstaged edit.
 baseline_must_be_clean() {
     [ -f "$BASELINE_FILE" ] || return 0
-    if ! git diff --quiet -- "$BASELINE_FILE"; then
-        echo ""
-        echo "====================================="
-        echo " Pre-commit check REFUSED: quality-baseline.json has unstaged changes."
-        echo " The gate writes lowered counts into it and stages it with the commit,"
-        echo " which would commit your unstaged edit too."
-        echo " Fix: stage it (git add quality-baseline.json) or discard the edit."
-        echo "====================================="
-        exit 1
+    git diff --quiet -- "$BASELINE_FILE" && return 0
+    # `git commit <path>` commits from a temporary index, so the baseline the
+    # hook lowered and staged reaches the commit but not the index: the index
+    # keeps the older copy while the working copy equals HEAD's. Staging it
+    # stages no change to the commit, and puts the index back in step.
+    if git diff --quiet HEAD -- "$BASELINE_FILE" 2>/dev/null; then
+        git add -- "$BASELINE_FILE" || broken "could not stage $BASELINE_FILE to bring the index back to HEAD's copy." \
+            "stage it by hand: git add quality-baseline.json"
+        echo "JP_TOOLS: the index held an older quality-baseline.json than HEAD (a \`git commit <path>\` leaves it so); staged HEAD's copy." >&2
+        return 0
     fi
+    echo ""
+    echo "====================================="
+    echo " Pre-commit check REFUSED: quality-baseline.json has unstaged changes."
+    echo " The gate writes lowered counts into it and stages it with the commit,"
+    echo " which would commit your unstaged edit too."
+    echo " Fix: stage it (git add quality-baseline.json) or discard the edit."
+    echo "====================================="
+    exit 1
+}
+
+# LINT-DEBT-OK. A file that is no worse but fixed none of its recorded
+# findings is held rather than failed, and the commit message decides:
+# hooks/commit-msg.sh lets it through on a line 'LINT-DEBT-OK: <reason>', so
+# the reason is kept in the history, and refuses the commit otherwise. Only
+# this rule is waived; a file that got worse fails here and no line clears it.
+# The hold is DEBT_FILE: the tree of the index being committed, the baseline
+# blob as it was staged before this run (for commit-msg to put back), then the
+# held paths. The tree ties it to this commit, so a hold left by a commit that
+# never reached its message is not read by a later one.
+commit_msg_hook_installed() {
+    hooks=$(git config --get core.hooksPath) || hooks=$(git rev-parse --git-path hooks)
+    grep -q "^# JP_TOOLS commit-msg hook" "$hooks/commit-msg" 2>/dev/null
+}
+
+hold_needs_commit_msg() {
+    [ -n "$held" ] && [ "$rc" -eq 0 ] || return 0
+    commit_msg_hook_installed && return 0
+    echo ""
+    echo " REFUSED: fixed none of their recorded findings:"
+    printf '%s' "$held" | sed 's/^/   /'
+    echo " A 'LINT-DEBT-OK: <reason>' line in the message would let them through,"
+    echo " but this repo has no JP_TOOLS commit-msg hook to read it."
+    echo " Fix: python3 \"$TOOLS_DIR/install-hooks.py\" ."
+    rc=1
+}
+
+write_hold() {
+    [ -n "$held" ] && [ "$rc" -eq 0 ] || return 0
+    tree=$(git write-tree) || broken "git write-tree failed, so the LINT-DEBT-OK hold cannot be recorded." \
+        "run git write-tree by hand to see why."
+    { echo "$tree"; echo "$PRIOR_BASELINE"; printf '%s' "$held"; } > "$DEBT_FILE" \
+        || broken "could not write $DEBT_FILE." "check that the git directory is writable."
+    echo "JP_TOOLS: no worse, but fixed none of their recorded findings:"
+    printf '%s' "$held" | sed 's/^/   /'
+    echo "  The commit goes through only with a line 'LINT-DEBT-OK: <reason>' in its message."
 }
 
 # A passing commit carries the lowered baseline with it, so the gain is kept.
@@ -208,6 +275,12 @@ settle_baseline() {
         git add -- "$BASELINE_FILE" || broken "could not stage the lowered $BASELINE_FILE." \
             "stage it by hand: git add quality-baseline.json"
         echo "JP_TOOLS: quality-baseline.json lowered, and staged with this commit."
+        case "${GIT_INDEX_FILE##*/}" in
+            next-index-*)
+                echo "  This is \`git commit <path>\`: git does not carry it into your index, so"
+                echo "  \`git status\` shows it changed there until your next commit, which stages"
+                echo "  HEAD's copy (or run: git add quality-baseline.json)." ;;
+        esac
     else
         git checkout -- "$BASELINE_FILE"
     fi
@@ -229,12 +302,14 @@ verdict() {
     # was not checked, and is never counted as if it had been.
     total=$((checked + $(printf '%s' "$skipped" | wc -l)))
     summary=$(skipped_summary)
+    state=clean
+    [ -n "$held" ] && state="none worse, $(printf '%s' "$held" | wc -l | tr -d ' ') held for LINT-DEBT-OK"
     if [ "$checked" -eq 0 ] && [ -n "$summary" ]; then
         echo "JP_TOOLS: 0 of $total staged file(s) checked, nothing here to check ($summary)."
     elif [ -n "$summary" ]; then
-        echo "JP_TOOLS: $checked of $total staged file(s) checked, clean ($summary)."
+        echo "JP_TOOLS: $checked of $total staged file(s) checked, $state ($summary)."
     else
-        echo "JP_TOOLS: $checked of $total staged file(s) checked, clean."
+        echo "JP_TOOLS: $checked of $total staged file(s) checked, $state."
     fi
     exit 0
 }
@@ -247,11 +322,16 @@ choose_python
 # fails loudly instead of reporting scope difference as regression.
 BASELINE_FILE="$(git rev-parse --show-toplevel)/quality-baseline.json"
 CHECK_PY="$TOOLS_DIR/check.py"
+DEBT_FILE=$(git rev-parse --git-path jp-tools-lint-debt)
+rm -f "$DEBT_FILE"
 check_flags
 check_emdashes
 STAGED=$(git diff --cached --name-only --diff-filter=ACM)
 [ -z "$STAGED" ] && exit 0
 baseline_must_be_clean
+PRIOR_BASELINE=$(git rev-parse -q --verify ":quality-baseline.json" 2>/dev/null)
 check_staged
+hold_needs_commit_msg
 settle_baseline
+write_hold
 verdict

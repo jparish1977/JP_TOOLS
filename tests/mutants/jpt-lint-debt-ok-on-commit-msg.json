@@ -1,0 +1,25 @@
+{
+  "about": "A file the pre-commit hook held goes through only on a non-comment line 'LINT-DEBT-OK: <reason>', and a refusal puts the baseline back as it was staged. Run: mutate-on-target.py TREE hooks/commit-msg.sh tests/test_install_hooks.py tests/mutants/jpt-lint-debt-ok-on-commit-msg.json",
+  "mutants": [
+    {
+      "name": "an empty reason accepted",
+      "edits": [["grep -q -E '^LINT-DEBT-OK:[[:space:]]*[^[:space:]]'", "grep -q -E '^LINT-DEBT-OK:'"]],
+      "target": "an empty reason: refused, naming the file and the line that would pass"
+    },
+    {
+      "name": "a commented-out line accepted",
+      "edits": [["grep -q -E '^LINT-DEBT-OK:[[:space:]]*[^[:space:]]'", "grep -q -E 'LINT-DEBT-OK:[[:space:]]*[^[:space:]]'"]],
+      "target": "a commented-out line: refused, naming the file and the line that would pass"
+    },
+    {
+      "name": "the baseline not put back on a refusal",
+      "edits": [["    if [ -n \"$prior\" ]; then", "    if false; then"]],
+      "target": "  and the baseline is put back as staged, b.py's drop undone"
+    },
+    {
+      "name": "the hold ignored",
+      "edits": [["    [ -f \"$debt_file\" ] || return 0", "    return 0"]],
+      "target": "no line: refused, naming the file and the line that would pass"
+    }
+  ]
+}

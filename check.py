@@ -73,7 +73,8 @@ def _parser() -> argparse.ArgumentParser:
                              "must have fewer findings than recorded, until it "
                              "has none, and a lowered count is written back to "
                              "the baseline. mypy and phpstan are not counted "
-                             "either way. The pre-commit hook passes it.")
+                             "either way. Exit 3 when no worse but none fixed. "
+                             "The pre-commit hook passes it.")
     parser.add_argument("--record-baseline", metavar="FILE",
                         help="Measure per-file and write a baseline to FILE. "
                              "Per-file because that is what the gate does; see "

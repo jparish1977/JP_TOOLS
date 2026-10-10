@@ -1,5 +1,5 @@
 {
-  "about": "With quality-baseline.json the hook passes --touched, stages a lowered baseline with the commit, restores it when the commit fails, and refuses an unstaged edit to it. Run: mutate-on-target.py TREE hooks/pre-commit.sh tests/test_install_hooks.py tests/mutants/jpt-ratchet-on-hook.json",
+  "about": "With quality-baseline.json the hook passes --touched, stages a lowered baseline with the commit, restores it when the commit fails, refuses an unstaged edit to it, puts back the index a `git commit <path>` leaves, refuses a file staged in part, and holds a not-lowered file for the message only when a commit-msg hook can read it. Run: mutate-on-target.py TREE hooks/pre-commit.sh tests/test_install_hooks.py tests/mutants/jpt-ratchet-on-hook.json",
   "mutants": [
     {
       "name": "--touched not passed",
@@ -8,13 +8,38 @@
     },
     {
       "name": "the lowered baseline not staged",
-      "edits": [["        git add -- \"$BASELINE_FILE\" || broken", "        true || broken"]],
+      "edits": [["        git add -- \"$BASELINE_FILE\" || broken \"could not stage the lowered", "        true || broken \"could not stage the lowered"]],
       "target": "  and the commit carries the lowered count"
     },
     {
       "name": "an unstaged baseline edit not refused",
-      "edits": [["baseline_must_be_clean\ncheck_staged", "check_staged"]],
+      "edits": [["baseline_must_be_clean\nPRIOR_BASELINE", "PRIOR_BASELINE"]],
       "target": "an unstaged edit to the baseline is refused, not swept into the commit"
+    },
+    {
+      "name": "the index a path commit leaves is not put back",
+      "edits": [["    if git diff --quiet HEAD -- \"$BASELINE_FILE\" 2>/dev/null; then", "    if false; then"]],
+      "target": "the next commit is not refused over the index git left behind"
+    },
+    {
+      "name": "a file staged in part is measured on its working copy",
+      "edits": [["        if [ -f \"$BASELINE_FILE\" ] && ! git diff --quiet -- \"$f\"; then", "        if false; then"]],
+      "target": "a file staged in part is refused, not measured on its working copy"
+    },
+    {
+      "name": "not lowered fails like worse, so no message can pass it",
+      "edits": [["        if [ \"$file_rc\" -eq 3 ]; then", "        if false; then"]],
+      "target": "with a reason: committed, and said"
+    },
+    {
+      "name": "a hold with no commit-msg hook to read it",
+      "edits": [["    commit_msg_hook_installed && return 0\n", "    return 0\n"]],
+      "target": "with no commit-msg hook to read the line, a held file is refused"
+    },
+    {
+      "name": "the hold never written",
+      "edits": [["printf '%s' \"$held\"; } > \"$DEBT_FILE\"", "printf '%s' \"$held\"; } > /dev/null"]],
+      "target": "no line: refused, naming the file and the line that would pass"
     }
   ]
 }

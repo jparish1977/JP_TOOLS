@@ -18,6 +18,7 @@ From `jpexit`:
 | 0 | `OK` | every check ran (or was `skip`), and no finding is an error |
 | 1 | `FINDINGS` | at least one finding with `severity` `error` that is not `exempt` |
 | 2 | `NOT_RUN` | nothing was measured, or a check did not run (see the statuses) |
+| 3 | `NOT_LOWERED` | `--baseline --touched` only: no worse, but the file had recorded findings and fixed none |
 
 Findings win over not-run: a run with an error AND a check that did not run
 exits 1, and the check that did not run is still named on stderr. Warnings
@@ -29,10 +30,13 @@ could not be used (unreadable, or recorded in another mode). A check whose
 status is not a verdict, `skip` included, or whose tool version changed since
 the baseline, is left out of the comparison and named on stderr.
 
-With `--touched` as well (one file, the one a commit changes), the file also
-exits 1 when it had recorded findings and its count did not drop, and on exit
-0 any lowered count is written back to FILE. Both leave out `mypy` and
-`phpstan`, whose per-file counts move when other files change.
+With `--touched` as well (one file, the one a commit changes), the file exits
+3 when it had recorded findings and its count did not drop (1 still wins when
+it got worse), and on exit 0 any lowered count is written back to FILE. Both
+leave out `mypy` and `phpstan`, whose per-file counts move when other files
+change. The pre-commit hook reads 3 apart from 1: a `LINT-DEBT-OK: <reason>`
+line in the commit message lets that file through, and nothing lets a worse
+one through.
 
 ## Check statuses
 

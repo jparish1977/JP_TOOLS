@@ -4,7 +4,12 @@
     {
       "name": "an unchanged count passes, as before #35",
       "edits": [["    return (before, after) if before > 0 and after >= before else None", "    return None"]],
-      "target": "with --touched an unchanged count is refused"
+      "target": "with --touched an unchanged count is refused, as NOT_LOWERED (3)"
+    },
+    {
+      "name": "not lowered reads as worse",
+      "edits": [["        return jpexit.NOT_LOWERED", "        return jpexit.FINDINGS"]],
+      "target": "with --touched an unchanged count is refused, as NOT_LOWERED (3)"
     },
     {
       "name": "cross-file tools counted",

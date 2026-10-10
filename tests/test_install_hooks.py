@@ -35,6 +35,7 @@ Skips rather than fails when the environment cannot support it:
     python tests/test_install_hooks.py
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -634,6 +635,118 @@ def ratchet_cases(tmp: Path) -> None:
           (repo / "quality-baseline.json").read_text(encoding="utf-8") == edited)
 
 
+DEBT = "import os\nimport sys\n\nx = 1\n"   # two F401s
+
+
+def debt_repo(tmp: Path) -> Path:
+    """A hooked repo whose baseline records two F401s in each of a.py and b.py."""
+    repo, _ = build_repo(tmp)
+    for name in ("a.py", "b.py"):
+        (repo / name).write_text(DEBT, encoding="utf-8")
+    subprocess.run([sys.executable, str(ROOT / "check.py"), ".", "--record-baseline",
+                    "quality-baseline.json"], cwd=repo, capture_output=True, check=False)
+    git(repo, "add", "--", "a.py", "b.py", "quality-baseline.json")
+    git(repo, "commit", "-q", "--no-verify", "-m", "debt, and its baseline")
+    return repo
+
+
+def baseline_errors(repo: Path, rev: str, path: str) -> int:
+    doc = json.loads(git(repo, "show", f"{rev}:quality-baseline.json").stdout)
+    return int(doc["files"][path]["ruff"]["errors"])
+
+
+def tracked_changes(repo: Path) -> str:
+    # Tracked files only: CI's coverage leaves untracked .coverage.* files.
+    return git(repo, "status", "--porcelain", "--untracked-files=no").stdout
+
+
+def lint_debt_ok_cases(tmp: Path) -> None:
+    """A file that changed and fixed none of its findings goes through only
+    with a reason in the message; a worse file never does."""
+    print("\nLINT-DEBT-OK:")
+    repo = debt_repo(tmp)
+    recorded = (repo / "quality-baseline.json").read_text(encoding="utf-8")
+    (repo / "a.py").write_text(DEBT.replace("x = 1", "x = 2"), encoding="utf-8")
+    git(repo, "add", "--", "a.py")
+    for label, msg in (("no line", "touch a"),
+                       ("an empty reason", "touch a\n\nLINT-DEBT-OK:"),
+                       ("a commented-out line", "touch a\n\n# LINT-DEBT-OK: no")):
+        r = git(repo, "commit", "-m", msg)
+        out = r.stdout + r.stderr
+        check(f"{label}: refused, naming the file and the line that would pass",
+              r.returncode != 0 and "a.py" in out and "LINT-DEBT-OK: <why" in out, out)
+    check("  and the baseline is as staged",
+          (repo / "quality-baseline.json").read_text(encoding="utf-8") == recorded
+          and git(repo, "diff", "--quiet", "--", "quality-baseline.json").returncode == 0)
+
+    r = git(repo, "commit", "-m", "touch a\n\nLINT-DEBT-OK: hotfix, the cleanup is #12")
+    out = r.stdout + r.stderr
+    check("with a reason: committed, and said", r.returncode == 0
+          and "held for LINT-DEBT-OK" in out and "LINT-DEBT-OK in the message" in out, out)
+    kept = baseline_errors(repo, "HEAD", "a.py")
+    check("  keeping the count", kept == 2, str(kept))
+
+    # One file held and one lowered: a refusal puts the lowered one back too.
+    (repo / "a.py").write_text(DEBT.replace("x = 1", "x = 3"), encoding="utf-8")
+    (repo / "b.py").write_text("import os\n\nx = 1\n", encoding="utf-8")
+    git(repo, "add", "--", "a.py", "b.py")
+    r = git(repo, "commit", "-m", "a held, b fixed")
+    check("one held, one lowered, no line: refused", r.returncode != 0, r.stdout + r.stderr)
+    check("  and the baseline is put back as staged, b.py's drop undone",
+          (repo / "quality-baseline.json").read_text(encoding="utf-8") == recorded
+          and git(repo, "diff", "--quiet", "--", "quality-baseline.json").returncode == 0)
+    git(repo, "reset", "-q", "--hard")
+
+    (repo / "a.py").write_text(DEBT + "import json\n", encoding="utf-8")
+    git(repo, "add", "--", "a.py")
+    r = git(repo, "commit", "-m", "worse\n\nLINT-DEBT-OK: no line clears this")
+    check("a file that got worse is refused, whatever the message says",
+          r.returncode != 0 and "LINT-DEBT-OK in the message" not in r.stdout + r.stderr,
+          r.stdout + r.stderr)
+    git(repo, "reset", "-q", "--hard")
+
+    (repo / ".git" / "hooks" / "commit-msg").unlink()
+    (repo / "a.py").write_text(DEBT.replace("x = 1", "x = 4"), encoding="utf-8")
+    git(repo, "add", "--", "a.py")
+    r = git(repo, "commit", "-m", "touch\n\nLINT-DEBT-OK: no hook to read me")
+    check("with no commit-msg hook to read the line, a held file is refused",
+          r.returncode != 0 and "no JP_TOOLS commit-msg hook" in r.stdout + r.stderr,
+          r.stdout + r.stderr)
+
+
+def ratchet_index_cases(tmp: Path) -> None:
+    """What a commit records is what its own tree has: `git commit <path>` and
+    a partial stage."""
+    print("\nThe ratchet and the index:")
+    repo = debt_repo(tmp)
+    (repo / "a.py").write_text("import os\n\nx = 1\n", encoding="utf-8")
+    r = git(repo, "commit", "-m", "fix one, by path", "a.py")
+    check("`git commit <path>` with a fix commits the lowered count",
+          r.returncode == 0 and baseline_errors(repo, "HEAD", "a.py") == 1, r.stdout + r.stderr)
+    check("  and says the index will show it changed", "git commit <path>" in r.stdout + r.stderr,
+          r.stdout + r.stderr)
+    r = commit_file(repo, "fresh.py", CLEAN_PY)
+    check("the next commit is not refused over the index git left behind",
+          r.returncode == 0, r.stdout + r.stderr)
+    kept = baseline_errors(repo, "HEAD", "a.py")
+    check("  and the gain is still there", kept == 1, str(kept))
+    left = tracked_changes(repo)
+    check("  and nothing tracked is left changed", left == "", left)
+
+    # Staged: a comment only. Unstaged: a fix. The hook measures the working copy.
+    (repo / "b.py").write_text("# note\n" + DEBT, encoding="utf-8")
+    git(repo, "add", "--", "b.py")
+    (repo / "b.py").write_text("# note\nimport os\n\nx = 1\n", encoding="utf-8")
+    r = git(repo, "commit", "-m", "partial\n\nLINT-DEBT-OK: even with a reason")
+    check("a file staged in part is refused, not measured on its working copy",
+          r.returncode != 0 and "unstaged changes as well" in r.stdout + r.stderr,
+          r.stdout + r.stderr)
+    kept = baseline_errors(repo, "HEAD", "b.py")
+    check("  and HEAD's baseline is unchanged", kept == 2, str(kept))
+    check("  and so is the staged one",
+          git(repo, "diff", "--quiet", "--cached", "--", "quality-baseline.json").returncode == 0)
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
@@ -711,6 +824,10 @@ def main() -> int:
         skipped_count_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:
         ratchet_cases(Path(td))
+    with tempfile.TemporaryDirectory() as td:
+        lint_debt_ok_cases(Path(td))
+    with tempfile.TemporaryDirectory() as td:
+        ratchet_index_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:
         commit_msg_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:

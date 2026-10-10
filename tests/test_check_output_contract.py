@@ -36,7 +36,7 @@ from pathlib import Path
 from _harness import ROOT, check, check_true, run
 from jpcheck.common import _NOT_RUN, _RAN, _VERDICTS
 from jpcheck.registry import _exit_code
-from jpexit import FINDINGS, NOT_RUN, OK
+from jpexit import FINDINGS, NOT_LOWERED, NOT_RUN, OK
 
 DOC = ROOT / "docs" / "check-output.md"
 CLASS_ROW = re.compile(r"^\| `([a-z_]+)` \| (verdict|ran|not run) \|", re.M)
@@ -71,7 +71,8 @@ def test_every_status_the_code_writes_is_documented() -> None:
 
 def test_the_exit_table_is_jpexit() -> None:
     rows = {int(code): name for code, name in EXIT_ROW.findall(DOC.read_text(encoding="utf-8"))}
-    check("the page's exit codes are jpexit's", rows, {OK: "OK", FINDINGS: "FINDINGS", NOT_RUN: "NOT_RUN"})
+    check("the page's exit codes are jpexit's", rows,
+          {OK: "OK", FINDINGS: "FINDINGS", NOT_RUN: "NOT_RUN", NOT_LOWERED: "NOT_LOWERED"})
 
 
 def exit_for(statuses: list[str], errors: int = 0) -> int:

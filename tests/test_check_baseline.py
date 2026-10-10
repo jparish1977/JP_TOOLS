@@ -192,10 +192,14 @@ def git_test_touched_must_lower_and_keeps_the_gain() -> None:
         check("CONTROL: without --touched an unchanged count passes",
               check_py("dirty.py", "--baseline", str(base), cwd=r).returncode, 0)
         p = check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r)
-        check("with --touched an unchanged count is refused", p.returncode, 1)
+        check("with --touched an unchanged count is refused, as NOT_LOWERED (3)", p.returncode, 3)
         check_true("  naming the file and both numbers",
                    f"dirty.py was changed and still has {n} of its {n}" in p.stderr)
+        check_true("  and the escape", "LINT-DEBT-OK: <reason>" in p.stderr)
         check("  and the baseline is not written", base.read_text(encoding="utf-8"), recorded)
+        (r / "dirty.py").write_text(DIRTY + "import json\n", encoding="utf-8")
+        check("a count that grows is still FINDINGS (1), which no message lets through",
+              check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r).returncode, 1)
 
         (r / "dirty.py").write_text("import os\nx = 1\n", encoding="utf-8")
         p = check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r)
@@ -205,7 +209,7 @@ def git_test_touched_must_lower_and_keeps_the_gain() -> None:
         check_true("  and the lower count is written back", 0 < files["dirty.py"]["ruff"]["errors"] < n)
         check_true("  and said", "lowered in base.json" in p.stdout)
         check("the same count again is refused: each change fixes one",
-              check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r).returncode, 1)
+              check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r).returncode, 3)
 
         written = base.read_text(encoding="utf-8")
         check("a clean file passes", check_py("clean.py", "--baseline", str(base), "--touched",
