@@ -1,0 +1,20 @@
+{
+  "about": "With quality-baseline.json the hook passes --touched, stages a lowered baseline with the commit, restores it when the commit fails, and refuses an unstaged edit to it. Run: mutate-on-target.py TREE hooks/pre-commit.sh tests/test_install_hooks.py tests/mutants/jpt-ratchet-on-hook.json",
+  "mutants": [
+    {
+      "name": "--touched not passed",
+      "edits": [["--baseline \"$BASELINE_FILE\" --touched --pretty", "--baseline \"$BASELINE_FILE\" --pretty"]],
+      "target": "changing a file with findings and fixing none is refused"
+    },
+    {
+      "name": "the lowered baseline not staged",
+      "edits": [["        git add -- \"$BASELINE_FILE\" || broken", "        true || broken"]],
+      "target": "  and the commit carries the lowered count"
+    },
+    {
+      "name": "an unstaged baseline edit not refused",
+      "edits": [["baseline_must_be_clean\ncheck_staged", "check_staged"]],
+      "target": "an unstaged edit to the baseline is refused, not swept into the commit"
+    }
+  ]
+}

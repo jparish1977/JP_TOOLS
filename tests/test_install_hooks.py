@@ -586,6 +586,52 @@ def skipped_count_cases(tmp: Path) -> None:
         check(f"{label}: {verdict}", got == verdict, got)
 
 
+def ratchet_cases(tmp: Path) -> None:
+    """With quality-baseline.json, a commit that changes a file with findings
+    must fix at least one, and the lowered count goes into the same commit."""
+    print("\nThe baseline ratchet (--touched):")
+    repo, _ = build_repo(tmp)
+    debt = "import os\nimport sys\n\nx = 1\n"   # two F401s
+    (repo / "debt.py").write_text(debt, encoding="utf-8")
+    subprocess.run([sys.executable, str(ROOT / "check.py"), ".", "--record-baseline",
+                    "quality-baseline.json"], cwd=repo, capture_output=True, check=False)
+    git(repo, "add", "--", "debt.py", "quality-baseline.json")
+    git(repo, "commit", "-q", "--no-verify", "-m", "debt, and its baseline")
+    recorded = (repo / "quality-baseline.json").read_text(encoding="utf-8")
+    check("CONTROL: the baseline records debt.py", '"debt.py"' in recorded, recorded)
+
+    r = commit_file(repo, "debt.py", debt.replace("x = 1", "x = 2"))
+    out = r.stdout + r.stderr
+    check("changing a file with findings and fixing none is refused",
+          r.returncode != 0 and "still has 2 of its 2" in out, out)
+    check("  and leaves the baseline as staged",
+          git(repo, "diff", "--quiet", "--", "quality-baseline.json").returncode == 0
+          and (repo / "quality-baseline.json").read_text(encoding="utf-8") == recorded)
+
+    r = commit_file(repo, "debt.py", "import os\n\nx = 2\n")
+    out = r.stdout + r.stderr
+    check("fixing one commits", r.returncode == 0, out)
+    check("  and says the baseline was lowered and staged", "lowered, and staged" in out, out)
+    committed = git(repo, "show", "HEAD:quality-baseline.json").stdout
+    check("  and the commit carries the lowered count",
+          '"errors": 1' in committed and committed != recorded, committed)
+    check("  leaving nothing unstaged", git(repo, "status", "--porcelain").stdout == "",
+          git(repo, "status", "--porcelain").stdout)
+
+    r = commit_file(repo, "fresh.py", CLEAN_PY)
+    check("a clean new file commits and leaves the baseline alone",
+          r.returncode == 0 and "lowered" not in r.stdout + r.stderr, r.stdout + r.stderr)
+
+    edited = (repo / "quality-baseline.json").read_text(encoding="utf-8") + "\n"
+    (repo / "quality-baseline.json").write_text(edited, encoding="utf-8")
+    r = commit_file(repo, "fresh2.py", CLEAN_PY)
+    out = r.stdout + r.stderr
+    check("an unstaged edit to the baseline is refused, not swept into the commit",
+          r.returncode != 0 and "unstaged changes" in out, out)
+    check("  and the edit is left as it was",
+          (repo / "quality-baseline.json").read_text(encoding="utf-8") == edited)
+
+
 def main() -> int:
     if not shutil.which("git"):
         print("SKIP: git not found")
@@ -661,6 +707,8 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as td:
         skipped_count_cases(Path(td))
+    with tempfile.TemporaryDirectory() as td:
+        ratchet_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:
         commit_msg_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:

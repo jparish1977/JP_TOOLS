@@ -1,0 +1,25 @@
+{
+  "about": "check.py --touched: a changed file with findings must lower its own count, mypy and phpstan are never counted, and a lowered count is written back. Run: mutate-on-target.py TREE jpcheck/baseline.py tests/test_check_baseline.py tests/mutants/jpt-touched-on-baseline.json",
+  "mutants": [
+    {
+      "name": "an unchanged count passes, as before #35",
+      "edits": [["    return (before, after) if before > 0 and after >= before else None", "    return None"]],
+      "target": "with --touched an unchanged count is refused"
+    },
+    {
+      "name": "cross-file tools counted",
+      "edits": [["    return sorted(tools - skip - _CROSS_FILE)", "    return sorted(tools - skip)"]],
+      "target": "a file whose only findings are mypy's is not required to drop"
+    },
+    {
+      "name": "a tool that cannot be compared still counted",
+      "edits": [["    return sorted(tools - skip - _CROSS_FILE)", "    return sorted(tools - _CROSS_FILE)"]],
+      "target": "a tool that cannot be compared is not counted either"
+    },
+    {
+      "name": "the gain is not written back",
+      "edits": [["        if after < before:\n            was.setdefault", "        if False:\n            was.setdefault"]],
+      "target": "  and the lower count is written back"
+    }
+  ]
+}

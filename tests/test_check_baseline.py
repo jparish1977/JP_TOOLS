@@ -178,6 +178,62 @@ def git_test_an_unreadable_baseline_is_not_an_absent_one() -> None:
               check_py("dirty.py", "--record-baseline", str(alien), cwd=r).returncode, 2)
 
 
+def git_test_touched_must_lower_and_keeps_the_gain() -> None:
+    """--touched: a changed file with findings must leave with fewer, and a
+    lower count is written back, so the next change starts from it."""
+    with repo() as r:
+        base = r / "base.json"
+        check_py(".", "--record-baseline", str(base), cwd=r)
+        recorded = base.read_text(encoding="utf-8")
+        files = _doc(base).get("files")
+        assert isinstance(files, dict)
+        n = files["dirty.py"]["ruff"]["errors"]
+        (r / "dirty.py").write_text(DIRTY + "z = 3\n", encoding="utf-8")
+        check("CONTROL: without --touched an unchanged count passes",
+              check_py("dirty.py", "--baseline", str(base), cwd=r).returncode, 0)
+        p = check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r)
+        check("with --touched an unchanged count is refused", p.returncode, 1)
+        check_true("  naming the file and both numbers",
+                   f"dirty.py was changed and still has {n} of its {n}" in p.stderr)
+        check("  and the baseline is not written", base.read_text(encoding="utf-8"), recorded)
+
+        (r / "dirty.py").write_text("import os\nx = 1\n", encoding="utf-8")
+        p = check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r)
+        check("one fixed passes", p.returncode, 0)
+        files = _doc(base).get("files")
+        assert isinstance(files, dict)
+        check_true("  and the lower count is written back", 0 < files["dirty.py"]["ruff"]["errors"] < n)
+        check_true("  and said", "lowered in base.json" in p.stdout)
+        check("the same count again is refused: each change fixes one",
+              check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r).returncode, 1)
+
+        written = base.read_text(encoding="utf-8")
+        check("a clean file passes", check_py("clean.py", "--baseline", str(base), "--touched",
+                                              cwd=r).returncode, 0)
+        check("  and writes nothing", base.read_text(encoding="utf-8"), written)
+        check("--touched on a directory refuses",
+              check_py(".", "--lang", "python", "--baseline", str(base), "--touched",
+                       cwd=r).returncode, 2)
+
+
+def git_test_touched_never_counts_cross_file_tools() -> None:
+    """mypy and phpstan counts move when other files change: never required
+    to drop, never written back."""
+    from jpcheck import baseline
+    was = {"a.py": {"mypy": {"errors": 4, "warnings": 0}, "ruff": {"errors": 0, "warnings": 0}}}
+    check("a file whose only findings are mypy's is not required to drop",
+          baseline._not_reduced("a.py", was, was, set()), None)
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "b.json"
+        doc: dict[str, object] = {"files": json.loads(json.dumps(was))}
+        now = {"a.py": {"mypy": {"errors": 1, "warnings": 0}}}
+        check("a mypy drop is not locked in", baseline._lock_in(str(src), doc, "a.py", now, set()), [])
+        check("  and nothing is written", src.exists(), False)
+    was2 = {"a.py": {"ruff": {"errors": 3, "warnings": 0}}}
+    check("a tool that cannot be compared is not counted either",
+          baseline._not_reduced("a.py", was2, was2, {"ruff"}), None)
+
+
 def git_test_no_baseline_behaves_as_before() -> None:
     with repo() as r:
         check("dirty file with no --baseline still exits 1", check_py("dirty.py", cwd=r).returncode, 1)

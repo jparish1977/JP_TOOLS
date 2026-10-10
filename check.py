@@ -68,6 +68,12 @@ def _parser() -> argparse.ArgumentParser:
                              "where a file got WORSE, instead of failing on any "
                              "finding at all. Refuses if the baseline was "
                              "recorded in a different mode.")
+    parser.add_argument("--touched", action="store_true",
+                        help="With --baseline, on one file a commit changes: it "
+                             "must have fewer findings than recorded, until it "
+                             "has none, and a lowered count is written back to "
+                             "the baseline. mypy and phpstan are not counted "
+                             "either way. The pre-commit hook passes it.")
     parser.add_argument("--record-baseline", metavar="FILE",
                         help="Measure per-file and write a baseline to FILE. "
                              "Per-file because that is what the gate does; see "
@@ -151,7 +157,8 @@ def main() -> None:
     print(json.dumps(output, indent=2 if args.pretty else None))
     # With a baseline, the verdict replaces the compare-against-zero one.
     if args.baseline:
-        sys.exit(compare_baseline(output["checks"], target, args.baseline, mode))
+        sys.exit(compare_baseline(output["checks"], target, args.baseline, mode,
+                                  touched=args.touched))
     sys.exit(_exit_code(output["summary"], output["checks"]))
 
 

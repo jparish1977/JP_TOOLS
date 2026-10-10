@@ -29,6 +29,11 @@ could not be used (unreadable, or recorded in another mode). A check whose
 status is not a verdict, `skip` included, or whose tool version changed since
 the baseline, is left out of the comparison and named on stderr.
 
+With `--touched` as well (one file, the one a commit changes), the file also
+exits 1 when it had recorded findings and its count did not drop, and on exit
+0 any lowered count is written back to FILE. Both leave out `mypy` and
+`phpstan`, whose per-file counts move when other files change.
+
 ## Check statuses
 
 Every check in `checks` has a `status`, one of:

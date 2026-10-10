@@ -60,7 +60,7 @@ tools_git() {
 check_flags() {
     HELP=$("$PY" "$CHECK_PY" --help 2>/dev/null)
     NEED="--skip-unsupported"
-    [ -f "$BASELINE_FILE" ] && NEED="--skip-unsupported --baseline"
+    [ -f "$BASELINE_FILE" ] && NEED="--skip-unsupported --baseline --touched"
     MISSING=""
     for flag in $NEED; do
         case "$HELP" in
@@ -142,7 +142,7 @@ check_staged() {
         # --skip-unsupported: a staged README or JSON file exits 0 rather than 2,
         # and says it was skipped, which is how it is told from a checked file.
         if [ -f "$BASELINE_FILE" ]; then
-            out=$("$PY" "$CHECK_PY" "$f" --baseline "$BASELINE_FILE" --pretty --skip-unsupported)
+            out=$("$PY" "$CHECK_PY" "$f" --baseline "$BASELINE_FILE" --touched --pretty --skip-unsupported)
         else
             out=$("$PY" "$CHECK_PY" "$f" --pretty --skip-unsupported)
         fi
@@ -179,6 +179,38 @@ skipped_summary() {
         printf '%s %s, ' "$count" "$why"
     done)
     echo "$n skipped: ${kinds%, }"
+}
+
+# check.py --touched writes a lowered count back to the baseline. The
+# baseline must match the index before the run, so what the hook stages
+# afterwards is only what check.py wrote, never someone's own unstaged edit.
+baseline_must_be_clean() {
+    [ -f "$BASELINE_FILE" ] || return 0
+    if ! git diff --quiet -- "$BASELINE_FILE"; then
+        echo ""
+        echo "====================================="
+        echo " Pre-commit check REFUSED: quality-baseline.json has unstaged changes."
+        echo " The gate writes lowered counts into it and stages it with the commit,"
+        echo " which would commit your unstaged edit too."
+        echo " Fix: stage it (git add quality-baseline.json) or discard the edit."
+        echo "====================================="
+        exit 1
+    fi
+}
+
+# A passing commit carries the lowered baseline with it, so the gain is kept.
+# A failing one puts the file back as it was staged: the counts were lowered
+# for a commit that is not happening.
+settle_baseline() {
+    [ -f "$BASELINE_FILE" ] || return 0
+    git diff --quiet -- "$BASELINE_FILE" && return 0
+    if [ "$rc" -eq 0 ]; then
+        git add -- "$BASELINE_FILE" || broken "could not stage the lowered $BASELINE_FILE." \
+            "stage it by hand: git add quality-baseline.json"
+        echo "JP_TOOLS: quality-baseline.json lowered, and staged with this commit."
+    else
+        git checkout -- "$BASELINE_FILE"
+    fi
 }
 
 # The verdict. Say so on success too: a gate that only speaks when it fails
@@ -219,5 +251,7 @@ check_flags
 check_emdashes
 STAGED=$(git diff --cached --name-only --diff-filter=ACM)
 [ -z "$STAGED" ] && exit 0
+baseline_must_be_clean
 check_staged
+settle_baseline
 verdict

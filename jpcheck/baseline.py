@@ -416,17 +416,99 @@ def _report_comparison(source: str, skipped: list[tuple[str, str]], deltas: list
             print(f"  {path}  {tool}  {before} -> {after}", file=sys.stderr)
 
 
+# TOUCHED. A file a commit changes must leave with fewer findings than it
+# came with, until it has none, and a count that drops is written back, so
+# the gain cannot be spent later. Both halves count only the tools that
+# judge a file on its own. mypy and phpstan resolve across files, so this
+# file's count from them moves when OTHER files change: requiring it to drop
+# would fail a commit over code it did not touch, and locking in a drop that
+# another file caused would fail a later one when that file changes back.
+_CROSS_FILE = frozenset({"mypy", "phpstan"})
+
+
+def _own_tools(path: str, now: dict[str, Any], was: dict[str, Any],
+               skip: set[str]) -> list[str]:
+    tools = set(now.get(path, {})) | set(was.get(path, {}))
+    return sorted(tools - skip - _CROSS_FILE)
+
+
+def _errors(counts: dict[str, Any], path: str, tool: str) -> int:
+    return int(counts.get(path, {}).get(tool, {}).get("errors", 0))
+
+
+def _not_reduced(path: str, now: dict[str, Any], was: dict[str, Any],
+                 skip: set[str]) -> tuple[int, int] | None:
+    """(before, after) when a touched file had findings and kept as many; else None."""
+    tools = _own_tools(path, now, was, skip)
+    before = sum(_errors(was, path, t) for t in tools)
+    after = sum(_errors(now, path, t) for t in tools)
+    return (before, after) if before > 0 and after >= before else None
+
+
+def _lock_in(source: str, doc: dict[str, Any], path: str, now: dict[str, Any],
+             skip: set[str]) -> list[str]:
+    """Write each lowered count for PATH back to SOURCE; a line per tool lowered.
+
+    Only a lower count is written, never a higher one. "totals" stays as
+    recorded: it describes the recording run, and this is not one.
+    """
+    was = doc.setdefault("files", {})
+    lowered = []
+    for tool in _own_tools(path, now, was, skip):
+        before, after = _errors(was, path, tool), _errors(now, path, tool)
+        if after < before:
+            was.setdefault(path, {})[tool] = now.get(path, {}).get(
+                tool, {"errors": 0, "warnings": 0})
+            lowered.append(f"  {path}  {tool}  {before} -> {after}")
+    if lowered:
+        Path(source).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n",
+                                encoding="utf-8")
+    return lowered
+
+
+def _touched_verdict(source: str, doc: dict[str, Any], path: str, now: dict[str, Any],
+                     skip: set[str]) -> bool:
+    """True when a touched PATH may pass: it lowered its own count, or had none.
+    A pass writes the lowered counts back, and says so."""
+    stuck = _not_reduced(path, now, doc.get("files", {}), skip)
+    if stuck:
+        before, after = stuck
+        print(file=sys.stderr)
+        print(f"baseline: {path} was changed and still has {after} of its {before} "
+              f"recorded finding(s). A commit that changes a file with findings "
+              f"fixes at least one (mypy and phpstan are not counted: other "
+              f"files move them).", file=sys.stderr)
+        return False
+    lowered = _lock_in(source, doc, path, now, skip)
+    if lowered:
+        print(f"baseline: lowered in {Path(source).name}, so the gain is kept:")
+        for line in lowered:
+            print(line)
+    return True
+
+
 def compare_baseline(checks: list[dict[str, Any]], target: str,
-                     source: str, mode: str) -> int:
-    """jpexit.OK no worse, FINDINGS worse, NOT_RUN cannot compare."""
+                     source: str, mode: str, touched: bool = False) -> int:
+    """jpexit.OK no worse, FINDINGS worse, NOT_RUN cannot compare.
+
+    With TOUCHED, TARGET is one file a commit changes: see _CROSS_FILE.
+    """
     doc = _read_baseline(source, mode)
     if doc is None:
         return jpexit.NOT_RUN
     root = _repo_root(target)
+    if touched and Path(target).is_dir():
+        print("baseline: --touched takes one file, the one being changed", file=sys.stderr)
+        return jpexit.NOT_RUN
     now = _counts_by_file(checks, root)
     was = doc.get("files", {})
     skipped = _uncomparable(_statuses(checks), doc.get("tools", {}))
+    skip = {t for t, _ in skipped}
     compared, unmeasured = _compared_paths(target, root, now, was)
-    worse, deltas = _deltas(compared, now, was, {t for t, _ in skipped})
+    worse, deltas = _deltas(compared, now, was, skip)
     _report_comparison(source, skipped, deltas, unmeasured, worse)
-    return jpexit.FINDINGS if worse else jpexit.OK
+    if worse:
+        return jpexit.FINDINGS
+    if touched and not _touched_verdict(source, doc, _rel(target, root), now, skip):
+        return jpexit.FINDINGS
+    return jpexit.OK
