@@ -30,7 +30,7 @@ from pathlib import Path
 
 from _harness import ROOT, check, check_true, run
 from fake_tools import fake_tools
-from jpcheck.files import _collect_files, source_paths
+from jpcheck.files import _SKIP_DIRS, _collect_files, source_paths
 from jpcheck.php_tools import run_phpcs, run_phpstan, run_rector
 
 
@@ -120,9 +120,17 @@ def test_php_runners_skip_vendor() -> None:
 # Written out here, not read from jpcheck.files._SKIP_DIRS: a test that reads
 # the list it checks agrees with it whatever it says. #56 was a second
 # assignment of that constant silently dropping .venv, venv, dist, build and
-# .pytest_cache from the walk.
+# .pytest_cache from the walk. The code's set is compared against this one,
+# so a name added there, which would skip real source, fails too.
 SKIPPED = ["node_modules", "vendor", "__pycache__", ".git", ".venv", "venv", "dist",
            "build", ".mypy_cache", ".ruff_cache", ".pytest_cache", ".tox", "site-packages"]
+
+
+def test_the_gate_skips_only_the_listed_directories() -> None:
+    """The walk below shows each listed name is skipped; this shows nothing
+    else is. Without it a name added to the code skips that directory's
+    source silently, and README goes on listing thirteen."""
+    check("the code skips exactly the listed directories", sorted(_SKIP_DIRS), sorted(SKIPPED))
 
 
 def test_the_gate_walk_skips_every_listed_directory() -> None:
