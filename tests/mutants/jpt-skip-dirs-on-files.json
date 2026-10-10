@@ -1,0 +1,20 @@
+{
+  "about": "The gate's walk skips every directory that is not the project's source. Run: mutate-on-target.py TREE jpcheck/files.py tests/test_check_skip_dirs.py tests/mutants/jpt-skip-dirs-on-files.json",
+  "mutants": [
+    {
+      "name": "#56 again: a second assignment, the old set, silently wins",
+      "edits": [["              \".tox\", \"site-packages\"}\n", "              \".tox\", \"site-packages\"}\n_SKIP_DIRS = {\".git\", \"__pycache__\", \"node_modules\", \"vendor\", \".mypy_cache\",\n              \".ruff_cache\", \".tox\", \"site-packages\"}\n"]],
+      "target": "no skipped directory is entered"
+    },
+    {
+      "name": "one name dropped",
+      "edits": [["\".git\", \".venv\", \"venv\",", "\".git\", \".venv\","]],
+      "target": "no skipped directory is entered"
+    },
+    {
+      "name": "the walk prunes nothing",
+      "edits": [["        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]\n", ""]],
+      "target": "no skipped directory is entered"
+    }
+  ]
+}

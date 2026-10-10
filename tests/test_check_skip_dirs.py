@@ -28,9 +28,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from _harness import check, check_true, run
+from _harness import ROOT, check, check_true, run
 from fake_tools import fake_tools
-from jpcheck.files import source_paths
+from jpcheck.files import _collect_files, source_paths
 from jpcheck.php_tools import run_phpcs, run_phpstan, run_rector
 
 
@@ -115,6 +115,44 @@ def test_php_runners_skip_vendor() -> None:
     check_true("phpstan is given the project's autoloader",
                "--autoload-file" in calls[0]
                and calls[0][calls[0].index("--autoload-file") + 1] == str(root / "vendor" / "autoload.php"))
+
+
+# Written out here, not read from jpcheck.files._SKIP_DIRS: a test that reads
+# the list it checks agrees with it whatever it says. #56 was a second
+# assignment of that constant silently dropping .venv, venv, dist, build and
+# .pytest_cache from the walk.
+SKIPPED = ["node_modules", "vendor", "__pycache__", ".git", ".venv", "venv", "dist",
+           "build", ".mypy_cache", ".ruff_cache", ".pytest_cache", ".tox", "site-packages"]
+
+
+def test_the_gate_walk_skips_every_listed_directory() -> None:
+    """_collect_files, the gate's own walk, enters none of them, at the top or
+    nested, and still collects the project's files beside them."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        for d in SKIPPED:
+            for at in (root / d, root / "pkg" / d):
+                at.mkdir(parents=True, exist_ok=True)
+                (at / "inside.py").write_text("x = 1\n", encoding="utf-8")
+                (at / "inside.js").write_text("let x = 1;\n", encoding="utf-8")
+        (root / "app.py").write_text("x = 1\n", encoding="utf-8")
+        (root / "pkg" / "mod.js").write_text("let y = 2;\n", encoding="utf-8")
+        groups, _ = _collect_files(td)
+        found = sorted(os.path.relpath(f, root) for fs in groups.values() for f in fs)
+        check("CONTROL: the project's own files are collected", found,
+              ["app.py", os.path.join("pkg", "mod.js")])
+        entered = sorted({Path(os.path.relpath(f, root)).parts[-2] for fs in groups.values()
+                          for f in fs if "inside" in f})
+        check("no skipped directory is entered", entered, [])
+
+
+def test_the_readme_names_every_skipped_directory() -> None:
+    """README's 'Skipped directories' line is the list an adopter reads; #56's
+    bug went unnoticed partly because it named directories the code dropped."""
+    line = next(ln for ln in (ROOT / "README.md").read_text(encoding="utf-8").splitlines()
+                if ln.startswith("Skipped directories:"))
+    named = sorted(w.strip("`, ") for w in line.split(":", 1)[1].split() if w.strip("`, "))
+    check("README lists exactly the skipped directories", named, sorted(SKIPPED))
 
 
 if __name__ == "__main__":

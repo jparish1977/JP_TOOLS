@@ -279,7 +279,7 @@ the one place it is kept.
 | PowerShell | `.ps1`, `.psm1`, `.psd1`, or a `#!` naming pwsh |
 | C / C++ | `.c`, `.cc`, `.cpp`, `.h`, `.hpp`, `.ino` |
 
-Skipped directories: `node_modules`, `vendor`, `__pycache__`, `.git`, `.venv`, `dist`, `build`
+Skipped directories: `node_modules`, `vendor`, `__pycache__`, `.git`, `.venv`, `venv`, `dist`, `build`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache`, `.tox`, `site-packages`
 
 **Smells**, in every language with code to measure (METHODOLOGY 2.14): a file
 or a function too long or too complex, by the limits in `jpcheck/smells.py`.
