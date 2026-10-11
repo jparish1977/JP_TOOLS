@@ -1,0 +1,10 @@
+{
+ "about": "run-suites.sh counts a suite that exits 0 with a SKIP last line as skipped, never passed; a failure exits 1 and a skip with no failure exits 2. Run: mutate-on-target.py TREE run-suites.sh tests/test_run_suites.py tests/mutants/jpt-skip-is-not-a-pass-on-run-suites.json",
+ "mutants": [
+  {"name": "skip-counted-as-pass", "edits": [["  elif [ \"${last#SKIP}\" != \"$last\" ]; then", "  elif false; then"]], "target": "counted as skipped, not passed"},
+  {"name": "skip-exits-0", "edits": [["if [ \"${#skipped[@]}\" -gt 0 ]; then exit 2; fi", "true"]], "target": "a skip and no failure: exit 2"},
+  {"name": "failure-exits-0", "edits": [["if [ \"${#failed[@]}\" -gt 0 ]; then exit 1; fi", "true"]], "target": "a failure: exit 1, whatever else"},
+  {"name": "skips-not-named", "edits": [["  echo \"SKIPPED ${suites[$((n - 1))]}\"", "  true"]], "target": "and named"},
+  {"name": "count-says-all-passed", "edits": [["echo \"suites: $passed/${#suites[@]} passed", "echo \"suites: ${#suites[@]}/${#suites[@]} passed"]], "target": "counted as skipped, not passed"}
+ ]
+}

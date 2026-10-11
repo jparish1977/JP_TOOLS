@@ -1,0 +1,9 @@
+{
+ "about": "prove-head.sh exits 0 only when composer, every suite and every spec passed; a composer failure stops it; an off-target spec's output is printed. Run: mutate-on-target.py TREE prove-head.sh tests/test_prove_head.py tests/mutants/jpt-verdict-on-prove-head.json",
+ "mutants": [
+  {"name": "verdict-ignores-specs", "edits": [["[ \"$suites\" = 0 ] && [ \"$specs\" = 0 ]", "[ \"$suites\" = 0 ]"]], "target": "a spec off target: exit 1"},
+  {"name": "verdict-ignores-suites", "edits": [["[ \"$suites\" = 0 ] && [ \"$specs\" = 0 ]", "[ \"$specs\" = 0 ]"]], "target": "a failing suite: exit 1"},
+  {"name": "composer-failure-ignored", "edits": [["if ! composer install", "if ! true || composer install"]], "target": "composer fails: exit 1"},
+  {"name": "off-target-output-hidden", "edits": [["    *) echo \"--- $(basename \"$f\") ---\"; cat \"$f\" ;;", "    *) ;;"]], "target": "its output printed"}
+ ]
+}
