@@ -105,6 +105,9 @@ jobs:
           echo "left out, written by mutants: $(wc -l < stray.txt) path(s)"
           tar -cf - --exclude=mutants/.git --exclude-from=<(sed 's|^|mutants/|' stray.txt) \
               mutants baseline.json | tar -C "$next" -xf -
+          # The job's checkout is made under umask 0, and tar keeps the modes:
+          # without this, 555 of 571 files in the state were world-writable.
+          chmod -R go-w "$next"
           rm -rf /mutmut-state/old
           if [ -d /mutmut-state/current ]; then mv /mutmut-state/current /mutmut-state/old; fi
           mv "$next" /mutmut-state/current
