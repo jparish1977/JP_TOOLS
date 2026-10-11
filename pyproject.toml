@@ -32,10 +32,11 @@ dependencies = []
 autoit = ["autoit-ripper==1.2.0"]
 
 # The suites are plain scripts (`python tests/test_x.py`); pytest runs them only
-# for mutmut. Only test_* functions are tests: pytest's default prefix "test"
+# for mutmut. Only test_* functions are tests (git_test_* in
+# test_check_baseline.py, which needs git): pytest's default prefix "test"
 # would also collect helpers such as tests_job and take their parameters for
-# fixtures.
+# fixtures. A suite run from main() is collected by tests/conftest.py.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_functions = ["test_*"]
+python_functions = ["test_*", "git_test_*"]
 addopts = ["-p", "no:cacheprovider"]
