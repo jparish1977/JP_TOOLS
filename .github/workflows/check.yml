@@ -233,13 +233,13 @@ jobs:
           done
           exit $rc
 
-  # Mutation testing with mutmut (mutmut-gate.py), Joe's schedule and rule
-  # (2026-10-11): a PR re-tests only the functions it changed, against the
-  # state iteration8's nightly full run leaves in the runner volume
-  # mutmut-state, mounted read-only and copied out first so parallel runs never
-  # share it. A function with more survivors than the nightly baseline fails,
-  # and a new function fails on any survivor. With no state in the volume there
-  # is no baseline, so the job fails as could-not-look rather than pass.
+  # Mutation testing with mutmut (mutmut-gate.py): a PR re-tests only the
+  # functions it changed, against the state the nightly full run
+  # (mutmut-nightly.yml) leaves in the runner volume mutmut-state, mounted
+  # read-only and copied out first so parallel runs never share it. A function
+  # with more survivors than the nightly baseline fails, and a new function
+  # fails on any survivor. With no state in the volume there is no baseline, so
+  # the job fails as could-not-look rather than pass.
   mutation:
     name: Mutation (mutmut, changed functions)
     runs-on: fleet-ci
@@ -286,7 +286,7 @@ jobs:
       - name: Mutants of the changed functions
         shell: bash
         run: |
-          # ci-image/mutmut-nightly.sh swaps a whole new state in as current/.
+          # mutmut-nightly.yml swaps a whole new state in as current/.
           state=/mutmut-state/current
           if [ -d "$state/mutants" ] && [ -f "$state/baseline.json" ]; then
             cp -a "$state/mutants" ./mutants

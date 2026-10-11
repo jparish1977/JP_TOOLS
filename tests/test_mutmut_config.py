@@ -11,6 +11,9 @@ pyproject.toml's [tool.mutmut] lists stay true to the checkout.
     - Nothing is listed that is not tracked. The installed node_modules/ and
       vendor/ are linked into mutants/ by the run, not copied (see
       pyproject.toml).
+    - Under pytest each test starts in an empty directory of its own
+      (conftest.py), so a mutant writing to a relative path cannot litter
+      mutmut's copy. The control runs the same test without conftest.
 
 The tracked files come from `git ls-files`, checked first against names this
 file knows are there, so the comparison cannot pass by listing nothing.
@@ -18,9 +21,12 @@ file knows are there, so the comparison cannot pass by listing nothing.
     python3 tests/test_mutmut_config.py
 """
 
+import os
 import subprocess
 import sys
+import tempfile
 import tomllib
+from pathlib import Path
 
 from _harness import ROOT, check, check_true, run
 
@@ -66,6 +72,35 @@ def test_the_lists_are_the_checkout() -> None:
           sorted(others - copied), [])
     check("also_copy names nothing that is not there",
           sorted(copied - top), [])
+
+
+_STRAY_WRITER = """\
+from pathlib import Path
+
+
+def test_writes_relative() -> None:
+    Path("stray.txt").write_text("a mutant's output path", encoding="utf-8")
+"""
+
+
+def _pytest_stray(launch: Path, with_conftest: bool) -> tuple[int, bool]:
+    """Run pytest from LAUNCH on a test that writes stray.txt to its working
+    directory; (pytest's exit code, whether stray.txt landed in LAUNCH)."""
+    (launch / "test_stray.py").write_text(_STRAY_WRITER, encoding="utf-8")
+    plugin = ["-p", "conftest"] if with_conftest else []
+    env = dict(os.environ, PYTHONPATH=str(ROOT / "tests"))
+    p = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                        *plugin, "test_stray.py"],
+                       cwd=launch, env=env, capture_output=True, text=True, check=False)
+    return p.returncode, (launch / "stray.txt").exists()
+
+
+def test_each_test_runs_in_its_own_directory() -> None:
+    with tempfile.TemporaryDirectory() as bare, tempfile.TemporaryDirectory() as ours:
+        check("CONTROL: without conftest, a relative write lands where pytest started",
+              _pytest_stray(Path(bare), with_conftest=False), (0, True))
+        check("with conftest it lands in the test's own directory, not there",
+              _pytest_stray(Path(ours), with_conftest=True), (0, False))
 
 
 if __name__ == "__main__":

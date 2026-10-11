@@ -1,0 +1,113 @@
+# The nightly full mutmut run over master, and its state into the runner volume
+# mutmut-state, which check.yml's mutation job reads (read-only) to re-test only
+# what a PR changed. It runs as the fleet-ci user in the fleet-ci image, with
+# the volume mounted read-write, so nothing outside the runner is involved.
+#
+# 06:30 UTC: after the runner's nightly reap (it starts between 00:00 and 01:00
+# local) and before the box's corpus refresh (04:30 to 05:00 local), in EDT
+# and EST alike. A full run is about 40 minutes on 8 cores; --cpus and
+# --memory hold it to that share of the box.
+#
+# What it leaves, /mutmut-state/current/:
+#   mutants/       mutmut's state, without mutmut-gate's git link (a PR job's
+#                  prepare rebuilds it) and without anything a mutant wrote
+#                  that git does not track
+#   baseline.json  survivors per function (mutmut-gate.py record)
+# A new state is written beside the old one and renamed in: a PR job reads the
+# old state or the new one, never half of each.
+#
+# Who can write the volume: any job on this runner can mount it read-write,
+# because the runner admits volumes per runner, not per repository. The
+# runner serves only this forge's owner and seats, and a pull request that
+# edits a workflow can change any check a workflow makes, so a checksum kept
+# where a workflow can read it would guard nothing.
+
+name: Mutation (nightly)
+
+on:
+  schedule:
+    - cron: '30 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  full-run:
+    name: mutmut, every mutant, into mutmut-state
+    runs-on: fleet-ci
+    timeout-minutes: 90
+    container:
+      image: fleet-ci:current
+      options: --cpus 8 --memory 8g -v mutmut-state:/mutmut-state
+    steps:
+      - name: CI does not run as root
+        run: |
+          echo "user: $(id -un) uid $(id -u)"
+          if [ "$(id -u)" = 0 ]; then echo "CI is running as root: use the fleet-ci label" >&2; exit 1; fi
+      - name: The volume is mounted and writable
+        run: |
+          probe=/mutmut-state/.write-probe-$$
+          if ! touch "$probe"; then
+            echo "mutmut-state is not mounted read-write at /mutmut-state" >&2
+            exit 2
+          fi
+          rm -f "$probe"
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: pip install -r requirements-dev.txt
+      - run: npm install
+      - name: PowerShell and PSScriptAnalyzer
+        run: bash install-pwsh.sh
+      # As check.yml's Python job's step of the same name.
+      - name: Install PHP tools
+        shell: bash
+        env:
+          FLEET_READ_TOKEN: ${{ secrets.FLEET_READ_TOKEN }}
+          OWNER: ${{ vars.ITERATION8_LIBRARIES_OWNER }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          if [ -z "$FLEET_READ_TOKEN" ] || [ -z "$OWNER" ]; then
+            echo "Set the secret FLEET_READ_TOKEN and the variable ITERATION8_LIBRARIES_OWNER." >&2
+            exit 1
+          fi
+          for lib in core utilities; do
+            composer config -g "repositories.iteration8-$lib" vcs "$SERVER/$OWNER/iteration8-$lib.git"
+          done
+          case "$SERVER" in http://*) composer config -g secure-http false ;; esac
+          auth=$(python -c 'import json, os, sys
+          print(json.dumps({"http-basic": {sys.argv[1]: {"username": "ci", "password": os.environ["FLEET_READ_TOKEN"]}}}))' "${SERVER#*://}")
+          COMPOSER_AUTH=$auth composer install --no-interaction --no-progress
+      - name: Every mutant
+        run: python mutmut-gate.py run --full --max-children 8
+      - name: Survivors per function
+        run: |
+          python -m mutmut results --all true > mutmut-results.txt
+          python mutmut-gate.py record baseline.json --results mutmut-results.txt
+      - name: Into the volume
+        shell: bash
+        run: |
+          set -euo pipefail
+          next=/mutmut-state/next
+          rm -rf "$next"
+          mkdir -p "$next"
+          # Only what mutmut wrote and git does not track as stray: tar takes
+          # mutants/ less its .git link and anything git reports as untracked
+          # there that is not mutmut's own (.meta, .spans, mutmut-stats.json).
+          git -C mutants status --porcelain --untracked-files=all \
+            | sed -n 's/^?? //p' \
+            | { grep -v -e '\.meta$' -e '\.spans$' -e '^mutmut-stats\.json$' || true; } \
+            > stray.txt
+          echo "left out, written by mutants: $(wc -l < stray.txt) path(s)"
+          tar -cf - --exclude=mutants/.git --exclude-from=<(sed 's|^|mutants/|' stray.txt) \
+              mutants baseline.json | tar -C "$next" -xf -
+          rm -rf /mutmut-state/old
+          if [ -d /mutmut-state/current ]; then mv /mutmut-state/current /mutmut-state/old; fi
+          mv "$next" /mutmut-state/current
+          rm -rf /mutmut-state/old
+          du -sh /mutmut-state/current
+          ls /mutmut-state/current

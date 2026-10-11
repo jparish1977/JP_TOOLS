@@ -57,7 +57,13 @@ addopts = ["-p", "no:cacheprovider"]
 # One test is left out of mutmut's runs: test_pyproject's import scan reads
 # the source text, and in the copy every mutated file imports mutmut itself.
 # It checks declarations, not behaviour, and runs in the ordinary suites.
+# A mutant is stopped at (its tests' estimated time + timeout_constant) x
+# timeout_multiplier x 2 seconds of CPU. mutmut's default multiplier, 15, let
+# a mutant that loops spin a core for over seven minutes against a 14-second
+# estimate while the other 17,966 had finished. mutmut counts a timeout as a
+# kill, so the limit stays well above a test's normal spread: 10x the estimate.
 [tool.mutmut]
+timeout_multiplier = 5.0
 pytest_add_cli_args = ["--deselect", "tests/test_pyproject.py::test_every_import_is_declared"]
 source_paths = [
     "chdmap/", "chdtool/", "inventory/", "jpcheck/", "jpexit/", "ntfstools/",

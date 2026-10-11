@@ -87,6 +87,19 @@ def _fresh_module_tmp(request: pytest.FixtureRequest, tmp_path: Path) -> Iterato
         module.TMP = saved
 
 
+@pytest.fixture(autouse=True)
+def _cwd_is_scratch(monkeypatch: pytest.MonkeyPatch,
+                    tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Every test runs in an empty directory of its own. Under mutmut the
+    working directory is its copy of the checkout, and a mutant that turns an
+    output path into None or a flag writes there: a mutant of mutmut-gate's
+    dispatch ran prepare() and left a git worktree in the copy, others left
+    None/, None.tmp and --max-children. The suites find their files through
+    __file__, never the working directory. Not tmp_path: _fresh_module_tmp
+    gives that to a suite that needs it empty."""
+    monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
+
+
 @pytest.fixture
 def tmp(tmp_path: Path) -> Path:
     """A fresh directory per test, which test_check_exit_codes.py's own runner
