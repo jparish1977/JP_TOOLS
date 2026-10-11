@@ -26,6 +26,9 @@ from _harness import ROOT, check, check_true, run
 
 NOT_MUTATED = {"tests", "tools"}
 INSTALLED = {"vendor/"}
+# Scripts their suites must run as processes (git hooks, child processes):
+# mutmut cannot see such a test, so these stay on tests/mutants specs.
+ON_SPECS = {"install-hooks.py", "fix-dashes.py", "mutate-on-target.py", "mutate-spec.py"}
 # mutmut copies these itself, whatever also_copy says.
 COPIED_BY_MUTMUT = {"pyproject.toml", "setup.cfg"}
 
@@ -52,8 +55,11 @@ def test_the_lists_are_the_checkout() -> None:
     top = {f.split("/")[0] + ("/" if "/" in f else "") for f in files}
     table = mutmut_table()
     source = set(table.get("source_paths", []))
-    check("source_paths is every package and top-level script",
-          sorted(source), sorted(packages | scripts))
+    check("source_paths is every package and top-level script but the ones on specs",
+          sorted(source), sorted((packages | scripts) - ON_SPECS))
+    specs = " ".join(p.read_text(encoding="utf-8") for p in (ROOT / "tests" / "mutants").glob("*.json"))
+    check("each script left to specs has a spec aimed at it",
+          sorted(s for s in ON_SPECS if f"TREE {s} " not in specs), [])
     others = {t for t in top if t not in source and t.rstrip("/") not in NOT_MUTATED
               and t not in COPIED_BY_MUTMUT}
     copied = set(table.get("also_copy", []))

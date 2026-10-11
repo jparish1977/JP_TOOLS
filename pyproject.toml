@@ -42,7 +42,11 @@ python_functions = ["test_*", "git_test_*"]
 addopts = ["-p", "no:cacheprovider"]
 
 # What mutmut mutates: every package and top-level script. Not tools/ (all
-# lab code, METHODOLOGY 2.9) and not tests/. tests/test_mutmut_config.py holds
+# lab code, METHODOLOGY 2.9) and not tests/. Not the four scripts whose suites
+# must run them as processes, because they drive git hooks and child
+# processes (install-hooks.py, fix-dashes.py, mutate-on-target.py,
+# mutate-spec.py): mutmut cannot see a test in another process, so they stay
+# on hand-written tests/mutants specs. tests/test_mutmut_config.py holds
 # these lists to the tracked files. also_copy is everything else the suites
 # read from the checkout, so they run in mutmut's copy (mutants/) as they do
 # in the tree; vendor/ is installed, not tracked. node_modules/ is NOT copied:
@@ -58,10 +62,10 @@ source_paths = [
     "platformtools/", "recovery/", "spoolaudit/",
     "autoit-extract.py", "chd-hunkmap.py", "chd.py", "check-pins.py", "check.py",
     "count-callers.py", "coverage-gate.py", "deploy-all.py", "deploy-s3.py",
-    "diff-functions.py", "fix-dashes.py", "fix.py", "gh-comment.py", "image-disk.py",
-    "init-ci.py", "install-hooks.py", "install-issue-templates.py",
+    "diff-functions.py", "fix.py", "gh-comment.py", "image-disk.py",
+    "init-ci.py", "install-issue-templates.py",
     "inventory-drive.py", "list-exemptions.py", "list-suppressions.py",
-    "mutate-on-target.py", "mutate-spec.py", "ntfs-extract.py", "ntfs-inventory.py",
+    "ntfs-extract.py", "ntfs-inventory.py",
     "ntfs-size.py", "recover.py", "scan-image.py", "snapshot-test.py",
     "spool-audit.py", "undelete.py", "vm-image-boot.py",
 ]
@@ -74,4 +78,5 @@ also_copy = [
     "jp_node_resolve.mjs", "jp_php_ast.php", "jp_stylelint.mjs", "lib/", "oob/",
     "package.json", "requirements-dev.txt", "requirements-system.txt", "templates/",
     "tools/", "vendor/",
+    "install-hooks.py", "fix-dashes.py", "mutate-on-target.py", "mutate-spec.py",
 ]
