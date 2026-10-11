@@ -48,7 +48,11 @@ addopts = ["-p", "no:cacheprovider"]
 # in the tree; vendor/ is installed, not tracked. node_modules/ is NOT copied:
 # a copy turns its .bin symlinks into files and eslint and stylelint stop
 # honouring disable comments, so the run links mutants/node_modules to it.
+# One test is left out of mutmut's runs: test_pyproject's import scan reads
+# the source text, and in the copy every mutated file imports mutmut itself.
+# It checks declarations, not behaviour, and runs in the ordinary suites.
 [tool.mutmut]
+pytest_add_cli_args = ["--deselect", "tests/test_pyproject.py::test_every_import_is_declared"]
 source_paths = [
     "chdmap/", "chdtool/", "inventory/", "jpcheck/", "jpexit/", "ntfstools/",
     "platformtools/", "recovery/", "spoolaudit/",
