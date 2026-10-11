@@ -69,6 +69,24 @@ def pytest_configure(config: pytest.Config) -> None:
     subprocess.Popen.__init__ = popen  # type: ignore[method-assign]
 
 
+@pytest.fixture(autouse=True)
+def _fresh_module_tmp(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[None]:
+    """A suite that makes one TMP directory at import and expects it empty
+    (test_mutate_on_target.py) gets a fresh one per test. mutmut runs the
+    tests more than once in one process, and the second run met the first
+    run's fixture directories."""
+    module = request.module
+    if not isinstance(getattr(module, "TMP", None), str):
+        yield
+        return
+    saved = module.TMP
+    module.TMP = str(tmp_path)
+    try:
+        yield
+    finally:
+        module.TMP = saved
+
+
 @pytest.fixture
 def tmp(tmp_path: Path) -> Path:
     """A fresh directory per test, which test_check_exit_codes.py's own runner
