@@ -22,13 +22,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 # projectbook's pb/lab/ci-apt-time.sh), retrying a mirror address that does
 # not answer. composer.json's PHP extensions are requirements-system.txt's
 # php:* lines; php-xml, php-mbstring, php-curl and unzip are what composer and
-# the PHP tools need to install and run.
+# the PHP tools need to install and run. mame-tools, testdisk, gddrescue and
+# ntfs-3g are the real tools JP_TOOLS' recovery suites drive (chdman,
+# photorec, ddrescue, mkntfs and ntfsls), from install-recovery.sh's apt set:
+# without them those suites print SKIP in a plain run, and under pytest, where
+# mutmut runs them, a suite that skips only in its __main__ fails instead.
 RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
     && apt-get update -q \
     && apt-get install -y -q --no-install-recommends \
         php-cli php-xml php-mbstring php-curl php-gd php-sqlite3 unzip composer \
         shellcheck cppcheck \
         ripgrep poppler-utils iproute2 \
+        mame-tools testdisk gddrescue ntfs-3g \
     && rm -rf /var/lib/apt/lists/*
 
 # Jobs run as fleet-ci, never root. The base image's user is root, so every
