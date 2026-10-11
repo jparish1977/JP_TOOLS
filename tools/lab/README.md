@@ -43,5 +43,6 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `directive-sweep.py` | which linter suppression directives across a set of repos give no reason, by the gate's own parser |
 | `complexity-sweep.py` | what each language's standard complexity and size rules would find across a tree of repos, per rule and repo, before they are selected |
 | `scrub-history.py` | what a branch's history looks like with a list of names gone from messages, identities and every file version, in a fresh clone, and whether anything named survives; `--squash` makes it one commit of the tip instead; never pushes |
+| `lab-use-sweep.py` | which tracked files across ~/projects and which Claude memories name one of this repo's lab tools, per tool: the candidates for METHODOLOGY 2.9's promotion rule |
 
 Every header carries all three fields.
