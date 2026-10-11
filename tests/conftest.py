@@ -14,7 +14,8 @@ mutant would read as survived. Two adaptations:
 """
 
 import os
-from collections.abc import Iterator
+import subprocess
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -37,17 +38,35 @@ def _a_failed_check_fails_the_test() -> Iterator[None]:
     _fail_on_recorded(before)
 
 
+_STATS = "stats"
+
+
+def _without_stats(env: Mapping[str, str] | None) -> dict[str, str]:
+    child = dict(os.environ if env is None else env)
+    if child.get("MUTANT_UNDER_TEST") == _STATS:
+        del child["MUTANT_UNDER_TEST"]
+    return child
+
+
 def pytest_configure(config: pytest.Config) -> None:
-    """mutmut's stats pass marks itself MUTANT_UNDER_TEST=stats, in this
-    process and in the environment every child inherits. A child that runs one
-    of our scripts then records each call by loading mutmut's config from its
-    own working directory, a scratch repo with none, and crashes. The child's
-    calls are lost to mutmut anyway, so the marker is kept in this process
-    only (mutmut holds its own copy) and children run unmutated. A mutant's
-    own name, set for the runs that test it, is left for children to inherit:
-    that is how a test driving a script as a subprocess kills a mutant."""
-    if os.environ.get("MUTANT_UNDER_TEST") == "stats":
-        del os.environ["MUTANT_UNDER_TEST"]
+    """mutmut's stats pass marks itself MUTANT_UNDER_TEST=stats, and this
+    process reads the marker from the environment to record which tests reach
+    which code. A child that runs one of our scripts would inherit it, record
+    its calls by loading mutmut's config from its own working directory (a
+    scratch repo with none) and crash. Its calls are lost to mutmut anyway, so
+    in the stats pass only, every child is started without the marker and
+    runs unmutated. A mutant's own name, set for the runs that test it, is
+    still inherited: that is how a test driving a script as a subprocess
+    kills a mutant."""
+    if os.environ.get("MUTANT_UNDER_TEST") != _STATS:
+        return
+    start = subprocess.Popen.__init__
+
+    def popen(self: subprocess.Popen[Any], *args: Any, **kwargs: Any) -> None:
+        kwargs["env"] = _without_stats(kwargs.get("env"))
+        start(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = popen  # type: ignore[method-assign]
 
 
 @pytest.fixture
