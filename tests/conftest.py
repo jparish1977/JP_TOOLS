@@ -13,6 +13,7 @@ mutant would read as survived. Two adaptations:
   recording calls in the test process, and a subprocess's calls are lost.
 """
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,19 @@ def _a_failed_check_fails_the_test() -> Iterator[None]:
     before = len(FAILURES)
     yield
     _fail_on_recorded(before)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """mutmut's stats pass marks itself MUTANT_UNDER_TEST=stats, in this
+    process and in the environment every child inherits. A child that runs one
+    of our scripts then records each call by loading mutmut's config from its
+    own working directory, a scratch repo with none, and crashes. The child's
+    calls are lost to mutmut anyway, so the marker is kept in this process
+    only (mutmut holds its own copy) and children run unmutated. A mutant's
+    own name, set for the runs that test it, is left for children to inherit:
+    that is how a test driving a script as a subprocess kills a mutant."""
+    if os.environ.get("MUTANT_UNDER_TEST") == "stats":
+        del os.environ["MUTANT_UNDER_TEST"]
 
 
 @pytest.fixture
