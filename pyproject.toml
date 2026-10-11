@@ -54,6 +54,11 @@ addopts = ["-p", "no:cacheprovider"]
 # into files and eslint and stylelint stop honouring disable comments, and
 # mutmut re-copies also_copy on every run, which fails on the read-only git
 # packs composer leaves under vendor/.
+# tests/mutants keeps a hand spec only where mutmut cannot judge: the four
+# scripts above; shell, PHP and config files, which it does not mutate;
+# module-level code (constants, compiled patterns), since it mutates only
+# inside functions; and code its tests reach only through a child process,
+# which it records as having no tests (#217).
 # One test is left out of mutmut's runs: test_pyproject's import scan reads
 # the source text, and in the copy every mutated file imports mutmut itself.
 # It checks declarations, not behaviour, and runs in the ordinary suites.

@@ -1,7 +1,0 @@
-{
- "about": "Each check runs once: tool_names in jpcheck/runs.py drops a tool named twice, including the audit tool --audit adds to a --tools list that already names it. Run: mutate-on-target.py TREE jpcheck/runs.py tests/test_check_tool_names.py tests/mutants/jpt-tool-names-once-on-runs.json",
- "mutants": [
-  {"name": "duplicates are kept", "edits": [["    return list(dict.fromkeys(names))", "    return names"]], "target": "--tools naming the audit tool, plus --audit: once"},
-  {"name": "duplicates are dropped but the order is lost", "edits": [["    return list(dict.fromkeys(names))", "    return sorted(set(names))"]], "target": "a tool named twice in --tools: once, first-named order"}
- ]
-}
