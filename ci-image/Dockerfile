@@ -37,11 +37,12 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
 # cases. fleet-ci has no sudo: what a job used to install as root is already
 # here. setup-python and pip write the tool cache, so fleet-ci owns it.
 #
-# The uid and gid are the HOST's fleet-ci account (a system user on
-# iteration8, nologin, no other groups), passed in by build.sh: the runner's
-# daemon does not remap users, so a job's uid is that uid on the host. A uid
-# picked here could be someone's on the host (1001 was the web deploy
-# account); the host's own fleet-ci account reserves it and names it in ps.
+# The uid and gid are passed in by build.sh. Under a daemon that remaps users
+# they are 994 and 981, and a job's host uid is the remap base plus that.
+# Under one that does not, a job's uid IS that uid on the host, so build.sh
+# passes the host's fleet-ci account (a system user, nologin, no other
+# groups): a uid picked here could be someone's on the host (1001 was the web
+# deploy account), and the host account reserves it and names it in ps.
 ARG CI_UID
 ARG CI_GID
 RUN test -n "$CI_UID" && test -n "$CI_GID" \

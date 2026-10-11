@@ -16,10 +16,16 @@
 # Tagging current first tags the image it replaces fleet-ci:previous, then
 # runs reap.sh, which removes every other fleet-ci tag.
 #
-# Jobs run as fleet-ci, the HOST's account of that name (a system user on
-# iteration8, nologin, no other groups): the runner's daemon does not remap
-# users, so the image takes that account's uid and gid. Without the account
-# it stops. The runner's shared cache volumes are owned by the same uid, so
+# Jobs run as fleet-ci, uid 994 gid 981 in the image. Which uid that is on the
+# host depends on the runner's daemon:
+# - remapping users (docker info lists name=userns): a job's uid is the remap
+#   range's base plus 994, so no host account is involved and none is
+#   required;
+# - not remapping: a job's uid IS that uid on the host, so it must be an
+#   account nobody else has. The host's fleet-ci account (a system user,
+#   nologin, no other groups) reserves it, and the image takes that account's
+#   uid and gid; without the account it stops.
+# The runner's shared cache volumes are owned by the image's fleet-ci, so
 # jobs can write them; a volume created afresh is root's and would silently
 # stop caching. Each is mounted into every job by the runner's config
 # (iteration8_server forgejo-runner): pip-cache (PIP_CACHE_DIR), npm-cache
@@ -28,8 +34,8 @@
 # download. build.sh fills toolcache from ci-image/toolcache.txt, so jobs
 # only read it: jobs filling it raced and failed (CI run 308).
 #
-# After it builds, it reads back inside the new image: that it runs as the
-# host's fleet-ci uid, not root, and cannot sudo; then every pinned tool
+# After it builds, it reads back inside the new image: that it runs as
+# fleet-ci's uid, not root, and cannot sudo; then every pinned tool
 # (check-pins.py's powershell arm, the PHP extensions, composer, shellcheck,
 # cppcheck, rg, pdftotext, ss). Exit 0 only when every step passes.
 printf '%s' jpt-ci-image > /proc/$$/comm 2>/dev/null
@@ -39,11 +45,19 @@ dind=forgejo-runner-docker-in-docker-1
 tag="fleet-ci:$(git -C "$here" rev-parse --short HEAD)"
 current=1
 [ "${1:-}" = "--no-current" ] && current=0
-if ! uid=$(id -u fleet-ci 2>/dev/null) || ! gid=$(id -g fleet-ci 2>/dev/null); then
-    echo "ci-image: no fleet-ci account on this host; create it first:" >&2
-    echo "  sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --user-group fleet-ci" >&2
-    exit 1
-fi
+# fleet-ci's uid and gid for the image, into uid and gid (see the header).
+fleet_ci_ids() {
+    if sudo -n docker exec "$dind" docker info -f '{{range .SecurityOptions}}{{.}} {{end}}' \
+            | tr ' ' '\n' | grep -qx 'name=userns'; then
+        uid=994 gid=981
+        echo "ci-image: $dind remaps users, so no host account is needed"
+    elif ! uid=$(id -u fleet-ci 2>/dev/null) || ! gid=$(id -g fleet-ci 2>/dev/null); then
+        echo "ci-image: $dind does not remap users and there is no fleet-ci account on this host; create it first:" >&2
+        echo "  sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --user-group fleet-ci" >&2
+        exit 1
+    fi
+}
+fleet_ci_ids
 
 echo "ci-image: building $tag in $dind as fleet-ci uid $uid gid $gid"
 tar -C "$here" -cf - ci-image/Dockerfile requirements-system.txt install-pwsh.sh \
@@ -57,8 +71,8 @@ tar -C "$here" -cf - check-pins.py requirements-system.txt requirements-dev.txt 
         jpcheck platformtools jpexit \
     | sudo -n docker exec -i "$dind" docker run -i --rm -e "WANT_UID=$uid" "$tag" bash -c '
         set -e; mkdir /tmp/r && cd /tmp/r && tar -xf -
-        if [ "$(id -u)" != "$WANT_UID" ]; then echo "FAIL: runs as uid $(id -u), not the host fleet-ci uid $WANT_UID" >&2; exit 1; fi
-        echo "user: $(id -un) uid $(id -u), the host fleet-ci account"
+        if [ "$(id -u)" != "$WANT_UID" ]; then echo "FAIL: runs as uid $(id -u), not fleet-ci uid $WANT_UID" >&2; exit 1; fi
+        echo "user: $(id -un) uid $(id -u)"
         if sudo -n true 2>/dev/null; then echo "FAIL: fleet-ci can sudo" >&2; exit 1; fi
         echo "sudo: refused"
         python3 check-pins.py powershell
