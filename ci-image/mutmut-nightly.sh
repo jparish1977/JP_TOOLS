@@ -46,10 +46,13 @@ git -C "$here" worktree add -q --detach "$work/tree" "$ref"
 cd "$work/tree"
 echo "mutmut-nightly: at $(git log --oneline -1)"
 
+# Not silenced: a quiet install that fails stops this with no reason given
+# (its first run). npm install, not npm ci: JP_TOOLS pins exact versions in
+# package.json and keeps no lock file, which npm ci requires.
 python3 -m venv "$work/venv"
 "$work/venv/bin/pip" install -q -r requirements-dev.txt
-composer install --no-interaction --no-progress --quiet
-npm ci --silent
+composer install --no-interaction --no-progress
+npm install --no-audit --no-fund
 export PATH="$work/venv/bin:$PATH"
 
 python mutmut-gate.py run --full --max-children "$jobs"
