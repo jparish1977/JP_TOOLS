@@ -49,9 +49,11 @@ addopts = ["-p", "no:cacheprovider"]
 # on hand-written tests/mutants specs. tests/test_mutmut_config.py holds
 # these lists to the tracked files. also_copy is everything else the suites
 # read from the checkout, so they run in mutmut's copy (mutants/) as they do
-# in the tree; vendor/ is installed, not tracked. node_modules/ is NOT copied:
-# a copy turns its .bin symlinks into files and eslint and stylelint stop
-# honouring disable comments, so the run links mutants/node_modules to it.
+# in the tree. The installed node_modules/ and vendor/ are LINKED into
+# mutants/ by the run, not copied: a copy turns node_modules' .bin symlinks
+# into files and eslint and stylelint stop honouring disable comments, and
+# mutmut re-copies also_copy on every run, which fails on the read-only git
+# packs composer leaves under vendor/.
 # One test is left out of mutmut's runs: test_pyproject's import scan reads
 # the source text, and in the copy every mutated file imports mutmut itself.
 # It checks declarations, not behaviour, and runs in the ordinary suites.
@@ -77,6 +79,6 @@ also_copy = [
     "install.sh", "jp_eslint.mjs", "jp_measure.mjs", "jp_node_hooks.mjs",
     "jp_node_resolve.mjs", "jp_php_ast.php", "jp_stylelint.mjs", "lib/", "oob/",
     "package.json", "requirements-dev.txt", "requirements-system.txt", "templates/",
-    "tools/", "vendor/",
+    "tools/",
     "install-hooks.py", "fix-dashes.py", "mutate-on-target.py", "mutate-spec.py",
 ]
