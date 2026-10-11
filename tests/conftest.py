@@ -36,6 +36,13 @@ def _a_failed_check_fails_the_test() -> Iterator[None]:
     _fail_on_recorded(before)
 
 
+@pytest.fixture
+def tmp(tmp_path: Path) -> Path:
+    """A fresh directory per test, which test_check_exit_codes.py's own runner
+    passes its tests as `tmp`."""
+    return tmp_path
+
+
 class _Main(pytest.Item):
     """The whole of a main()-driven suite, as one test."""
 
