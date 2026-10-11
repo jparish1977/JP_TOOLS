@@ -2,6 +2,9 @@
 # scripts import beyond the standard library (METHODOLOGY §7 item 10).
 # tests/test_pyproject.py fails when an import is not declared here.
 #
+# [tool.pytest.ini_options] and [tool.mutmut] configure mutation testing; see
+# the tables below.
+#
 # No [tool.ruff] or [tool.mypy], on purpose. check.py treats either table as
 # the project's own config and stops applying configs/ruff.toml and
 # configs/mypy.ini. The gate's own tools are declared elsewhere:
@@ -27,3 +30,12 @@ dependencies = []
 # install when absent. It uses the package's internal modules, and 1.2.0 is
 # the release its docstring describes.
 autoit = ["autoit-ripper==1.2.0"]
+
+# The suites are plain scripts (`python tests/test_x.py`); pytest runs them only
+# for mutmut. Only test_* functions are tests: pytest's default prefix "test"
+# would also collect helpers such as tests_job and take their parameters for
+# fixtures.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_functions = ["test_*"]
+addopts = ["-p", "no:cacheprovider"]

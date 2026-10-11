@@ -42,9 +42,11 @@ def load_script(filename: str) -> ModuleType:
     """Import a checkout script whose name is not a module name (chd-hunkmap.py).
 
     Registered in sys.modules before it runs, which a dataclass defined in it
-    needs in order to resolve its own annotations.
+    needs in order to resolve its own annotations. Under the file's own stem,
+    hyphen and all: mutmut names a script's mutants after its file, and a
+    test that loads it under another name runs none of them.
     """
-    name = filename.removesuffix(".py").replace("-", "_")
+    name = filename.removesuffix(".py")
     spec = importlib.util.spec_from_file_location(name, ROOT / filename)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {filename}")

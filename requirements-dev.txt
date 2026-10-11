@@ -26,3 +26,8 @@ pyyaml==6.0.1
 # 4.2.0), the standard shell parser, whose JSON tree the shell measure reads.
 lizard==1.24.0
 shfmt-py==4.2.0
+# Mutation testing for the Python code. mutmut generates the mutants from the
+# parsed source and runs the suites under pytest; tests/conftest.py makes a
+# failed check() fail the pytest test it was recorded in.
+mutmut==3.8.0
+pytest==9.1.1
