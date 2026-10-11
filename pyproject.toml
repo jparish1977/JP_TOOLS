@@ -40,3 +40,32 @@ autoit = ["autoit-ripper==1.2.0"]
 testpaths = ["tests"]
 python_functions = ["test_*", "git_test_*"]
 addopts = ["-p", "no:cacheprovider"]
+
+# What mutmut mutates: every package and top-level script. Not tools/ (all
+# lab code, METHODOLOGY 2.9) and not tests/. tests/test_mutmut_config.py holds
+# these lists to the tracked files. also_copy is everything else the suites
+# read from the checkout, so they run in mutmut's copy (mutants/) as they do
+# in the tree; vendor/ and node_modules/ are installed, not tracked.
+[tool.mutmut]
+source_paths = [
+    "chdmap/", "chdtool/", "inventory/", "jpcheck/", "jpexit/", "ntfstools/",
+    "platformtools/", "recovery/", "spoolaudit/",
+    "autoit-extract.py", "chd-hunkmap.py", "chd.py", "check-pins.py", "check.py",
+    "count-callers.py", "coverage-gate.py", "deploy-all.py", "deploy-s3.py",
+    "diff-functions.py", "fix-dashes.py", "fix.py", "gh-comment.py", "image-disk.py",
+    "init-ci.py", "install-hooks.py", "install-issue-templates.py",
+    "inventory-drive.py", "list-exemptions.py", "list-suppressions.py",
+    "mutate-on-target.py", "mutate-spec.py", "ntfs-extract.py", "ntfs-inventory.py",
+    "ntfs-size.py", "recover.py", "scan-image.py", "snapshot-test.py",
+    "spool-audit.py", "undelete.py", "vm-image-boot.py",
+]
+also_copy = [
+    ".coveragerc", ".gitattributes", ".github/", ".gitignore", ".jp-tools-ignore",
+    "METHODOLOGY.md", "README.md", "ci-image/", "composer.json", "configs/", "docs/",
+    "find-dupes.php", "fix-eval-const.mjs", "fix-style.mjs", "hooks/",
+    "install-pwsh.sh", "install-recovery.ps1", "install-recovery.sh", "install.ps1",
+    "install.sh", "jp_eslint.mjs", "jp_measure.mjs", "jp_node_hooks.mjs",
+    "jp_node_resolve.mjs", "jp_php_ast.php", "jp_stylelint.mjs", "lib/", "oob/",
+    "package.json", "requirements-dev.txt", "requirements-system.txt", "templates/",
+    "tools/", "vendor/", "node_modules/",
+]
