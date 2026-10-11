@@ -233,6 +233,74 @@ jobs:
           done
           exit $rc
 
+  # Mutation testing with mutmut (mutmut-gate.py), Joe's schedule and rule
+  # (2026-10-11): a PR re-tests only the functions it changed, against the
+  # state iteration8's nightly full run leaves in the runner volume
+  # mutmut-state, mounted read-only and copied out first so parallel runs never
+  # share it. A function with more survivors than the nightly baseline fails,
+  # and a new function fails on any survivor. With no state in the volume there
+  # is no baseline, so the job fails as could-not-look rather than pass.
+  mutation:
+    name: Mutation (mutmut, changed functions)
+    runs-on: fleet-ci
+    container:
+      image: fleet-ci:current
+      options: -v mutmut-state:/mutmut-state:ro
+    steps:
+      - name: CI does not run as root
+        run: |
+          echo "user: $(id -un) uid $(id -u)"
+          if [ "$(id -u)" = 0 ]; then echo "CI is running as root: use the fleet-ci label" >&2; exit 1; fi
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: pip install -r requirements-dev.txt
+      - run: npm install
+      - name: PowerShell and PSScriptAnalyzer
+        run: bash install-pwsh.sh
+      # As the Python job's step of the same name.
+      - name: Install PHP tools
+        shell: bash
+        env:
+          FLEET_READ_TOKEN: ${{ secrets.FLEET_READ_TOKEN }}
+          OWNER: ${{ vars.ITERATION8_LIBRARIES_OWNER }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          if [ -z "$FLEET_READ_TOKEN" ] || [ -z "$OWNER" ]; then
+            echo "Set the secret FLEET_READ_TOKEN and the variable ITERATION8_LIBRARIES_OWNER." >&2
+            exit 1
+          fi
+          for lib in core utilities; do
+            composer config -g "repositories.iteration8-$lib" vcs "$SERVER/$OWNER/iteration8-$lib.git"
+          done
+          case "$SERVER" in http://*) composer config -g secure-http false ;; esac
+          auth=$(python -c 'import json, os, sys
+          print(json.dumps({"http-basic": {sys.argv[1]: {"username": "ci", "password": os.environ["FLEET_READ_TOKEN"]}}}))' "${SERVER#*://}")
+          COMPOSER_AUTH=$auth composer install --no-interaction --no-progress
+      - name: Mutants of the changed functions
+        shell: bash
+        run: |
+          # ci-image/mutmut-nightly.sh swaps a whole new state in as current/.
+          state=/mutmut-state/current
+          if [ -d "$state/mutants" ] && [ -f "$state/baseline.json" ]; then
+            cp -a "$state/mutants" ./mutants
+            cp "$state/baseline.json" ./mutmut-baseline.json
+            echo "state: the nightly run's, from the mutmut-state volume"
+          else
+            echo "NO STATE in the mutmut-state volume: the nightly full run has not left one," >&2
+            echo "so there is no baseline to judge against. Not judged (could not look)." >&2
+            exit 2
+          fi
+          python mutmut-gate.py run --max-children "$CI_WORKERS"
+          python -m mutmut results --all true > mutmut-results.txt
+          python mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt
+
   js:
     name: JS (eslint, prettier)
     runs-on: fleet-ci
