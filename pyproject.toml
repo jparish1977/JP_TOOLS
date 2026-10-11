@@ -45,7 +45,9 @@ addopts = ["-p", "no:cacheprovider"]
 # lab code, METHODOLOGY 2.9) and not tests/. tests/test_mutmut_config.py holds
 # these lists to the tracked files. also_copy is everything else the suites
 # read from the checkout, so they run in mutmut's copy (mutants/) as they do
-# in the tree; vendor/ and node_modules/ are installed, not tracked.
+# in the tree; vendor/ is installed, not tracked. node_modules/ is NOT copied:
+# a copy turns its .bin symlinks into files and eslint and stylelint stop
+# honouring disable comments, so the run links mutants/node_modules to it.
 [tool.mutmut]
 source_paths = [
     "chdmap/", "chdtool/", "inventory/", "jpcheck/", "jpexit/", "ntfstools/",
@@ -67,5 +69,5 @@ also_copy = [
     "install.sh", "jp_eslint.mjs", "jp_measure.mjs", "jp_node_hooks.mjs",
     "jp_node_resolve.mjs", "jp_php_ast.php", "jp_stylelint.mjs", "lib/", "oob/",
     "package.json", "requirements-dev.txt", "requirements-system.txt", "templates/",
-    "tools/", "vendor/", "node_modules/",
+    "tools/", "vendor/",
 ]

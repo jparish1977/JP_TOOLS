@@ -8,8 +8,9 @@ pyproject.toml's [tool.mutmut] lists stay true to the checkout.
       remembering to add it. tools/ is lab code and tests/ is the tests.
     - also_copy names every other tracked top-level file and directory, so a
       suite that reads one finds it in mutmut's copy (mutants/) too.
-    - Nothing is listed that does not exist, apart from vendor/ and
-      node_modules/, which are installed rather than tracked.
+    - Nothing is listed that does not exist, apart from vendor/, which is
+      installed rather than tracked. node_modules/ is linked, not copied (see
+      pyproject.toml).
 
 The tracked files come from `git ls-files`, checked first against names this
 file knows are there, so the comparison cannot pass by listing nothing.
@@ -24,7 +25,7 @@ import tomllib
 from _harness import ROOT, check, check_true, run
 
 NOT_MUTATED = {"tests", "tools"}
-INSTALLED = {"vendor/", "node_modules/"}
+INSTALLED = {"vendor/"}
 # mutmut copies these itself, whatever also_copy says.
 COPIED_BY_MUTMUT = {"pyproject.toml", "setup.cfg"}
 
