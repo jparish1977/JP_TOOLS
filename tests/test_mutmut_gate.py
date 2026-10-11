@@ -3,7 +3,7 @@
 JP_TOOLS/tests/test_mutmut_gate.py
 mutmut-gate.py holds each function to its baseline, and gets mutants/ ready.
 
-    - The rule (Joe, 2026-10-11, strict): a baseline function fails when its
+    - The rule (Joe, 2026-10-10, strict): a baseline function fails when its
       survivors rise; a function the baseline lacks fails on any survivor;
       "no tests" mutants never count.
     - Results are counted per function, the name before `__mutmut_`.

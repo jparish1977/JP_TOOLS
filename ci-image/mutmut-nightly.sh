@@ -4,7 +4,7 @@
 #
 #   ssh iteration8 'bash ~/projects/JP_TOOLS/ci-image/mutmut-nightly.sh'
 #
-# Joe's schedule (2026-10-11): PRs mutate only what they changed; this full run
+# Joe's schedule (2026-10-10): PRs mutate only what they changed; this full run
 # is nightly. CI's mutation job copies /mutmut-state/current/mutants and
 # /mutmut-state/current/baseline.json out of the volume, read-only, and gates a
 # PR against them (mutmut-gate.py). Without them CI cannot judge, and says so.
@@ -24,8 +24,7 @@
 # (default origin/master; the first fill ran origin/mutmut, PR #215, before
 # mutmut-gate.py was on master).
 #
-# TESTED AGAINST: iteration8, 2026-10-11, its first run, which filled the
-#   empty volume (see the commit adding it).
+# TESTED AGAINST: not yet; its first run (filling the empty volume) is running.
 # NOT TESTED AGAINST: a second run swapping over an existing state; a volume
 #   that is missing (the docker step fails, and so does this).
 printf '%s' jpt-mm-nightly > /proc/$$/comm 2>/dev/null
