@@ -25,6 +25,7 @@ the function.
 """
 
 import ast
+import functools
 from collections.abc import Callable
 from itertools import pairwise, takewhile
 
@@ -90,17 +91,19 @@ class _Scope:
                     self.names[a.asname or a.name] = f"{node.module}.{a.name}"
 
     def _holders(self, assigns: list[tuple[ast.expr, ast.expr]]) -> None:
-        # To a fixed point: LAB = "tools/lab"; s = LAB + "/x.py" holds one too.
-        # Bounded: names that feed each other (a = b + "/x"; ...; b = a) grow
-        # their text every round and never settle.
-        for _ in range(len(assigns) + 1):
-            before = dict(self.held)
+        # To a fixed point of WHICH names hold one: LAB = "tools/lab"; s = LAB +
+        # "/x.py" holds one too, wherever s is assigned. The names only grow,
+        # from a finite set, so this ends; the texts are re-read each round
+        # and do not decide it, because names that feed each other (a = b +
+        # "/x"; ...; b = a) grow their text every round and never settle.
+        while True:
+            before = set(self.held)
             for target, value in assigns:
                 key = _dotted(target)
                 if key and (_names_lab_path(value) or self.mentions(value)):
                     self.held[key] = (self.words(value) if isinstance(value, (ast.List, ast.Tuple))
                                       else self.text(value))
-            if self.held == before:
+            if set(self.held) == before:
                 return
 
     def with_held(self, name: str) -> "_Scope":
@@ -118,14 +121,21 @@ class _Scope:
             if func.id in self.names:
                 return self.names[func.id]
             return func.id if func.id in _BUILTINS else ""
-        dotted = _dotted(func) or ""
-        head, _, rest = dotted.partition(".")
+        dotted = _dotted(func)
+        if dotted is None:
+            return ""
+        head, _, rest = dotted.partition(".")  # an attribute: rest is never empty
         bound = self.modules.get(head) or self.names.get(head)
-        return f"{bound}.{rest}" if bound and rest else ""
+        return f"{bound}.{rest}" if bound else ""
 
     def mentions(self, node: ast.AST) -> bool:
         return any(_dotted(n) in self.held for n in ast.walk(node)
                    if isinstance(n, (ast.Name, ast.Attribute)))
+
+    def holding(self, node: ast.AST) -> str | list[str] | None:
+        """What the name or attribute NODE holds, if it holds a lab path."""
+        key = _dotted(node)
+        return None if key is None else self.held.get(key)
 
     def text(self, node: ast.AST) -> str:
         """What NODE would hold as a string, as far as this file says:
@@ -138,17 +148,24 @@ class _Scope:
                            for v in node.values)
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
             return self.text(node.left) + self.text(node.right)
-        held = self.held.get(_dotted(node) or "")
+        held = self.holding(node)
         if isinstance(held, str):
             return held
         return MARK if held is not None or _names_lab_path(node) or self.mentions(node) else UNKNOWN
 
     def words(self, node: ast.AST) -> list[str]:
-        """An argv: a list or tuple word by word, a held list as held, any
-        other value as one word."""
+        """An argv: a list or tuple word by word (a *NAME holding a list
+        spread into it), a held list as held, any other value as one word."""
         if isinstance(node, (ast.List, ast.Tuple)):
-            return [UNKNOWN if isinstance(e, ast.Starred) else self.text(e) for e in node.elts]
-        held = self.held.get(_dotted(node) or "")
+            out: list[str] = []
+            for e in node.elts:
+                spread = self.holding(e.value) if isinstance(e, ast.Starred) else None
+                if isinstance(spread, list):
+                    out += spread
+                else:
+                    out.append(UNKNOWN if isinstance(e, ast.Starred) else self.text(e))
+            return out
+        held = self.holding(node)
         if isinstance(held, list):
             return held
         return [self.text(node)]
@@ -158,11 +175,19 @@ def _kw(call: ast.Call, keyword: str) -> ast.expr | None:
     return next((k.value for k in call.keywords if k.arg == keyword), None)
 
 
-def _arg(call: ast.Call, index: int, keyword: str = "") -> ast.expr | None:
-    """Argument INDEX of CALL, or its KEYWORD; None past a *args."""
-    if index < len(call.args) and not any(isinstance(a, ast.Starred) for a in call.args[:index + 1]):
-        return call.args[index]
-    return _kw(call, keyword) if keyword else None
+def _positional(call: ast.Call, index: int) -> ast.expr | None:
+    """Argument INDEX of CALL; None when there is none there, or a *args
+    comes at or before it, so its position cannot be known."""
+    upto = call.args[:index + 1]
+    if len(upto) <= index or any(isinstance(a, ast.Starred) for a in upto):
+        return None
+    return call.args[index]
+
+
+def _arg(call: ast.Call, index: int, keyword: str) -> ast.expr | None:
+    """Argument INDEX of CALL, or else its KEYWORD."""
+    found = _positional(call, index)
+    return found if found is not None else _kw(call, keyword)
 
 
 def _argv_runner(call: ast.Call, scope: _Scope) -> bool:
@@ -180,7 +205,8 @@ def _argv_runner(call: ast.Call, scope: _Scope) -> bool:
 
 
 def _shell_runner(call: ast.Call, scope: _Scope) -> bool:
-    command = _arg(call, 0, "cmd") or _kw(call, "command")
+    """os.system(command), os.popen(cmd), subprocess.getoutput(cmd), ..."""
+    command = _positional(call, 0) or _kw(call, "cmd") or _kw(call, "command")
     return command is not None and bool(shell_runs(scope.text(command)))
 
 
@@ -189,20 +215,25 @@ def _vararg_runner(call: ast.Call, scope: _Scope) -> bool:
     return command_runs_lab([scope.text(a) for a in call.args])
 
 
-def _exec_runner(at: int, argv_at: int | None) -> Callable[[ast.Call, _Scope], bool]:
+def _exec_runs(call: ast.Call, scope: _Scope, at: int, argv_at: int | None) -> bool:
     """os.exec*/spawn*/posix_spawn*: the program is argument AT; argv is the
     list at ARGV_AT, or, when None, the arguments after AT (argv[0] first)."""
-    def runs(call: ast.Call, scope: _Scope) -> bool:
-        path = _arg(call, at)
-        if path is None:
-            return False
-        if argv_at is None:
-            rest = [scope.text(a) for a in call.args[at + 2:]]
-        else:
-            argv = _arg(call, argv_at)
-            rest = scope.words(argv)[1:] if argv is not None else []
-        return command_runs_lab([scope.text(path), *rest])
-    return runs
+    path = _positional(call, at)
+    if path is None:
+        return False
+    if argv_at is None:
+        rest = [scope.text(a) for a in call.args[at + 2:]]  # past the path and argv[0]
+    else:
+        argv = _positional(call, argv_at)
+        rest = scope.words(argv)[1:] if argv is not None else []
+    return command_runs_lab([scope.text(path), *rest])
+
+
+def _exec_runner(at: int, argv_at: int | None) -> Callable[[ast.Call, _Scope], bool]:
+    # A partial over a module-level function, not a closure: the table below
+    # is built at import, and a closure made then would be the only code a
+    # mutation test could never switch.
+    return functools.partial(_exec_runs, at=at, argv_at=argv_at)
 
 
 def _file_loader(call: ast.Call, scope: _Scope) -> bool:
@@ -241,7 +272,7 @@ _LIBRARY: dict[str, Callable[[ast.Call, _Scope], bool]] = {
 def _by_library(call: ast.Call, scope: _Scope) -> bool:
     name = scope.qualified(call.func)
     judge = _LIBRARY.get(name)
-    if judge is None and name.rsplit(".", 1)[-1] == "load_script":
+    if judge is None and name.endswith(".load_script"):  # the suites' helper, imported from _harness
         judge = _file_loader
     return judge is not None and judge(call, scope)
 
@@ -267,10 +298,9 @@ def _local_runners(tree: ast.AST, scope: _Scope) -> _Runners:
     there: a helper running `git log -- PATH` runs nothing it is given."""
     funcs = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
     runners: _Runners = {}
-    # Each round that changes anything adds a parameter, from a finite set.
-    changed = True
-    while changed:
-        changed = False
+    # Until a round adds no parameter: they come from a finite set, so it ends.
+    while True:
+        found = sum(len(programs) for _, programs in runners.values())
         for f in funcs:
             params = _params(f)
             known = runners.get(f.name, ([], set()))[1]
@@ -278,22 +308,29 @@ def _local_runners(tree: ast.AST, scope: _Scope) -> _Runners:
                 trial = scope.with_held(p)
                 if any(_call_runs(c, trial, runners) for c in ast.walk(f) if isinstance(c, ast.Call)):
                     runners.setdefault(f.name, (params, set()))[1].add(p)
-                    changed = True
-    return runners
+        if sum(len(programs) for _, programs in runners.values()) == found:
+            return runners
 
 
 def _call_runs(call: ast.Call, scope: _Scope, runners: _Runners) -> bool:
     if _by_library(call, scope):
         return True
     f = call.func
-    local = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+    if isinstance(f, ast.Name):
+        local = f.id
+    elif isinstance(f, ast.Attribute):
+        local = f.attr
+    else:
+        return False  # a call through a subscript or a call: no name to match
     if local not in runners:
         return False
     params, programs = runners[local]
-    # Positions are known only up to the first *args.
-    positional = list(takewhile(lambda a: not isinstance(a, ast.Starred), call.args))
-    given = [v for p, v in zip(params, positional, strict=False) if p in programs]
-    given += [k.value for k in call.keywords if k.arg in programs]
+    given = [k.value for k in call.keywords if k.arg in programs]
+    # Positions are known only up to the first *args; arguments past the
+    # named parameters go to a *args of the helper's, never a program.
+    for i, v in enumerate(takewhile(lambda a: not isinstance(a, ast.Starred), call.args)):
+        if i < len(params) and params[i] in programs:
+            given.append(v)
     return any(is_lab(scope.text(v)) for v in given)
 
 

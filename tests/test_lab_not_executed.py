@@ -31,21 +31,34 @@ import sys
 import tempfile
 from pathlib import Path
 
+from _lab_edge_cases import PY_EDGES, SH_EDGES
 from _lab_python_cases import PY_CASES
 from _lab_shell_cases import SH_CASES
 
-from _harness import ROOT, check, run
+from _harness import ROOT, check, check_true, run
 from jpcheck.lab_use import lab_runs, python_runs, shell_runs
 
 
 def test_python_cases() -> None:
-    for label, runs, text in PY_CASES:
+    for label, runs, text in PY_CASES + PY_EDGES:
         check(label, bool(python_runs(text)), runs)
 
 
 def test_shell_cases() -> None:
-    for label, runs, line in SH_CASES:
+    for label, runs, line in SH_CASES + SH_EDGES:
         check(label, bool(shell_runs(line + "\n")), runs)
+
+
+def test_a_root_git_cannot_list_raises() -> None:
+    """"Nothing runs a lab tool" is never the answer to a question that
+    could not be asked."""
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            lab_runs(Path(tmp))
+            raised = False
+        except subprocess.CalledProcessError:
+            raised = True
+    check_true("lab_runs outside a git repo raises", raised)
 
 
 # Each file in the throwaway repo, and the lines lab_runs must report for it.
@@ -56,6 +69,7 @@ PLANTED = {
                       "        run: python3 tools/lab/x.py\n"), [5]),
     "bin/pyscript": ('#!/usr/bin/env python3\nimport subprocess\nsubprocess.run(["tools/lab/x.sh"])\n', [3]),
     "bin/shscript": ("#!/bin/sh\nbash tools/lab/x.sh\n", [2]),
+    "bin/perlscript": ("#!/usr/bin/perl\nsystem('bash tools/lab/x.sh');\n", []),
     "bin/data": ("tools/lab/x.sh\n", []),
     "notes.md": ("Run `bash tools/lab/x.sh` to measure.\n", []),
     "tools/lab/inner.sh": ("#!/bin/bash\nbash tools/lab/x.sh\n", []),
@@ -72,6 +86,8 @@ def test_planted_files_are_routed_by_kind() -> None:
         for name, (body, _) in PLANTED.items():
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_text(body, encoding="utf-8")
+        # A byte that is not UTF-8 before the line that runs one.
+        (root / "latin1.sh").write_bytes(b"echo caf\xe9\nbash tools/lab/x.sh\n")
         subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
         subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
         (root / "bin" / "locked").chmod(0)
@@ -81,6 +97,7 @@ def test_planted_files_are_routed_by_kind() -> None:
             found.setdefault(rel, []).append(line)
         for name, (_, lines) in PLANTED.items():
             check(f"{name}", found.get(name, []), lines)
+        check("latin1.sh: read past a byte that is not UTF-8", found.get("latin1.sh", []), [2])
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

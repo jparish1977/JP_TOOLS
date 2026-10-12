@@ -202,26 +202,99 @@ def test_run_traces_reach_afresh_and_keeps_results() -> None:
     if not shutil.which("git"):
         print("SKIP: git not found")
         return
-    real = subprocess.run
-    asked: list[list[str]] = []
-
-    def fake(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
-        if cmd[1:3] == ["-m", "mutmut"]:
-            asked.append(cmd)
-            return subprocess.CompletedProcess(cmd, 0)
-        return real(cmd, **kw)  # type: ignore[call-overload,no-any-return]  # reason: the real subprocess.run for git, passed through unchanged
-
     with tempfile.TemporaryDirectory() as td:
         root = _repo(Path(td))
         mutants = gate.prepare(root)
         (mutants / gate.STATS).write_text("{}", encoding="utf-8")
         (mutants / "a.py.meta").write_text("{}", encoding="utf-8")
-        with mock.patch.object(gate.subprocess, "run", side_effect=fake):
-            gate.run(root, False, 2)
+        asked = _run_mutmut(root, full=False)
         check("mutmut was run, with the children asked for",
-              [c[3:] for c in asked], [["run", "--max-children", "2"]])
+              [list(c["cmd"])[3:] for c in asked if isinstance(c["cmd"], list)],
+              [["run", "--max-children", "2"]])
+        check("  from the checkout", [c["cwd"] for c in asked], [root])
         check_true("  after the kept test reach was dropped", not (mutants / gate.STATS).exists())
         check_true("  and with the kept mutant results left in place", (mutants / "a.py.meta").exists())
+        check("a run with no stats kept runs just the same", len(_run_mutmut(root, full=False)), 1)
+
+
+def _run_mutmut(root: Path, full: bool, rc: int = 0,
+                env: dict[str, str] | None = None) -> list[dict[str, object]]:
+    """Each mutmut invocation gate.run makes, mutmut itself stood in for and
+    answering RC; git runs for real. ENV replaces os.environ for the run."""
+    real = subprocess.run
+    asked: list[dict[str, object]] = []
+
+    def fake(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        if cmd[1:3] == ["-m", "mutmut"]:
+            asked.append({"cmd": cmd, **kw})
+            return subprocess.CompletedProcess(cmd, rc)
+        return real(cmd, **kw)  # type: ignore[call-overload,no-any-return]  # reason: the real subprocess.run for git, passed through unchanged
+
+    with mock.patch.object(gate.subprocess, "run", side_effect=fake), \
+            mock.patch.dict(gate.os.environ, env or {}, clear=env is not None):
+        gate.run(root, full, 2)
+    return asked
+
+
+def test_run_puts_its_python_first_on_path() -> None:
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    here = str(Path(sys.executable).parent)
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        git = str(Path(shutil.which("git") or "git").parent)
+        env = {"PATH": git, "HOME": td, "KEEP": "1"}
+        [call] = _run_mutmut(root, full=False, env=env)
+        seen = call["env"]
+        assert isinstance(seen, dict)
+        check("PATH is mutmut's python's directory, then the PATH it had",
+              seen["PATH"], os.pathsep.join([here, git]))
+        check("  and the rest of the environment is kept", seen.get("KEEP"), "1")
+        [bare] = _run_mutmut(root, full=False, env={"HOME": td})
+        seen = bare["env"]
+        assert isinstance(seen, dict)
+        check("no PATH at all: its python's directory and an empty rest",
+              seen["PATH"], here + os.pathsep)
+
+
+def test_run_full_starts_from_nothing() -> None:
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        mutants = gate.prepare(root)
+        (mutants / "a.py.meta").write_text("{}", encoding="utf-8")
+        stale = Path(td) / "stale-wt"
+        subprocess.run(["git", "-C", str(root), "worktree", "add", "-q", "--detach", str(stale)],
+                       check=True, env=_ENV)
+        shutil.rmtree(stale)
+        check_true("CONTROL: git lists a worktree whose directory is gone",
+                   str(stale) in _worktrees(root))
+        _run_mutmut(root, full=True)
+        check_true("--full drops every kept result", not (mutants / "a.py.meta").exists())
+        check_true("  and prunes the worktree that was gone", str(stale) not in _worktrees(root))
+        check("  and mutants/ is ready again", _ls(mutants), "a.py\n")
+
+
+def test_run_says_how_mutmut_failed() -> None:
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        try:
+            _run_mutmut(root, full=False, rc=3)
+            said = ""
+        except gate.GateError as e:
+            said = str(e)
+    check("mutmut exiting 3 is a GateError naming the code", said, "mutmut run exited 3")
+
+
+def _worktrees(root: Path) -> str:
+    return subprocess.run(["git", "-C", str(root), "worktree", "list", "--porcelain"],
+                          capture_output=True, text=True, check=True).stdout
 
 
 def test_the_command_line() -> None:

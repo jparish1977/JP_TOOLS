@@ -19,6 +19,7 @@ PHP launching a process are not seen.
 """
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from jpcheck.lab_python import python_runs
@@ -27,32 +28,37 @@ from jpcheck.lab_shell import LAB, shell_runs
 __all__ = ["lab_runs", "python_runs", "shell_runs"]
 
 _SHELL_SUFFIXES = (".sh", ".bash", ".yml", ".yaml")
+_SHEBANG_MAX = 200  # bytes of a #! line read; one is never longer
+_DECODE = ("utf-8", "replace")  # a byte that is not UTF-8 cannot hide a line
+
+Reader = Callable[[str], list[int]]
 
 
-def _kind(path: Path) -> str:
-    """"python", "shell" or "" for a tracked file: by suffix, else by the
-    #! line of a file with none."""
+def _reader(path: Path) -> Reader | None:
+    """python_runs or shell_runs for a tracked file, by its suffix, else by
+    the #! line of a file with none; None for a file neither reads."""
     if path.suffix == ".py":
-        return "python"
+        return python_runs
     if path.suffix in _SHELL_SUFFIXES:
-        return "shell"
+        return shell_runs
     if path.suffix:
-        return ""
+        return None
     try:
         with path.open("rb") as fh:
-            first = fh.readline(200)
+            first = fh.readline(_SHEBANG_MAX)
     except OSError:  # reason: an unreadable file runs nothing this can see
-        return ""
+        return None
     if not first.startswith(b"#!"):
-        return ""
+        return None
     if b"python" in first:
-        return "python"
-    return "shell" if b"sh" in first else ""
+        return python_runs
+    return shell_runs if b"sh" in first else None
 
 
 def lab_runs(root: Path) -> list[tuple[str, int]]:
     """(path, line) for each place a tracked file outside tools/lab/ runs a
-    lab path, in path order."""
+    lab path, in path order. A ROOT git cannot list raises: "nothing runs a
+    lab tool" is never the answer to a question that could not be asked."""
     tracked = subprocess.run(["git", "-C", str(root), "ls-files"], capture_output=True,
                              text=True, check=True).stdout.splitlines()
     found = []
@@ -62,10 +68,8 @@ def lab_runs(root: Path) -> list[tuple[str, int]]:
         path = root / rel
         if not path.is_file():
             continue
-        kind = _kind(path)
-        if not kind:
+        read = _reader(path)
+        if read is None:
             continue
-        body = path.read_text(encoding="utf-8", errors="replace")
-        hits = python_runs(body) if kind == "python" else shell_runs(body)
-        found += [(rel, n) for n in hits]
+        found += [(rel, n) for n in read(path.read_bytes().decode(*_DECODE))]
     return found

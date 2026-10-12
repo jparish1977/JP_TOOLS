@@ -23,11 +23,13 @@ LAB_MODULE = "tools.lab"
 # be spelled out (os.path.join, Path / ..., a call): still a lab path.
 MARK = "tools/lab/?"
 UNKNOWN = "?"
+LAB_DIR = "tools/lab"
 
 
 def is_lab(text: str) -> bool:
-    """TEXT is a lab path: holds "tools/lab/", or is the lab dir itself."""
-    return LAB in text or text.rstrip("/").endswith("tools/lab")
+    """TEXT is a lab path: holds "tools/lab/", or is the lab dir itself.
+    (A trailing slash is the first case, so "tools/lab/" needs no strip.)"""
+    return LAB in text or text.endswith(LAB_DIR)
 
 
 def is_lab_module(name: str) -> bool:
@@ -84,6 +86,7 @@ _INTERPRETERS = {
                          code=dict.fromkeys(("-Command", "-c"), "")),
 }
 _FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
+_OPTION_MARKS = ("-", "+")  # bash's +o and +O are options too
 _SEPARATORS = {";", "&&", "||", "|", "&", "(", ")", ";;", "|&"}
 
 
@@ -96,18 +99,36 @@ def _tokens(line: str) -> list[str] | None:
         return None
 
 
-def _substitution_end(line: str, i: int) -> int:
-    """Index just past the substitution starting at I: a backtick's partner,
-    or the ")" closing "$(" (counting the parentheses inside it)."""
-    if line[i] == "`":
-        end = line.find("`", i + 1)
-        return len(line) if end < 0 else end + 1
-    depth = 0
-    for j in range(i + 1, len(line)):
-        depth += {"(": 1, ")": -1}.get(line[j], 0)
+_BACKTICK = "`"
+_DOLLAR_PAREN = "$("
+_DEPTH = {"(": 1, ")": -1}
+_QUOTES = ("'", '"')
+_ESCAPED = 2  # a backslash and the character it escapes
+
+
+def _substitution(line: str, i: int) -> tuple[str, int]:
+    """(the command, the index just past it) of the substitution opening at
+    I: up to a backtick's partner, or to the ")" closing "$(" (counting the
+    parentheses inside it). An unclosed one runs to the end of the line."""
+    if line.startswith(_BACKTICK, i):
+        start = i + len(_BACKTICK)
+        end = line.find(_BACKTICK, start)
+        if end == -1:
+            return line[start:], len(line)
+        return line[start:end], end + len(_BACKTICK)
+    start = i + len(_DOLLAR_PAREN)
+    depth = 1
+    for j in range(start, len(line)):
+        depth += _DEPTH.get(line[j], 0)
         if depth == 0:
-            return j + 1
-    return len(line)
+            return line[start:j], j + 1
+    return line[start:], len(line)
+
+
+def _is_comment(line: str, i: int) -> bool:
+    """A "#" at I starts a comment: at the start of the line or after
+    whitespace, not inside a word."""
+    return line[i] == "#" and (i == 0 or line[i - 1].isspace())
 
 
 def _substitutions(line: str) -> tuple[str, list[str]]:
@@ -118,24 +139,24 @@ def _substitutions(line: str) -> tuple[str, list[str]]:
     i, quote = 0, ""
     while i < len(line):
         c = line[i]
-        step = 1
         if quote == "'":
-            quote = "" if c == "'" else quote
+            if c == "'":
+                quote = ""
         elif c == "\\":
-            step = 2
-        elif c in "'\"":
+            out.append(line[i:i + _ESCAPED])
+            i += _ESCAPED
+            continue
+        elif c in _QUOTES:
             quote = "" if quote == c else quote or c
-        elif c == "#" and not quote and (i == 0 or line[i - 1].isspace()):
+        elif not quote and _is_comment(line, i):
             break
-        elif c == "`" or line.startswith("$(", i):
-            end = _substitution_end(line, i)
-            body = line[i + 1:end - 1] if c == "`" else line[i + 2:end - 1]
+        elif line.startswith((_BACKTICK, _DOLLAR_PAREN), i):
+            body, i = _substitution(line, i)
             inner.append(body)
             out.append(UNKNOWN)
-            i = end
             continue
-        out.append(line[i:i + step])
-        i += step
+        out.append(c)
+        i += 1
     return "".join(out), inner
 
 
@@ -152,7 +173,8 @@ def _skip_prefix(words: list[str]) -> list[str]:
     i = 0
     while i < len(words):
         w = words[i]
-        if w in _CONTROL or ("=" in w and not w.startswith("-") and w.split("=", 1)[0].isidentifier()):
+        # VAR=value: an option (-o=x) is never an identifier, so no check for "-".
+        if w in _CONTROL or ("=" in w and w.partition("=")[0].isidentifier()):
             i += 1
         elif Path(w).name in _WRAPPERS:
             takes = _WRAPPERS[Path(w).name]
@@ -180,16 +202,19 @@ def _interpreter_runs_lab(spec: _Interpreter, rest: list[str]) -> bool:
     i = 0
     while i < len(rest):
         w = rest[i]
-        value = rest[i + 1] if i + 1 < len(rest) else ""
-        if w in spec.code:
-            return _code_runs_lab(value, spec.code[w])
-        if spec.modules and w == "-m":
-            return is_lab_module(value)
-        if w in spec.script:
-            return is_lab(value)
-        if not w.startswith(("-", "+")):
+        if not w.startswith(_OPTION_MARKS):
             return is_lab(w)
-        i += 2 if w in spec.value else 1
+        takes_value = w in spec.code or w in spec.script or w in spec.value or (
+            spec.modules and w == "-m")
+        if takes_value and i + 1 == len(rest):
+            return False  # an option missing its value: nothing runs
+        if w in spec.code:
+            return _code_runs_lab(rest[i + 1], spec.code[w])
+        if spec.modules and w == "-m":
+            return is_lab_module(rest[i + 1])
+        if w in spec.script:
+            return is_lab(rest[i + 1])
+        i += 2 if takes_value else 1
     return False
 
 
