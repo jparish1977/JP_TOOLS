@@ -62,7 +62,7 @@ tools_git() {
 check_flags() {
     HELP=$("$PY" "$CHECK_PY" --help 2>/dev/null)
     NEED="--skip-unsupported"
-    [ -f "$BASELINE_FILE" ] && NEED="--skip-unsupported --baseline --touched"
+    [ -f "$BASELINE_FILE" ] && NEED="--skip-unsupported --baseline --touched --raised-over"
     MISSING=""
     for flag in $NEED; do
         case "$HELP" in
@@ -143,8 +143,8 @@ if isinstance(doc, dict) and isinstance(doc.get("skipped"), str):
 
 # Each staged file through check.py; sets rc (1 on any failure), checked,
 # skipped, one reason per line for each file check.py skipped, and held, one
-# path per line for each file check.py found no worse but not lowered
-# (jpexit.NOT_LOWERED, 3), which the commit message decides: see LINT-DEBT-OK below.
+# line per file check.py found no worse but not lowered (jpexit.NOT_LOWERED,
+# 3), naming it and why, which the commit message decides: see LINT-DEBT-OK below.
 #
 # Split on newlines only, so paths with spaces survive.
 #
@@ -186,7 +186,7 @@ check_staged() {
         printf '%s\n' "$out"
         why=""
         if [ "$file_rc" -eq 3 ]; then
-            held="$held$f
+            held="$held$f: changed, and fixed none of its recorded findings
 "
         elif [ "$file_rc" -ne 0 ]; then
             rc=1
@@ -246,15 +246,46 @@ baseline_must_be_clean() {
     exit 1
 }
 
+# RAISED. The baseline may only fall: a staged quality-baseline.json that
+# raises any count over HEAD's is held like a file below. It is how a re-record
+# commits, and also how `git restore quality-baseline.json` after a path
+# commit (which puts the index's older copy back) would silently undo a gain.
+# Compared as staged before this run: the run itself only lowers counts.
+check_raised() {
+    [ -n "$PRIOR_BASELINE" ] || return 0
+    head_blob=$(git rev-parse -q --verify "HEAD:quality-baseline.json" 2>/dev/null) || return 0
+    [ "$head_blob" = "$PRIOR_BASELINE" ] && return 0
+    old=$(git rev-parse --git-path jp-tools-baseline-head.json)
+    new=$(git rev-parse --git-path jp-tools-baseline-staged.json)
+    { git cat-file blob "$head_blob" > "$old" && git cat-file blob "$PRIOR_BASELINE" > "$new"; } \
+        || broken "could not read HEAD's and the staged quality-baseline.json." \
+            "run git cat-file blob HEAD:quality-baseline.json by hand to see why."
+    raised=$("$PY" "$CHECK_PY" "$new" --raised-over "$old" 2>&1)
+    raised_rc=$?
+    rm -f "$old" "$new"
+    case $raised_rc in
+        0) ;;
+        1)
+            printf '%s\n' "$raised"
+            echo " If this is \`git restore\` putting back an older copy, stage HEAD's instead:"
+            echo "   git checkout HEAD -- quality-baseline.json"
+            held="${held}quality-baseline.json: raises a count over HEAD's (above)
+" ;;
+        *) broken "check.py --raised-over exited $raised_rc, so the staged baseline was not compared with HEAD's: $raised" \
+            "run it by hand: $PY \"$CHECK_PY\" NEW.json --raised-over OLD.json" ;;
+    esac
+}
+
 # LINT-DEBT-OK. A file that is no worse but fixed none of its recorded
-# findings is held rather than failed, and the commit message decides:
-# hooks/commit-msg.sh lets it through on a line 'LINT-DEBT-OK: <reason>', so
-# the reason is kept in the history, and refuses the commit otherwise. Only
-# this rule is waived; a file that got worse fails here and no line clears it.
+# findings is held rather than failed, and so is a baseline that raises a
+# count; the commit message decides: hooks/commit-msg.sh lets them through on
+# a line 'LINT-DEBT-OK: <reason>', so the reason is kept in the history, and
+# refuses the commit otherwise. Only these are waived; a file that got worse
+# fails here and no line clears it.
 # The hold is DEBT_FILE: the tree of the index being committed, the baseline
-# blob as it was staged before this run (for commit-msg to put back), then the
-# held paths. The tree ties it to this commit, so a hold left by a commit that
-# never reached its message is not read by a later one.
+# blob as it was staged before this run (for commit-msg to put back), then a
+# line per held item, naming it and why. The tree ties it to this commit, so a
+# hold left by a commit that never reached its message is not read by a later one.
 commit_msg_hook_installed() {
     hooks=$(git config --get core.hooksPath) || hooks=$(git rev-parse --git-path hooks)
     grep -q "^# JP_TOOLS commit-msg hook" "$hooks/commit-msg" 2>/dev/null
@@ -264,7 +295,7 @@ hold_needs_commit_msg() {
     [ -n "$held" ] && [ "$rc" -eq 0 ] || return 0
     commit_msg_hook_installed && return 0
     echo ""
-    echo " REFUSED: fixed none of their recorded findings:"
+    echo " REFUSED: these need a reason in the message:"
     printf '%s' "$held" | sed 's/^/   /'
     echo " A 'LINT-DEBT-OK: <reason>' line in the message would let them through,"
     echo " but this repo has no JP_TOOLS commit-msg hook to read it."
@@ -278,7 +309,7 @@ write_hold() {
         "run git write-tree by hand to see why."
     { echo "$tree"; echo "$PRIOR_BASELINE"; printf '%s' "$held"; } > "$DEBT_FILE" \
         || broken "could not write $DEBT_FILE." "check that the git directory is writable."
-    echo "JP_TOOLS: no worse, but fixed none of their recorded findings:"
+    echo "JP_TOOLS: held for a reason in the message:"
     printf '%s' "$held" | sed 's/^/   /'
     echo "  The commit goes through only with a line 'LINT-DEBT-OK: <reason>' in its message."
 }
@@ -350,6 +381,7 @@ STAGED=$(git diff --cached --name-only --diff-filter=ACM)
 baseline_must_be_clean
 PRIOR_BASELINE=$(git rev-parse -q --verify ":quality-baseline.json" 2>/dev/null)
 check_staged
+check_raised
 hold_needs_commit_msg
 settle_baseline
 write_hold
