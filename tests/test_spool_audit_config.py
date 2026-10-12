@@ -137,6 +137,9 @@ def test_parse_retention_precedence() -> None:
         (b"PreserveJobFiles Yes\nPreserveJobFiles No\n", False, "the last wins both ways"),
         (b"  preservejobfiles   off  \n", False, "case and leading whitespace"),
         (b"PreserveJobFiles 0\n", False, "0 counts as off"),
+        (b"PreserveJobFiles false\n", False, "false counts as off"),
+        (b"PreserveJobFiles no\n", False, "no, lowercase, counts as off"),
+        (b"PreserveJobFiles On\n", True, "anything else keeps"),
         (b"# PreserveJobFiles Yes\n", True, "a commented directive is not a directive"),
         (b"# d\xe9partement\nPreserveJobFiles No\n", False, "a non-UTF-8 byte elsewhere"),
     ]

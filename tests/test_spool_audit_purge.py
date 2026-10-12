@@ -18,8 +18,37 @@ from _harness import FAILURES, check, check_true, run
 from spool_audit_support import _Blocked, first_note, spool
 from spoolaudit.classify import classify
 from spoolaudit.model import Entry, Kind, Listing, Removal, Verdict
-from spoolaudit.purge import delete_residue, purge_outcome
+from spoolaudit.purge import _unlink_at, delete_residue, purge_outcome
 from spoolaudit.read import read_spool
+
+
+def test_purge_refuses_an_empty_path_component() -> None:
+    """'' is refused as a component like '.' and '..': no listing produces
+    'sub//f.ps' or '/f.ps', so such an entry did not come from the audit, and
+    the file it seems to name is left alone."""
+    with tempfile.TemporaryDirectory() as raw:
+        spool_dir = pathlib.Path(raw) / "spool"
+        (spool_dir / "sub").mkdir(parents=True)
+        victim = spool_dir / "sub" / "f.ps"
+        victim.write_bytes(b"%!PS\n")
+        for name in ("sub//f.ps", "/sub/f.ps", "sub/f.ps/"):
+            res = delete_residue(str(spool_dir), (Entry(name=name, kind=Kind.TEMP),))
+            check(f"{name!r}: refused as a name the audit could not produce, nothing removed",
+                  (res.removed, res.failed),
+                  ((), (f"{name} (refused: not a name the audit could have produced)",)))
+        check_true("  the file survives", victim.exists())
+
+
+def test_a_refused_unlink_counts_no_surviving_links() -> None:
+    """_unlink_at's count is the OTHER links left after an unlink that
+    happened; a refusal unlinked nothing, so its count is 0, never 1."""
+    with tempfile.TemporaryDirectory() as raw:
+        fd = os.open(raw, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            note, survivors = _unlink_at(fd, "../outside.ps")
+        finally:
+            os.close(fd)
+        check("refused: a note, and 0", (note is not None, survivors), (True, 0))
 
 
 def test_purge_refuses_a_path_that_steps_outside() -> None:

@@ -1,12 +1,15 @@
 {
- "about": "run-suites.sh counts a suite that exits 0 with a SKIP last line as skipped, never passed; a failure exits 1, a root it cannot enter 2 (could not look), and a skip with no failure 3, so the two never share a code. Run: mutate-on-target.py TREE run-suites.sh tests/test_run_suites.py tests/mutants/jpt-skip-is-not-a-pass-on-run-suites.json",
+ "about": "run-suites.sh counts a suite that exits 0 having printed any line starting SKIP as skipped, never passed, and names it with that line; a failure exits 1, a root it cannot enter 2 (could not look), and a skip with no failure 3, so the two never share a code. The suites run without git's repository variables. Run: mutate-on-target.py TREE run-suites.sh tests/test_run_suites.py tests/mutants/jpt-skip-is-not-a-pass-on-run-suites.json",
  "mutants": [
-  {"name": "skip-counted-as-pass", "edits": [["  elif [ \"${last#SKIP}\" != \"$last\" ]; then", "  elif false; then"]], "target": "counted as skipped, not passed"},
+  {"name": "skip-counted-as-pass", "edits": [["    elif grep -q '^SKIP' \"$out/$n.out\"; then", "    elif false; then"]], "target": "counted as skipped, not passed"},
+  {"name": "only-the-last-line-decides", "edits": [["    elif grep -q '^SKIP' \"$out/$n.out\"; then", "    elif [ \"${last#SKIP}\" != \"$last\" ]; then"]], "target": "a SKIP printed before a later \"3 passed\": exit 3"},
   {"name": "skip-exits-0", "edits": [["  echo \"run-suites: exit 3, none failed, ${#skipped[@]} skipped\"\n  exit 3", "  true"]], "target": "a skip and no failure: exit 3"},
   {"name": "skip-exits-2-as-before", "edits": [["  exit 3\n", "  exit 2\n"]], "target": "a skip and no failure: exit 3"},
   {"name": "could-not-look-exits-3", "edits": [["  exit 2\nfi", "  exit 3\nfi"]], "target": "could not look: exit 2"},
   {"name": "failure-exits-0", "edits": [["  echo \"run-suites: exit 1, ${#failed[@]} failed\"\n  exit 1", "  true"]], "target": "a failure: exit 1, whatever else"},
-  {"name": "skips-not-named", "edits": [["  echo \"SKIPPED ${suites[$((n - 1))]}\"", "  true"]], "target": "and named"},
+  {"name": "skips-not-named", "edits": [["    echo \"SKIPPED ${suites[$((n - 1))]} :: $(grep -m 1 '^SKIP' \"$out/$n.out\" | cut -c1-110)\"", "    true"]], "target": "and named"},
+  {"name": "skip-named-without-its-line", "edits": [["SKIPPED ${suites[$((n - 1))]} :: $(grep -m 1 '^SKIP' \"$out/$n.out\" | cut -c1-110)", "SKIPPED ${suites[$((n - 1))]}"]], "target": "named with the SKIP line, not the last line"},
+  {"name": "git-variables-kept", "edits": [["  unset \"$var\"\n", "  :\n"]], "target": "a Python suite does not see GIT_DIR"},
   {"name": "count-says-all-passed", "edits": [["echo \"suites: $passed/${#suites[@]} passed", "echo \"suites: ${#suites[@]}/${#suites[@]} passed"]], "target": "counted as skipped, not passed"}
  ]
 }

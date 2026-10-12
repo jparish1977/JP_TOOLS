@@ -19,8 +19,20 @@ from unittest import mock
 from _harness import check, check_true, run
 from spoolaudit.classify import classify, temp_child_note
 from spoolaudit.model import Listing, TempFile, Verdict
-from spoolaudit.read import _head, _list_names, _walk_temp, read_spool
+from spoolaudit.read import _head, _list_names, _read_top, _walk_temp, read_spool
 from spoolaudit.render import render
+
+
+def test_a_top_level_name_that_cannot_be_stat_ed_is_named() -> None:
+    """A name listed at the top that is gone by the time it is stat'd is kept
+    out of the job listing as suspect, BY NAME, and reported as unexamined
+    under that name, not under a placeholder."""
+    with tempfile.TemporaryDirectory() as raw:
+        unexamined: list[str] = []
+        suspect, extra = _read_top(pathlib.Path(raw), ("d00085-001",), unexamined)
+        check("the name is suspect, as itself", suspect, ["d00085-001"])
+        check("  and unexamined, saying why", unexamined, ["d00085-001 (vanished while reading)"])
+        check("  and nothing was read for content", extra, [])
 
 
 def test_symlinks_are_never_followed() -> None:
