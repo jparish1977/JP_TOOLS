@@ -59,29 +59,13 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - run: pip install -r requirements-dev.txt
-      - run: npm install
-      - name: PowerShell and PSScriptAnalyzer
-        run: bash install-pwsh.sh
-      # As check.yml's Python job's step of the same name.
-      - name: Install PHP tools
-        shell: bash
+      # The same script as check.yml's two mutmut jobs, so they cannot drift.
+      - name: Tools for mutmut
         env:
           FLEET_READ_TOKEN: ${{ secrets.FLEET_READ_TOKEN }}
           OWNER: ${{ vars.ITERATION8_LIBRARIES_OWNER }}
           SERVER: ${{ github.server_url }}
-        run: |
-          if [ -z "$FLEET_READ_TOKEN" ] || [ -z "$OWNER" ]; then
-            echo "Set the secret FLEET_READ_TOKEN and the variable ITERATION8_LIBRARIES_OWNER." >&2
-            exit 1
-          fi
-          for lib in core utilities; do
-            composer config -g "repositories.iteration8-$lib" vcs "$SERVER/$OWNER/iteration8-$lib.git"
-          done
-          case "$SERVER" in http://*) composer config -g secure-http false ;; esac
-          auth=$(python -c 'import json, os, sys
-          print(json.dumps({"http-basic": {sys.argv[1]: {"username": "ci", "password": os.environ["FLEET_READ_TOKEN"]}}}))' "${SERVER#*://}")
-          COMPOSER_AUTH=$auth composer install --no-interaction --no-progress
+        run: bash ci-image/mutation-tools.sh
       - name: Every mutant
         run: python mutmut-gate.py run --full --max-children 8
       - name: Survivors per function

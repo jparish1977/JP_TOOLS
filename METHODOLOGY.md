@@ -471,6 +471,8 @@ Section 7 inverted. Those are the claims you make at the start of a project; the
 
 10. **Leave nothing behind (§2.11).** Every temporary directory, worktree, background job and scratch script this change created is either removed or handed off, and no fixture carries a secret-shaped value. After the tests have run, list `/tmp` for your fixture prefixes and expect nothing.
 
+11. **Fix every review finding in the PR under review.** A finding is either wrong or right. If it is wrong, say so on the PR, with the evidence, and do not do it. If it is right, there is no reason not to do it now. That includes the ones marked "non-blocking", "small" or "can follow". Review exists to find what the change still needs before it merges. A finding filed as a follow-up issue merges the problem anyway, and leaves a ticket in its place. Only the project's owner can rule a finding out of the PR, and that ruling is recorded on the PR. The author does not get to make that call, and the reviewer does not either. Answer each finding on the PR with the commit that fixes it, then ask for the next round (item 9).
+
 The one to keep if only one survives: **a check that did not run looks exactly like a check that passed.**
 
 ---
