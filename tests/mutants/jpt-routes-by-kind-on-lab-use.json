@@ -1,8 +1,7 @@
 {
- "about": "jpcheck/lab_use.py reads each tracked file outside tools/lab by its kind: .py as Python, shell and YAML as shell, a file with no suffix by its #! line, anything else (Markdown) not at all. Run: mutate-on-target.py TREE jpcheck/lab_use.py tests/test_lab_not_executed.py tests/mutants/jpt-routes-by-kind-on-lab-use.json",
+ "about": "jpcheck/lab_use.py's module-level choices, which mutmut does not mutate (its functions are mutmut's): which suffixes are read as shell, and that a byte that is not UTF-8 is replaced, not fatal. Run: mutate-on-target.py TREE jpcheck/lab_use.py tests/test_lab_not_executed.py tests/mutants/jpt-routes-by-kind-on-lab-use.json",
  "mutants": [
-  {"name": "lab-files-scanned-too", "edits": [["        if rel.startswith(LAB):\n            continue", "        if False:\n            continue"]], "target": "tools/lab/inner.sh"},
-  {"name": "shebang-python-not-read", "edits": [["    if b\"python\" in first:\n        return \"python\"", "    if False:\n        return \"python\""]], "target": "bin/pyscript"},
-  {"name": "markdown-read-as-shell", "edits": [["    if path.suffix:\n        return \"\"", "    if path.suffix:\n        return \"shell\""]], "target": "notes.md"}
+  {"name": "yaml-not-read", "edits": [["_SHELL_SUFFIXES = (\".sh\", \".bash\", \".yml\", \".yaml\")", "_SHELL_SUFFIXES = (\".sh\", \".bash\")"]], "target": "workflow.yml"},
+  {"name": "non-utf8-is-fatal", "edits": [["_DECODE = (\"utf-8\", \"replace\")", "_DECODE = (\"utf-8\", \"strict\")"]], "target": "latin1.sh"}
  ]
 }
