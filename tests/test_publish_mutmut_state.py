@@ -127,6 +127,39 @@ def test_a_publisher_waits_for_the_lock() -> None:
         check_true("  current now there", (state / "current").is_symlink())
 
 
+def test_a_copy_and_a_publish_wait_for_each_other() -> None:
+    if not shutil.which("git") or not shutil.which("flock"):
+        print("SKIP: git or flock not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        state = Path(td) / "state"
+        state.mkdir()
+        here = _checkout(Path(td) / "co")
+        _publish(here, state)
+        os.chmod(state / ".lock", 0o444)  # as a read-only mount shows it
+        out = Path(td) / "out"
+        out.mkdir()
+        with open(state / ".lock") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            p = subprocess.Popen(["bash", str(FETCH), str(state)], cwd=out, env=_ENV,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.5)
+            check("while a publish holds the lock, a copy waits",
+                  (p.poll(), (out / "mutants").exists()), (None, False))
+            fcntl.flock(held, fcntl.LOCK_UN)
+        check("released: the copy finishes", p.wait(timeout=30), 0)
+        os.chmod(state / ".lock", 0o644)
+        with open(state / ".lock") as held:
+            fcntl.flock(held, fcntl.LOCK_SH)
+            p = subprocess.Popen(["bash", str(PUBLISH), str(state)], cwd=here, env=_ENV,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.5)
+            check("while a copy holds the lock shared, a publish waits",
+                  (p.poll(), len(_versions(state))), (None, 1))
+            fcntl.flock(held, fcntl.LOCK_UN)
+        check("released: it publishes", p.wait(timeout=30), 0)
+
+
 def test_refusals_leave_the_state() -> None:
     with tempfile.TemporaryDirectory() as td:
         empty = Path(td) / "empty"

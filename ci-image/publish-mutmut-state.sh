@@ -5,13 +5,14 @@
 #   bash ci-image/publish-mutmut-state.sh STATE_DIR     (from the checkout)
 #
 # Takes ./mutants and ./baseline.json. The runner runs jobs side by side, so:
-# - Publishers take STATE_DIR/.lock exclusively (flock): two never interleave.
+# - Publishers take STATE_DIR/.lock exclusively (flock): two never interleave,
+#   and readers (fetch-mutmut-state.sh) hold it shared while they copy, so a
+#   publish waits for every copy in progress and a copy for the publish.
 # - Each publish is a new directory, STATE_DIR/v-<UTC time>-<pid>, never
 #   changed once written; STATE_DIR/current is a symlink to it, replaced in
 #   one rename. A reader (fetch-mutmut-state.sh) resolves the link once and
 #   copies that directory, so it gets the old state or the new one whole.
 # - The version current names and the one before it are kept; older ones go.
-#   A reader mid-copy of the one before is not cut short.
 # A current that is still a plain directory (the layout before this) is
 # moved to a version first.
 #
