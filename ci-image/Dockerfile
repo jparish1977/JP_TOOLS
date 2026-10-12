@@ -7,9 +7,10 @@
 # What it holds comes from the repos' own manifests, never a list kept here:
 # requirements-system.txt (JP_TOOLS' gate tools and PHP extensions, pwsh and
 # PSScriptAnalyzer at their pins, through install-pwsh.sh and its sha256
-# check), plus the tools other repos' CI installed per run (projectbook:
-# ripgrep, poppler-utils, iproute2). Python's packages stay with each job
-# (requirements-dev.txt through the runner's shared pip cache).
+# check), plus the tools other repositories' CI installed on every run
+# (ripgrep, poppler-utils, iproute2, pandoc, dvipng, opensp, sgml-data).
+# Python's packages stay with each job (requirements-dev.txt through the
+# runner's shared pip cache).
 #
 # A pin that moves in a manifest is not in the image until it is rebuilt.
 # check-pins.py in CI reads each tool back against its pin, so a stale image
@@ -27,6 +28,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 # photorec, ddrescue, mkntfs and ntfsls), from install-recovery.sh's apt set:
 # without them those suites print SKIP in a plain run, and under pytest, where
 # mutmut runs them, a suite that skips only in its __main__ fails instead.
+# pandoc converts HTML; dvipng draws TeX equations from DVI; opensp and
+# sgml-data: onsgmls validates SGML against the ISO entity sets. texlive-base
+# is named because it is only a RECOMMENDS of dvipng: without it
+# --no-install-recommends gave a dvipng with no TeX fonts (kpsewhich
+# cmr10.tfm found nothing, measured in fleet-ci:b48264a), which reads every
+# DVI's font as missing. build.sh checks onsgmls by parsing a valid one-line
+# document: `onsgmls -v` alone parses an empty one and exits 1.
 RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
     && apt-get update -q \
     && apt-get install -y -q --no-install-recommends \
@@ -34,6 +42,7 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
         shellcheck cppcheck \
         ripgrep poppler-utils iproute2 \
         mame-tools testdisk gddrescue ntfs-3g \
+        pandoc dvipng texlive-base opensp sgml-data \
     && rm -rf /var/lib/apt/lists/*
 
 # Jobs run as fleet-ci, never root. The base image's user is root, so every
