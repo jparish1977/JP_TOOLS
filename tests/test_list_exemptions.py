@@ -20,6 +20,7 @@ WHAT IS CHECKED
 import contextlib
 import io
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -158,7 +159,19 @@ def test_help() -> None:
     for want in ("Inventory every `# pragma: no cover` in a file or tree, and what it claims.",
                  "file or directory", "machine-readable output",
                  "exit 1 if any branchy exemption states no reason"):
-        check_true(f"--help says: {want}", want in text)
+        check_true(f"--help says, as words: {want}",
+                   re.search(rf"(?<![A-Za-z]){re.escape(want)}(?![A-Za-z])", text) is not None)
+    check_true("  the description is the docstring's first line only", "WHY THIS IS SEPARATE" not in text)
+
+
+def test_strict_passes_a_branchy_exemption_that_states_a_reason() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        f = Path(td) / "r.py"
+        f.write_text("def f(x):  # pragma: no cover reason: the socket half\n    if x:\n        return 1\n",
+                     encoding="utf-8")
+        rc, out, _ = _main(str(f), "--strict", "--json")
+        check("a branchy exemption with a reason: --strict passes, none unjustified",
+              (rc, json.loads(out)["unjustified"]), (0, 0))
 
 
 if __name__ == "__main__":

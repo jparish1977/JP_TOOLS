@@ -61,11 +61,12 @@ def _head(path: Path, n: int = HEAD_BYTES) -> str | None:
 
 
 def _readlink(path: Path) -> str:
-    """A symlink's target for the report, or "?" when it cannot be read."""
+    """A symlink's target for the report, or "?" when there is none to read:
+    not a link (readlink fails EINVAL), or one that cannot be read."""
     try:
         return os.readlink(path)
     except OSError:
-        # reason: the target is only printed; "?" says it could not be read
+        # reason: the target is only printed; "?" says there is none to show
         return "?"
 
 
@@ -266,10 +267,11 @@ def _read_top(root: Path, top: tuple[str, ...],
         if st is None:
             suspect.append(n)
             continue
-        link = stat.S_ISLNK(st.st_mode)
+        # _readlink answers "?" for anything that is not a link, so it is
+        # asked of every entry rather than only the ones lstat says are links.
         d = classify_top(TopEntry(
-            name=n, is_symlink=link, is_dir=stat.S_ISDIR(st.st_mode),
-            is_regular=stat.S_ISREG(st.st_mode), target=_readlink(f) if link else "?",
+            name=n, is_symlink=stat.S_ISLNK(st.st_mode), is_dir=stat.S_ISDIR(st.st_mode),
+            is_regular=stat.S_ISREG(st.st_mode), target=_readlink(f),
         ))
         if d.note is not None:
             unexamined.append(d.note)

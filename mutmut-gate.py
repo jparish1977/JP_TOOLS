@@ -249,7 +249,8 @@ def reset_moved_verdicts(mutants: Path, before: dict[str, frozenset[str]] | None
             functions.add(k.partition("__mutmut_")[0])
         if hit:
             verdicts += len(hit)
-            meta.write_text(json.dumps(doc, indent=4), encoding="utf-8")
+            # As mutmut writes it: indent 4, ASCII (json's default escapes the rest).
+            meta.write_bytes(json.dumps(doc, indent=4).encode())
     return verdicts, len(functions)
 
 

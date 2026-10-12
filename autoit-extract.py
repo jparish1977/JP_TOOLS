@@ -45,6 +45,10 @@ from platformtools.procname import name_process
 
 MARKER = bytes.fromhex("a3484bbe986c4aa9994c530a86d6487d")
 HEADER = 0x18                      # 16-byte marker + 8-byte "AU3!EAxx"
+# Section names and the tag are latin-1, which decodes any byte; a script is
+# UTF-8, with anything else replaced rather than refused.
+LATIN1 = "latin1"
+SCRIPT_TEXT = "utf-8"
 
 # Grouped so a hit reads as a finding rather than a grep result. AutoIt is a
 # GUI automation language, so Run/ShellExecute alone is not suspicious -- what
@@ -85,7 +89,7 @@ def pe_facts(data: bytes) -> tuple[dict[str, Any], int] | None:
         b = sect + 40 * i
         if len(data) < b + 40:
             break                     # section table truncated; report what we have
-        names.append(data[b:b + 8].rstrip(b"\0").decode("latin1", "replace"))
+        names.append(data[b:b + 8].rstrip(b"\0").decode(LATIN1))
         raw_size, raw_ptr = struct.unpack_from("<II", data, b + 16)
         end = max(end, raw_ptr + raw_size)
     built = datetime.datetime.fromtimestamp(stamp, datetime.UTC)
@@ -110,7 +114,7 @@ def find_payload(data: bytes, overlay_at: int | None) -> tuple[bytes | None, str
     at = data.find(MARKER)
     if at < 0:
         return None, "no AU3 marker anywhere in the file", ""
-    tag_text = data[at + 16:at + 24].decode("latin1", "replace")
+    tag_text = data[at + 16:at + 24].decode(LATIN1)
     where = "overlay" if overlay_at and at >= overlay_at else "resource/section"
     return (data[at + HEADER:],
             f"{where} at offset {at}, tag {tag_text}",
@@ -187,7 +191,7 @@ def main() -> int:
         path = os.path.join(args.outdir, safe)
         with open(path, "wb") as f:
             f.write(blob)
-        text = blob.decode("utf-8", "replace")
+        text = blob.decode(SCRIPT_TEXT, "replace")
         lines = text.count("\n") + 1
         print(f"  wrote {path} ({len(blob)} bytes, {lines} lines)")
 

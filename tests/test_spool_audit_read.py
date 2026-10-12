@@ -17,9 +17,9 @@ from collections.abc import Callable
 from unittest import mock
 
 from _harness import check, check_true, run
-from spoolaudit.classify import classify, temp_child_note
-from spoolaudit.model import Listing, TempFile, Verdict
-from spoolaudit.read import _head, _list_names, _read_top, _walk_temp, read_spool
+from spoolaudit.classify import classify, classify_top, temp_child_note
+from spoolaudit.model import TEMP_SUBDIR, Listing, TempFile, TopEntry, Verdict
+from spoolaudit.read import _head, _list_names, _lstat, _read_top, _walk_temp, read_spool
 from spoolaudit.render import render
 
 
@@ -33,6 +33,59 @@ def test_a_top_level_name_that_cannot_be_stat_ed_is_named() -> None:
         check("the name is suspect, as itself", suspect, ["d00085-001"])
         check("  and unexamined, saying why", unexamined, ["d00085-001 (vanished while reading)"])
         check("  and nothing was read for content", extra, [])
+
+
+def test_read_top_reads_each_kind_of_entry() -> None:
+    """Every top-level kind through _read_top: tmp/ passed over without
+    stopping the walk, a job-named symlink and directory kept out of the job
+    listing with their notes, a job-named file left to classify, a stray file
+    read for content, and an unreadable stray reported as such."""
+    if os.geteuid() == 0:
+        print("SKIP: root reads a mode-000 file; the unreadable case needs a normal user")
+        return
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        (root / TEMP_SUBDIR).mkdir()
+        (root / "d00001-001").symlink_to("/nowhere")
+        (root / "d00003-001").mkdir()
+        (root / "d00004-001").write_bytes(b"%!PS job\n")
+        (root / "notes.bak").write_bytes(b"%PDF-1.4 copied\n")
+        (root / "unread.bak").write_bytes(b"secret\n")
+        (root / "unread.bak").chmod(0)
+        unexamined: list[str] = []
+        try:
+            suspect, extra = _read_top(root, (TEMP_SUBDIR, "d00001-001", "d00003-001", "d00004-001",
+                                              "notes.bak", "unread.bak"), unexamined)
+        finally:
+            (root / "unread.bak").chmod(0o600)
+        dir_note = classify_top(TopEntry(name="d00003-001", is_symlink=False, is_dir=True,
+                                         is_regular=False)).note
+        check("the job-named link and directory are suspect, by name", suspect, ["d00001-001", "d00003-001"])
+        check("  each noted: the link with its target, the directory as one, the unreadable file", unexamined, [
+            ("d00001-001 -> /nowhere (symlink, NOT followed; not examined, and deleting the link would "
+             "not remove the target)"),
+            dir_note,
+            "unread.bak (could not be read)"])
+        check("  the stray read for content, with its size", extra,
+              [TempFile(name="notes.bak", size=16, head=_head(root / "notes.bak") or "")])
+
+
+def test_lstat_says_why_it_could_not_look() -> None:
+    if os.geteuid() == 0:
+        print("SKIP: root stats through a mode-000 directory; this needs a normal user")
+        return
+    with tempfile.TemporaryDirectory() as raw:
+        locked = pathlib.Path(raw) / "locked"
+        locked.mkdir()
+        (locked / "f").write_bytes(b"x")
+        locked.chmod(0)
+        unexamined: list[str] = []
+        try:
+            got = _lstat(locked / "f", "locked/f", unexamined)
+        finally:
+            locked.chmod(0o700)
+        check("permission denied: None, and said as that, not as vanished",
+              (got, unexamined), (None, ["locked/f (permission denied on stat)"]))
 
 
 def test_symlinks_are_never_followed() -> None:

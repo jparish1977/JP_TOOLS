@@ -16,20 +16,18 @@ def parse_retention(body: bytes) -> bool:
     install, rather than only by an end-to-end run on a machine that happens
     to have the right config.
     """
-    # cupsd honours the LAST matching directive. Returning on the first would
-    # make a hand-edited config with "No" followed by "Yes" report RETENTION:
-    # OFF on a host that is retaining documents: danger reported as safety.
-    setting: bytes | None = None
-    for line in body.splitlines():
-        m = re.match(rb"^\s*PreserveJobFiles\s+(\S+)", line, re.IGNORECASE)
-        if m:
-            setting = m.group(1).lower()
-    if setting is not None:
-        return setting not in (b"no", b"off", b"false", b"0")
-    # Unset means the compiled default, which on the hosts measured here keeps
-    # documents. Reporting "off" on an absent directive would be a guess in the
-    # dangerous direction.
-    return True
+    # The directive is case-blind, so each line is lowercased and matched as such.
+    settings = [m.group(1) for line in body.splitlines()
+                if (m := re.match(rb"^\s*preservejobfiles\s+(\S+)", line.lower()))]
+    if not settings:
+        # Unset means the compiled default, which on the hosts measured here
+        # keeps documents. Reporting "off" on an absent directive would be a
+        # guess in the dangerous direction.
+        return True
+    # cupsd honours the LAST matching directive. Taking the first would make a
+    # hand-edited config with "No" followed by "Yes" report RETENTION: OFF on a
+    # host that is retaining documents: danger reported as safety.
+    return settings[-1] not in (b"no", b"off", b"false", b"0")
 
 
 def retention_state(conf: str) -> bool | None:

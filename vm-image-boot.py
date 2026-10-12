@@ -53,6 +53,15 @@ VARS_CANDIDATES = [
     "/usr/share/edk2/ovmf/OVMF_VARS.fd",
 ]
 
+# The PNG format's fixed parts: the signature, a chunk's 4-byte length and CRC,
+# and IHDR's fields (width, height, then bit depth, colour type, compression,
+# filter and interlace bytes).
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PNG_U32 = ">I"
+PNG_IHDR = ">IIBBBBB"
+# What qemu writes on stderr, read as text; anything not UTF-8 is replaced.
+QEMU_TEXT = "utf-8"
+
 
 def image_format(path: str) -> str:
     """The image's real container format, asked of qemu-img rather than assumed.
@@ -80,14 +89,14 @@ def image_format(path: str) -> str:
 def parse_forward(spec: str) -> tuple[int, int]:
     """HOST:GUEST as two ports, refusing anything else by name.
 
-    `partition(":")` on a value with no colon yields an empty guest port and
-    builds `hostfwd=tcp:127.0.0.1:1234-:`, which qemu rejects at startup with
-    its own parse error rather than naming the argument that was wrong.
+    Checked here because a value with no colon would build
+    `hostfwd=tcp:127.0.0.1:1234-:`, which qemu rejects at startup with its own
+    parse error rather than naming the argument that was wrong.
     """
-    host, sep, guest = spec.partition(":")
-    if not sep or not host.isdigit() or not guest.isdigit():
+    ports = spec.split(":")
+    if len(ports) != 2 or not all(p.isdigit() for p in ports):
         sys.exit(f"--forward {spec}: expected HOST:GUEST, two port numbers")
-    return int(host), int(guest)
+    return int(ports[0]), int(ports[1])
 
 
 def first_existing(paths: list[str]) -> str | None:
@@ -115,11 +124,11 @@ def ppm_to_png(ppm_path: str, png_path: str) -> tuple[int, int]:
 
     def chunk(tag: bytes, payload: bytes) -> bytes:
         body = tag + payload
-        return (struct.pack(">I", len(payload)) + body
-                + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF))
+        return (struct.pack(PNG_U32, len(payload)) + body
+                + struct.pack(PNG_U32, zlib.crc32(body) & 0xFFFFFFFF))
 
-    png = (b"\x89PNG\r\n\x1a\n"
-           + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    png = (PNG_SIGNATURE
+           + chunk(b"IHDR", struct.pack(PNG_IHDR, width, height, 8, 2, 0, 0, 0))
            + chunk(b"IDAT", zlib.compress(raw))
            + chunk(b"IEND", b""))
     with open(png_path, "wb") as out:
@@ -146,7 +155,7 @@ def drain(pipe: IO[bytes] | None) -> str:
     reads it on the path where qemu has already died -- the one path where the
     message is the entire point.
     """
-    return pipe.read().decode("utf-8", "replace") if pipe else ""
+    return pipe.read().decode(QEMU_TEXT, "replace") if pipe else ""
 
 
 def screendump(monitor_path: str, out_ppm: str, timeout: int = 20) -> bool:

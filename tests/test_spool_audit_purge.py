@@ -13,6 +13,7 @@ import pathlib
 import signal
 import sys
 import tempfile
+from unittest import mock
 
 from _harness import FAILURES, check, check_true, run
 from spool_audit_support import _Blocked, first_note, spool
@@ -31,7 +32,7 @@ def test_purge_refuses_an_empty_path_component() -> None:
         (spool_dir / "sub").mkdir(parents=True)
         victim = spool_dir / "sub" / "f.ps"
         victim.write_bytes(b"%!PS\n")
-        for name in ("sub//f.ps", "/sub/f.ps", "sub/f.ps/"):
+        for name in ("sub//f.ps", "/sub/f.ps", "sub/f.ps/", "sub/./f.ps"):
             res = delete_residue(str(spool_dir), (Entry(name=name, kind=Kind.TEMP),))
             check(f"{name!r}: refused as a name the audit could not produce, nothing removed",
                   (res.removed, res.failed),
@@ -39,16 +40,55 @@ def test_purge_refuses_an_empty_path_component() -> None:
         check_true("  the file survives", victim.exists())
 
 
+def _at(root: pathlib.Path, rel: str) -> tuple[str | None, int]:
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        return _unlink_at(fd, rel)
+    finally:
+        os.close(fd)
+
+
 def test_a_refused_unlink_counts_no_surviving_links() -> None:
     """_unlink_at's count is the OTHER links left after an unlink that
     happened; a refusal unlinked nothing, so its count is 0, never 1."""
     with tempfile.TemporaryDirectory() as raw:
-        fd = os.open(raw, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            note, survivors = _unlink_at(fd, "../outside.ps")
-        finally:
-            os.close(fd)
-        check("refused: a note, and 0", (note is not None, survivors), (True, 0))
+        root = pathlib.Path(raw)
+        check("a name the audit cannot produce: a note, and 0",
+              _at(root, "../outside.ps"),
+              ("../outside.ps (refused: not a name the audit could have produced)", 0))
+        (root / "real").mkdir()
+        (root / "real" / "f.ps").write_bytes(b"%!PS\n")
+        (root / "link").symlink_to("real")
+        note, survivors = _at(root, "link/f.ps")
+        check("a symlinked parent: refused, and 0", (note, survivors),
+              ("link/f.ps (refused: link is a symlink, NOT followed)", 0))
+        check_true("  the file behind it survives", (root / "real" / "f.ps").exists())
+
+
+def test_unlink_at_removes_at_any_depth() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        (root / "top.ps").write_bytes(b"%!PS\n")
+        (root / "a" / "b").mkdir(parents=True)
+        (root / "a" / "b" / "c.ps").write_bytes(b"%!PS\n")
+        check("one component: removed, no other links", _at(root, "top.ps"), (None, 0))
+        check("three components: removed", _at(root, "a/b/c.ps"), (None, 0))
+        check_true("  both gone", not (root / "top.ps").exists() and not (root / "a" / "b" / "c.ps").exists())
+
+
+def test_unlink_at_when_the_unlink_itself_fails() -> None:
+    """The leaf was opened and checked, then the unlink: gone by then is the
+    goal state, counted 0; any other failure is a note that it is still there."""
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        (root / "sub").mkdir()
+        (root / "sub" / "f.ps").write_bytes(b"%!PS\n")
+        with mock.patch.object(os, "unlink", side_effect=FileNotFoundError()):
+            check("gone between the check and the unlink: removed, 0", _at(root, "sub/f.ps"), (None, 0))
+        with mock.patch.object(os, "unlink", side_effect=PermissionError()):
+            check("the unlink refused: said, and 0", _at(root, "sub/f.ps"),
+                  ("sub/f.ps (delete FAILED: PermissionError; it is still there)", 0))
+        check_true("  and it is still there", (root / "sub" / "f.ps").exists())
 
 
 def test_purge_refuses_a_path_that_steps_outside() -> None:

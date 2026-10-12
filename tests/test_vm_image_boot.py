@@ -28,6 +28,7 @@ WHAT IS CHECKED
 import argparse
 import contextlib
 import io
+import re
 import shutil
 import struct
 import subprocess
@@ -240,11 +241,11 @@ def test_screendump() -> None:
         check("no banner and no dump: False after the timeout, the command still sent",
               (ok, ("sendall", b"screendump " + str(ppm).encode() + b"\n") in calls, slept),
               (False, True, [1, 0.5, 0.5, 0.5, 0.5]))
-        ok, _, _ = _screendump(ppm, banner=True, write_at=2, content=b"")
-        check("an empty dump is not a dump", ok, False)
+        ok, _, slept = _screendump(ppm, banner=True, write_at=2, content=b"")
+        check("an empty dump is not a dump: waited out, False", (ok, slept), (False, [1, 0.5, 0.5, 0.5, 0.5]))
         ppm.unlink()
-        ok, _, _ = _screendump(ppm, banner=True, write_at=2, content=b"x")
-        check("one byte is", ok, True)
+        ok, _, slept = _screendump(ppm, banner=True, write_at=2, content=b"x")
+        check("one byte is: the wait ends there", (ok, slept), (True, [1, 0.5, 1]))
     with tempfile.TemporaryDirectory() as td:
         clock, sock = _Clock(), _Sock(True)
         with mock.patch.object(vm.time, "time", clock.time), mock.patch.object(vm.time, "sleep", clock.sleep), \
@@ -277,7 +278,9 @@ def test_the_parser() -> None:
                  "write to the image directly. Default is a throwaway overlay so the original cannot be damaged",
                  "DISPLAY", ("VNC display number on 127.0.0.1 (default 1, TCP 5901). A second concurrent run "
                              "needs its own."), "leave the VM running"):
-        check_true(f"help says: {want}", want in text)
+        check_true(f"help says, as words: {want}",
+                   re.search(rf"(?<![A-Za-z]){re.escape(want)}(?![A-Za-z])", text) is not None)
+    check_true("  the description is the docstring's first line only", "DRM node" not in text.split("positional")[0])
 
 
 def _build(args: argparse.Namespace, workdir: str, firmware: tuple[list[str], list[str]]
@@ -359,41 +362,58 @@ class _Proc:
 
 
 def _boot(args: argparse.Namespace, proc: _Proc, shot: bool = True) -> tuple[Any, str, list[Any], list[float]]:
+    """boot() with everything it calls stood in for; returns (result, stdout,
+    each stand-in's call in order, the sleeps)."""
     clock = _Clock()
-    popen: list[Any] = []
-    pngs: list[Any] = []
+    calls: list[Any] = []
+
+    def build(a: argparse.Namespace, fmt: str, workdir: str, monitor: str) -> list[str]:
+        calls.append(("build_command", a is args, fmt, workdir, monitor))
+        return ["qemu"]
 
     def popen_(cmd: list[str], **kw: Any) -> _Proc:
-        popen.append((cmd, kw))
+        calls.append(("Popen", cmd, kw))
         return proc
 
+    def dump(monitor: str, ppm: str) -> bool:
+        calls.append(("screendump", monitor, ppm))
+        return shot
+
+    def drained(p: Any) -> str:
+        calls.append(("drain_nonblocking", p is proc))
+        return "qemu said why"
+
     def to_png(ppm: str, png: str) -> tuple[int, int]:
-        pngs.append((ppm, png))
+        calls.append(("ppm_to_png", ppm, png))
         return 640, 480
 
     out = io.StringIO()
-    with mock.patch.object(vm, "build_command", lambda a, f, w, m: ["qemu", f, w, m]), \
+    with mock.patch.object(vm, "build_command", build), \
             mock.patch.object(vm.subprocess, "Popen", popen_), \
             mock.patch.object(vm.time, "sleep", clock.sleep), \
-            mock.patch.object(vm, "screendump", lambda mon, ppm: shot), \
-            mock.patch.object(vm, "drain_nonblocking", lambda p: "qemu said why"), \
+            mock.patch.object(vm, "screendump", dump), \
+            mock.patch.object(vm, "drain_nonblocking", drained), \
             mock.patch.object(vm, "ppm_to_png", to_png), \
             contextlib.redirect_stdout(out):
         try:
             result: Any = vm.boot(args, "raw", "/w")
         except SystemExit as e:
             result = str(e)
-    return result, out.getvalue(), popen + pngs, clock.slept
+    return result, out.getvalue(), calls, clock.slept
 
 
 def test_boot() -> None:
     proc = _Proc([None])
     rc, out, calls, slept = _boot(_args("-w", "20", "-o", "/o/s.png", "--forward", "1:2"), proc)
     check("a boot: exit 0", rc, 0)
-    check("  qemu run with its stderr kept, then the dump converted", calls, [
-        (["qemu", "raw", "/w", "/w/mon.sock"], {"stdout": vm.subprocess.DEVNULL, "stderr": vm.subprocess.PIPE}),
-        ("/w/screen.ppm", "/o/s.png")])
+    check("  the command built from these args, qemu run with its stderr kept, the dump asked "
+          "of the monitor and converted", calls, [
+              ("build_command", True, "raw", "/w", "/w/mon.sock"),
+              ("Popen", ["qemu"], {"stdout": vm.subprocess.DEVNULL, "stderr": vm.subprocess.PIPE}),
+              ("screendump", "/w/mon.sock", "/w/screen.ppm"),
+              ("ppm_to_png", "/w/screen.ppm", "/o/s.png")])
     check("  waited in steps of at most 15 s", slept, [15, 5])
+    check("16 s: a 15 s step, then the last second", _boot(_args("-w", "16"), _Proc([None]))[3], [15, 1])
     check("  what it says", out.splitlines(), [
         "  booting /img/disk.raw", "  gpu     virtio-vga", "  wrote   /o/s.png  (640x480)",
         "  note: a forwarded port answers on the host whether or not",
@@ -410,8 +430,9 @@ def test_boot() -> None:
           "  qemu exited early:\n" + "E" * 600)
     check("  noticed at the next step, and nothing left to stop", (slept, proc.calls), ([15], []))
     proc = _Proc([None])
-    said, _, _, _ = _boot(_args("-w", "1"), proc, shot=False)
-    check("no dump: exits with what qemu said", said, "  screendump produced nothing\nqemu said why")
+    said, _, calls, _ = _boot(_args("-w", "1"), proc, shot=False)
+    check("no dump: exits with what this qemu said", (said, calls[-1]),
+          ("  screendump produced nothing\nqemu said why", ("drain_nonblocking", True)))
     check("  and qemu stopped", proc.calls, ["terminate", ("wait", 10)])
     proc = _Proc([None])
     _, out, _, _ = _boot(_args("-w", "1", "--keep"), proc)
@@ -436,11 +457,19 @@ def test_clean_workdir() -> None:
                    err.getvalue().startswith(f"  could not remove {wd}: "))
 
 
+ASKED_FORMAT: list[str] = []
+
+
+def _image_format(path: str) -> str:
+    ASKED_FORMAT.append(path)
+    return "qcow2"
+
+
 def _main(argv: list[str], boot: Any) -> tuple[Any, list[Any]]:
     named: list[Any] = []
     with mock.patch.object(sys, "argv", ["vm-image-boot.py", *argv]), \
             mock.patch.object(vm, "name_process", side_effect=named.append), \
-            mock.patch.object(vm, "image_format", lambda p: "qcow2"), \
+            mock.patch.object(vm, "image_format", _image_format), \
             mock.patch.object(vm, "boot", boot):
         try:
             result: Any = vm.main()
@@ -460,8 +489,10 @@ def test_main() -> None:
             Path(workdir, "overlay.qcow2").write_bytes(b"o")
             return 7
 
+        ASKED_FORMAT.clear()
         rc, named = _main([str(img)], boot)
         check("boot's code returned, named itself", (rc, named), (7, ["vm-image-boot"]))
+        check("  the format asked of this image", ASKED_FORMAT, [str(img)])
         check("  boot given the image, its format, and a fresh vmboot- workdir", seen, [(str(img), "qcow2", True, True)])
 
         def fails(args: argparse.Namespace, fmt: str, workdir: str) -> int:

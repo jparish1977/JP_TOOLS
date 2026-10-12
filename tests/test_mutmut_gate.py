@@ -397,9 +397,12 @@ def test_verdicts_of_moved_reach_are_cleared() -> None:
         check("  each one", _codes(meta), {
             "pkg.m.x_new__mutmut_1": None, "pkg.m.x_new__mutmut_2": None, "pkg.m.x_lost__mutmut_1": None,
             "pkg.m.x_same__mutmut_1": 0, "pkg.m.x_edited__mutmut_1": 0, "pkg.m.x_lost__mutmut_2": None})
-        check("  the file stays as mutmut writes it", sorted(json.loads(meta.read_text(encoding="utf-8"))),
-              ["durations_by_key", "estimated_durations_by_key", "exit_code_by_key",
-               "hash_by_function_name", "type_check_error_by_key"])
+        doc = json.loads(meta.read_text(encoding="utf-8"))
+        check("  the file stays exactly as mutmut writes it: its keys, indent 4",
+              meta.read_text(encoding="utf-8"), json.dumps(doc, indent=4))
+        check("  all five keys kept", sorted(doc), ["durations_by_key", "estimated_durations_by_key",
+                                                  "exit_code_by_key", "hash_by_function_name",
+                                                  "type_check_error_by_key"])
         check("nothing moved: nothing cleared, the file untouched",
               gate.reset_moved_verdicts(mutants, {"pkg.m.x_new": frozenset({"t1"}),
                                                   "pkg.m.x_same": frozenset({"t1"}),
@@ -407,16 +410,43 @@ def test_verdicts_of_moved_reach_are_cleared() -> None:
                                         {f"pkg.m.{k}": v for k, v in hashes.items()}), (0, 0))
 
 
+def test_reach_compared_as_sets_an_empty_one_included() -> None:
+    """A function with no reach recorded and one recorded as reached by no
+    test are the same; neither has moved. A meta key holding __mutmut_ twice
+    is read the way mutmut reads it, up to the first."""
+    with tempfile.TemporaryDirectory() as td:
+        mutants = Path(td)
+        meta = _plant(mutants, "a.py", {"x_e": "1", "x_d": "2", "x__mutmut_odd": "3"},
+                      {"a.x_e__mutmut_1": 33, "a.x_d__mutmut_1": 33, "a.x__mutmut_odd__mutmut_1": 1})
+        _stats(mutants, {"a.x_e": [], "a.x": ["t2"]})
+        said = gate.reset_moved_verdicts(mutants, {"a.x_d": frozenset(), "a.x": frozenset({"t1"})},
+                                         {"a.x_e": "1", "a.x_d": "2", "a.x__mutmut_odd": "3"})
+        check("empty reach on either side is no reach: not moved; the odd key follows mutmut's split",
+              (said, _codes(meta)),
+              ((1, 1), {"a.x_e__mutmut_1": 33, "a.x_d__mutmut_1": 33, "a.x__mutmut_odd__mutmut_1": None}))
+
+
+def test_verdicts_cleared_in_every_meta_are_counted() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        mutants = Path(td)
+        _plant(mutants, "a.py", {"x_f": "1"}, {"a.x_f__mutmut_1": 1, "a.x_f__mutmut_2": 1})
+        _plant(mutants, "b.py", {"x_g": "1"}, {"b.x_g__mutmut_1": 0})
+        _stats(mutants, {"a.x_f": ["t"], "b.x_g": ["t"]})
+        check("two files: their cleared verdicts and functions summed",
+              gate.reset_moved_verdicts(mutants, {}, {"a.x_f": "1", "b.x_g": "1"}), (3, 2))
+
+
 def test_no_reach_before_clears_all_but_what_was_just_tested() -> None:
     with tempfile.TemporaryDirectory() as td:
         mutants = Path(td)
-        meta = _plant(mutants, "a.py", {"x_f": "1", "x_g": "2"},
-                      {"a.x_f__mutmut_1": 1, "a.x_g__mutmut_1": 0})
+        meta = _plant(mutants, "a.py", {"x_f": "1", "x_g": "2", "x_h": "3"},
+                      {"a.x_f__mutmut_1": 1, "a.x_g__mutmut_1": 0, "a.x_h__mutmut_1": 33})
         _stats(mutants, {"a.x_f": ["t"]})
-        check("no reach recorded before: every verdict whose code did not change is cleared",
-              gate.reset_moved_verdicts(mutants, None, {"a.x_f": "1", "a.x_g": "old"}), (1, 1))
+        check("no reach recorded before: every verdict whose code did not change is cleared, "
+              "a function no test reaches included",
+              gate.reset_moved_verdicts(mutants, None, {"a.x_f": "1", "a.x_g": "old", "a.x_h": "3"}), (2, 2))
         check("  the edited function's fresh verdict stays", _codes(meta),
-              {"a.x_f__mutmut_1": None, "a.x_g__mutmut_1": 0})
+              {"a.x_f__mutmut_1": None, "a.x_g__mutmut_1": 0, "a.x_h__mutmut_1": None})
         meta = _plant(mutants, "a.py", {"x_f": "1"}, {"a.x_f__mutmut_1": 1})
         check("a run from nothing (--full): every verdict is fresh, none cleared",
               gate.reset_moved_verdicts(mutants, None, {}), (0, 0))
@@ -439,13 +469,17 @@ def test_run_tests_moved_reach_again() -> None:
         (mutants / gate.STATS).write_text(json.dumps(kept), encoding="utf-8")
         meta = _plant(mutants, "a.py", {"x_f": "1"}, {"a.x_f__mutmut_1": 33})
         calls: list[dict[str, int | None]] = []
+        asked: list[tuple[object, object]] = []
 
         def fake(cmd: list[str], **kw: object) -> int:
             calls.append(_codes(meta))
+            asked.append((cmd, kw["cwd"]))
             if len(calls) == 1:  # mutmut's trace: tests/t.py::t now reaches a.x_f
                 (mutants / gate.STATS).write_text(json.dumps(
                     {**kept, "tests_by_mangled_function_name": {"a.x_f": ["tests/t.py::t"]}}),
                     encoding="utf-8")
+            else:  # mutmut tests the cleared mutant: killed
+                _plant(mutants, "a.py", {"x_f": "1"}, {"a.x_f__mutmut_1": 1})
             return 0
 
         out = io.StringIO()
@@ -453,12 +487,13 @@ def test_run_tests_moved_reach_again() -> None:
             gate.run(root, False, 2)
         check("a test newly reached a function: mutmut ran again, with its verdict cleared",
               calls, [{"a.x_f__mutmut_1": 33}, {"a.x_f__mutmut_1": None}])
+        check("  the second run asked exactly as the first", asked[1], asked[0])
         check_true("  and says so", "test reach moved for 1 function(s): their 1 verdict(s) tested again"
                    in out.getvalue())
         calls.clear()
         with mock.patch.object(gate.subprocess, "call", side_effect=fake):
             gate.run(root, False, 2)
-        check("reach unchanged since: mutmut runs once", len(calls), 1)
+        check("reach unchanged since: mutmut runs once, the new verdict kept", calls, [{"a.x_f__mutmut_1": 1}])
 
 
 def test_run_puts_its_python_first_on_path() -> None:
