@@ -55,8 +55,9 @@ def _checkout(where: Path, baseline: str = "1") -> Path:
 
 
 def _publish(cwd: Path, state: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["bash", str(PUBLISH), str(state)], cwd=cwd, capture_output=True,
-                          text=True, check=False, env=_ENV)
+    """Under umask 0, as a CI job runs it."""
+    return subprocess.run(["bash", "-c", 'umask 0; exec bash "$0" "$1"', str(PUBLISH), str(state)],
+                          cwd=cwd, capture_output=True, text=True, check=False, env=_ENV)
 
 
 def _files(top: Path) -> list[str]:
@@ -85,6 +86,7 @@ def test_publishes_a_version_and_points_current_at_it() -> None:
         check_true("  nothing in it group- or world-writable",
                    all(not (q.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH))
                        for q in current.resolve().rglob("*")))
+        check_true("  nor the lock file", not ((state / ".lock").stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH)))
         check_true("  and it says what it left out", "left out, written by mutants: 2 path(s)" in p.stdout)
         for n in (2, 3):
             time.sleep(1.1)  # versions are named to the second

@@ -42,6 +42,13 @@ counts them as new and traces just those. A change to a file the tests share
 test's reach without touching its file, so it, and a state whose commit this
 clone cannot diff against, has all reach traced afresh: slower, never wrong.
 
+mutmut also keeps each mutant's verdict until its function's code changes,
+whatever happens to the tests: a function a test newly reaches would stay
+"no tests", and one no test reaches any more would keep its kills, both until
+the nightly. So after mutmut runs, every function whose set of reaching tests
+changed, and whose code did not (that was tested again already), has its
+verdicts cleared, and mutmut runs once more for just those.
+
 mutants/ is a git worktree of HEAD with an index and NO checked-out files:
 mutmut writes every file in it, and some suites ask git about the checkout, so
 it has to answer there too. A normal checkout made mutmut take every file as
@@ -187,15 +194,68 @@ def forget_moved_reach(root: Path, stats: Path) -> str:
     return f"{len(changed)} file(s) changed since the traced commit: {len(moved)} test(s) traced again"
 
 
-def run(root: Path, full: bool, children: int) -> None:
-    """Prepare, then mutmut run. Its Python goes first on PATH: the git hooks
-    start `python3`, and in mutants/ every script imports mutmut."""
-    if full:
-        if (root / "mutants").exists():
-            shutil.rmtree(root / "mutants")
-        _git("-C", str(root), "worktree", "prune")
-    mutants = prepare(root)
-    print(f"mutmut-gate: {forget_moved_reach(root, mutants / STATS)}")
+def _reach(stats: Path) -> dict[str, frozenset[str]] | None:
+    """Which tests reach each function, as STATS records it; None when there
+    is no readable record."""
+    try:
+        doc = json.loads(stats.read_bytes())
+    except (FileNotFoundError, ValueError):  # reason: no record to compare, which run() reads as "every function may have moved"
+        return None
+    return {fn: frozenset(tests) for fn, tests in doc.get("tests_by_mangled_function_name", {}).items()}
+
+
+def _metas(mutants: Path) -> list[tuple[Path, str]]:
+    """Each .meta mutmut keeps, with the module its function names sit under."""
+    found = []
+    for meta in sorted(mutants.rglob("*.py.meta")):
+        module = _module(meta.relative_to(mutants).as_posix().removesuffix(".meta"))
+        if module:
+            found.append((meta, module))
+    return found
+
+
+def _hashes(mutants: Path) -> dict[str, str]:
+    """Each function's code hash, as mutmut kept it, by module.function."""
+    return {f"{module}.{fn}": h for meta, module in _metas(mutants)
+            for fn, h in json.loads(meta.read_bytes()).get("hash_by_function_name", {}).items()}
+
+
+def reset_moved_verdicts(mutants: Path, before: dict[str, frozenset[str]] | None,
+                         hashes_before: dict[str, str]) -> tuple[int, int]:
+    """Clear the verdicts of every function whose test reach changed in the
+    run just made, so the next run tests them again; return (verdicts,
+    functions) cleared. mutmut keeps a verdict until the function's code
+    changes, so a function a test newly reaches would stay "no tests", and one
+    a test no longer reaches would keep its kills. A function whose code
+    changed (or that is new) was tested by that run already. With no reach
+    recorded before it, every other function counts as moved."""
+    after = _reach(mutants / STATS) or {}
+    hashes = _hashes(mutants)
+    fresh = {fn for fn, h in hashes.items() if hashes_before.get(fn) != h}
+    if before is None:
+        moved = (hashes.keys() | after.keys()) - fresh
+    else:
+        moved = {fn for fn in before.keys() | after.keys()
+                 if before.get(fn, frozenset()) != after.get(fn, frozenset())} - fresh
+    verdicts = 0
+    functions: set[str] = set()
+    for meta, _ in _metas(mutants):
+        doc = json.loads(meta.read_bytes())
+        codes = doc.get("exit_code_by_key", {})
+        hit = [k for k, code in codes.items()
+               if code is not None and k.partition("__mutmut_")[0] in moved]
+        for k in hit:
+            codes[k] = None
+            functions.add(k.partition("__mutmut_")[0])
+        if hit:
+            verdicts += len(hit)
+            meta.write_text(json.dumps(doc, indent=4), encoding="utf-8")
+    return verdicts, len(functions)
+
+
+def _mutmut_run(root: Path, children: int) -> None:
+    """mutmut run, its Python first on PATH: the git hooks start `python3`,
+    and in mutants/ every script imports mutmut."""
     env = dict(os.environ, PATH=os.pathsep.join(
         [str(Path(sys.executable).parent), os.environ.get("PATH", "")]))
     # call, not run: only the exit code is read, and a nonzero one is ours to name.
@@ -203,6 +263,25 @@ def run(root: Path, full: bool, children: int) -> None:
                          cwd=root, env=env)
     if rc != 0:
         raise GateError(f"mutmut run exited {rc}")
+
+
+def run(root: Path, full: bool, children: int) -> None:
+    """Prepare, then mutmut run; then, if any function's test reach moved,
+    clear its verdicts and run again (reset_moved_verdicts)."""
+    if full:
+        if (root / "mutants").exists():
+            shutil.rmtree(root / "mutants")
+        _git("-C", str(root), "worktree", "prune")
+    mutants = prepare(root)
+    before = _reach(mutants / STATS)
+    hashes_before = _hashes(mutants)
+    print(f"mutmut-gate: {forget_moved_reach(root, mutants / STATS)}")
+    _mutmut_run(root, children)
+    verdicts, functions = reset_moved_verdicts(mutants, before, hashes_before)
+    if verdicts:
+        print(f"mutmut-gate: test reach moved for {functions} function(s): "
+              f"their {verdicts} verdict(s) tested again")
+        _mutmut_run(root, children)
 
 
 def results_text(root: Path, source: str | None) -> str:

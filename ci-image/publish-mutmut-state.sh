@@ -23,7 +23,8 @@
 # --exclude-from NUL-separated: a name after the first was kept, measured).
 #
 # A CI checkout is made under umask 0 and tar keeps modes, so the state is
-# made not group- or world-writable before it goes in.
+# made not group- or world-writable before it goes in, and so is the lock
+# file, which the same umask creates world-writable.
 #
 # Exit: 0 published; 2 nothing to publish, or STATE_DIR not writable.
 #
@@ -41,6 +42,7 @@ if ! { exec 9>>"$state/.lock"; } 2>/dev/null; then
   echo "publish-mutmut-state: $state is not writable: nothing published" >&2
   exit 2
 fi
+chmod go-w "$state/.lock"
 flock -x 9
 version=v-$(date -u +%Y%m%dT%H%M%SZ)-$$
 dir=$state/$version
