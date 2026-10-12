@@ -19,7 +19,7 @@ from unittest import mock
 from _harness import check, check_true, run
 from spoolaudit.classify import classify, classify_top, temp_child_note
 from spoolaudit.model import TEMP_SUBDIR, Listing, TempFile, TopEntry, Verdict
-from spoolaudit.read import _head, _list_names, _lstat, _read_top, _walk_temp, read_spool
+from spoolaudit.read import _head, _list_names, _lstat, _read_top, _readlink, _walk_temp, read_spool
 from spoolaudit.render import render
 
 
@@ -33,6 +33,25 @@ def test_a_top_level_name_that_cannot_be_stat_ed_is_named() -> None:
         check("the name is suspect, as itself", suspect, ["d00085-001"])
         check("  and unexamined, saying why", unexamined, ["d00085-001 (vanished while reading)"])
         check("  and nothing was read for content", extra, [])
+
+
+def test_a_vanished_name_does_not_stop_the_walk() -> None:
+    """The names after one that vanished are still read."""
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        (root / "notes.bak").write_bytes(b"%PDF-1.4 copied\n")
+        unexamined: list[str] = []
+        suspect, extra = _read_top(root, ("d00085-001", "notes.bak"), unexamined)
+        check("the vanished name is suspect and the next one is read",
+              (suspect, [t.name for t in extra]), (["d00085-001"], ["notes.bak"]))
+
+
+def test_readlink_of_a_non_link_is_a_question_mark() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        plain = pathlib.Path(raw) / "plain"
+        plain.write_bytes(b"x")
+        check("a regular file has no target to show", _readlink(plain), "?")
+        check("  nor does a name that is not there", _readlink(pathlib.Path(raw) / "gone"), "?")
 
 
 def test_read_top_reads_each_kind_of_entry() -> None:

@@ -413,17 +413,20 @@ def test_verdicts_of_moved_reach_are_cleared() -> None:
 def test_reach_compared_as_sets_an_empty_one_included() -> None:
     """A function with no reach recorded and one recorded as reached by no
     test are the same; neither has moved. A meta key holding __mutmut_ twice
-    is read the way mutmut reads it, up to the first."""
+    is read the way mutmut reads it, up to the first, so it counts as the
+    same function as a plain a.x key."""
     with tempfile.TemporaryDirectory() as td:
         mutants = Path(td)
         meta = _plant(mutants, "a.py", {"x_e": "1", "x_d": "2", "x__mutmut_odd": "3"},
-                      {"a.x_e__mutmut_1": 33, "a.x_d__mutmut_1": 33, "a.x__mutmut_odd__mutmut_1": 1})
+                      {"a.x_e__mutmut_1": 33, "a.x_d__mutmut_1": 33, "a.x__mutmut_1": 1,
+                       "a.x__mutmut_odd__mutmut_1": 1})
         _stats(mutants, {"a.x_e": [], "a.x": ["t2"]})
         said = gate.reset_moved_verdicts(mutants, {"a.x_d": frozenset(), "a.x": frozenset({"t1"})},
                                          {"a.x_e": "1", "a.x_d": "2", "a.x__mutmut_odd": "3"})
         check("empty reach on either side is no reach: not moved; the odd key follows mutmut's split",
               (said, _codes(meta)),
-              ((1, 1), {"a.x_e__mutmut_1": 33, "a.x_d__mutmut_1": 33, "a.x__mutmut_odd__mutmut_1": None}))
+              ((2, 1), {"a.x_e__mutmut_1": 33, "a.x_d__mutmut_1": 33, "a.x__mutmut_1": None,
+                        "a.x__mutmut_odd__mutmut_1": None}))
 
 
 def test_verdicts_cleared_in_every_meta_are_counted() -> None:
