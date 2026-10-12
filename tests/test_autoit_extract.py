@@ -24,10 +24,12 @@ WHAT IS CHECKED
 
 import contextlib
 import io
+import os
 import re
 import struct
 import sys
 import tempfile
+import time
 import types
 from pathlib import Path
 from typing import Any
@@ -75,6 +77,19 @@ def test_pe_facts() -> None:
     check("no sections: none named, the overlay is the whole file",
           ae.pe_facts(_pe([], stamp=0)), ({"machine": "x86", "sections": "", "stub built":
                                           "1970-01-01 00:00:00 UTC", "file size": 0x58}, 0))
+
+
+def test_the_stub_stamp_is_utc_in_any_zone() -> None:
+    """On a box whose zone is UTC, a stamp read as local time prints the same,
+    so the zone is set to one that is not."""
+    pe = _pe([], stamp=1_000_000_000)
+    try:
+        with mock.patch.dict(os.environ, {"TZ": "EST5"}):
+            time.tzset()
+            check("CONTROL: the zone here is not UTC", time.strftime("%H", time.localtime(0)), "19")
+            check("the stub stamp is still UTC", ae.pe_facts(pe)[0]["stub built"], "2001-09-09 01:46:40 UTC")
+    finally:
+        time.tzset()
 
 
 def test_pe_fields_read_as_unsigned_and_where_they_are() -> None:
