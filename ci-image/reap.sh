@@ -1,8 +1,8 @@
 #!/bin/bash
 # ci-image/reap.sh -- remove what CI jobs and image builds leave behind in
-# iteration8's runner daemon.
+# the runner's daemon.
 #
-#   ssh iteration8 'cd ~/projects/JP_TOOLS && bash ci-image/reap.sh [--dry-run]'
+#   bash ci-image/reap.sh [--dry-run]     (on the runner's host, in a checkout)
 #
 # Jobs run in the runner's docker-in-docker sidecar. A task cancelled or killed
 # before its first step leaves its container there, never started ("Created"),
@@ -22,16 +22,16 @@
 #   3. Images that no runner label names (labels read from the runner's
 #      config.yml) and that are not fleet-ci. An image a container still uses
 #      is refused by docker and left.
-# Environment: RUNNER_CONFIG (the runner's rendered config.yml), CLAUDE_JOB
-# (claude-config's bin/claude-job), REAP_AGE_HOURS. The first two default under
-# $HOME, which is joe's.
+# Environment: RUNNER_CONFIG (the runner's rendered config.yml; default under
+# $HOME), CLAUDE_JOB (the job registry's `claude-job`, which the brake can stop;
+# default the one on PATH), REAP_AGE_HOURS.
 #
 # Each removal is printed. --dry-run prints the same list and removes nothing.
-# Exit 0 when every removal it tried succeeded.
+# Exit 0 when every removal it tried succeeded; 1 when a removal failed, or
+# when there is no claude-job to register with (a real run only).
 #
-# build.sh runs it after tagging fleet-ci:current. A daily timer runs it too
-# (ci-image/fleet-ci-reap.timer), registered with claude-job, so the brake
-# stops it.
+# build.sh runs it after tagging fleet-ci:current, and the host runs it daily,
+# registered with claude-job, so the brake stops it.
 printf '%s' jpt-ci-reap > /proc/$$/comm 2>/dev/null
 set -uo pipefail
 dind=forgejo-runner-docker-in-docker-1
@@ -40,17 +40,16 @@ age_h=${REAP_AGE_HOURS:-24}
 dry=0
 [ "${1:-}" = "--dry-run" ] && dry=1
 fail=0
-# CLAUDE_JOB: iteration8_server runs this as a root system unit (its #25), and
-# root's HOME holds no claude-config checkout.
-job=${CLAUDE_JOB:-$HOME/projects/claude-config/bin/claude-job}
+# A daily run as root has no claude-job on PATH, so it sets CLAUDE_JOB.
+job=${CLAUDE_JOB:-$(command -v claude-job || true)}
 # A missing claude-job is not a halt. Without this check, `start` failing to
 # run reads as "the fleet is halted" below and every run exits 0 having
 # removed nothing.
-if [ "$dry" = 0 ] && [ ! -x "$job" ]; then
-    echo "reap: no claude-job at $job (set CLAUDE_JOB); removing nothing" >&2
+if [ "$dry" = 0 ] && { [ -z "$job" ] || [ ! -x "$job" ]; }; then
+    echo "reap: no claude-job (${job:-none on PATH}); set CLAUDE_JOB; removing nothing" >&2
     exit 1
 fi
-if [ "$dry" = 0 ] && ! "$job" start fleet-ci-reap --writes iteration8:runner-dind --every 1440; then
+if [ "$dry" = 0 ] && ! "$job" start fleet-ci-reap --writes runner-dind --every 1440; then
     echo "reap: the fleet is halted; removing nothing" >&2
     exit 0
 fi

@@ -63,7 +63,7 @@ jobs:
       - name: Tools for mutmut
         env:
           FLEET_READ_TOKEN: ${{ secrets.FLEET_READ_TOKEN }}
-          OWNER: ${{ vars.ITERATION8_LIBRARIES_OWNER }}
+          OWNER: ${{ vars.LIBRARIES_OWNER }}
           SERVER: ${{ github.server_url }}
         run: bash ci-image/mutation-tools.sh
       - name: Every mutant

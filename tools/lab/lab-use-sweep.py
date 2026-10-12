@@ -13,15 +13,15 @@ ANSWERS: for each file in tools/lab/ (not its README), every tracked file in
   i8-proof.sh and run-suites.sh carrying every merge (#218) and no non-lab code
   in JP_TOOLS running any lab tool (#219 is the check that should say so).
 
-TESTED AGAINST: the Air, 2026-10-10, 20 lab tools: every hit read by hand.
-  Positive control: i8-proof.sh, known to be named by this seat's checklist
-  and memories, was found there.
+TESTED AGAINST: a Linux workstation, 2026-10-10, 20 lab tools: every hit
+  read by hand. Positive control: i8-proof.sh, known to be named by a session
+  checklist and memories, was found there.
 
 NOT TESTED AGAINST: names that are a substring of an unrelated word (it
   matches the bare file name, so it over-reports; a false hit costs a look);
   repos not cloned under ~/projects; uses that build the path at run time; files
-  over 2 MB, which it skips. Memory directories are symlinks into
-  claude-config, so one memory can be listed under more than one path.
+  over 2 MB, which it skips. Memory directories may be symlinks into one
+  shared repo, so one memory can be listed under more than one path.
 """
 import subprocess
 import sys

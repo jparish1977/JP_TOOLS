@@ -15,7 +15,7 @@ TESTED AGAINST: this repo's by-path-load branch, --tracked --base
   name: all exit 0. Positive control: a file holding only `import os`
   printed `F401 os imported but unused` and exit 1. It listed no .php then,
   though CI gates them. With .php: the php-gate branch at 6261977, --tracked
-  --base origin/master, in a worktree whose own vendor/ has the iteration8
+  --base origin/master, in a worktree whose own vendor/ has the private PHP
   libraries: 169 files in 91s, worst exit 0, the 4 PHP files among them
   (sample.php with its deliberate PSR-1 warning).
 

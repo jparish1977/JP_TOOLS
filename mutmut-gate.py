@@ -6,8 +6,7 @@
     mutmut-gate.py record OUT.json [--results FILE]
     mutmut-gate.py gate BASELINE.json [--results FILE]
 
-THE RULE (Joe, 2026-10-10, "yes for the srict rule"; no tests added 2026-10-11):
-mutants are counted per function, because mutmut renumbers a function's
+THE RULE: mutants are counted per function, because mutmut renumbers a function's
 mutants whenever it changes.
 
 - A function in the baseline fails if it now has MORE survivors, or more

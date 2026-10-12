@@ -36,7 +36,7 @@ PHP = ROOT / "ci-image" / "install-php-tools.sh"
 MUT = ROOT / "ci-image" / "mutation-tools.sh"
 WORKFLOWS = ROOT / ".github" / "workflows"
 ENV = {"FLEET_READ_TOKEN": "${{ secrets.FLEET_READ_TOKEN }}",
-       "OWNER": "${{ vars.ITERATION8_LIBRARIES_OWNER }}",
+       "OWNER": "${{ vars.LIBRARIES_OWNER }}",
        "SERVER": "${{ github.server_url }}"}
 
 
@@ -99,7 +99,7 @@ def test_it_refuses_without_each_of_the_three() -> None:
             p, calls = _php(Path(td), **{k: v for k, v in full.items() if k != missing})
             check(f"no {missing}: exit 1", p.returncode, 1)
             check_true("  naming the secret and the variable to set",
-                       "FLEET_READ_TOKEN" in p.stderr and "ITERATION8_LIBRARIES_OWNER" in p.stderr)
+                       "FLEET_READ_TOKEN" in p.stderr and "variable LIBRARIES_OWNER" in p.stderr)
             check("  and composer never called", calls, [])
 
 

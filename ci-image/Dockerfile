@@ -2,7 +2,7 @@
 # fleet's CI installs already in place, so a run checks instead of
 # reinstalling PHP, shellcheck, PowerShell and the rest each time.
 #
-# Built inside the runner's docker-in-docker daemon on iteration8 by
+# Built inside the runner's docker-in-docker daemon on the runner's host by
 # ci-image/build.sh, and served to jobs under the runner label `fleet-ci`.
 # What it holds comes from the repos' own manifests, never a list kept here:
 # requirements-system.txt (JP_TOOLS' gate tools and PHP extensions, pwsh and
@@ -20,7 +20,7 @@ FROM ghcr.io/catthehacker/ubuntu:act-24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # One update and one install (an update per install took 2.5 times as long,
-# projectbook's pb/lab/ci-apt-time.sh), retrying a mirror address that does
+# measured), retrying a mirror address that does
 # not answer. composer.json's PHP extensions are requirements-system.txt's
 # php:* lines; php-xml, php-mbstring, php-curl and unzip are what composer and
 # the PHP tools need to install and run. mame-tools, testdisk, gddrescue and

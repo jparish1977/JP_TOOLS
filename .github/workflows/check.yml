@@ -17,12 +17,12 @@ on:
 # since against HEAD a new smell only warns. So does a base the clone does not
 # have: after a force-push, the commit before it is no longer in the history.
 
-# fleet-ci is the fleet CI image (ci-image/), served by iteration8's runner:
+# fleet-ci is the fleet CI image (ci-image/), served by the fleet's own runner:
 # the job image with every system tool below already installed, so the
 # install steps find them in place and check-pins.py confirms their pins.
 #
 # CI_WORKERS is how many files or suites a step runs at once. Not nproc: a
-# job container sees all of iteration8's cores (32), and the runner takes
+# job container sees all of the runner host's cores (32), and the runner takes
 # three jobs at a time, so nproc-wide steps in each oversubscribe the box
 # (load 38.5 on 32 cores measured 2026-10-09, with CI jobs running).
 env:
@@ -79,13 +79,13 @@ jobs:
       - name: PowerShell and PSScriptAnalyzer
         run: bash install-pwsh.sh
       # composer.json's private libraries, read with the secret
-      # FLEET_READ_TOKEN from the owner in ITERATION8_LIBRARIES_OWNER; the
+      # FLEET_READ_TOKEN from the owner in the variable LIBRARIES_OWNER; the
       # script says why when either is missing. Every job with PHP tools runs
       # this one script.
       - name: Install PHP tools
         env:
           FLEET_READ_TOKEN: ${{ secrets.FLEET_READ_TOKEN }}
-          OWNER: ${{ vars.ITERATION8_LIBRARIES_OWNER }}
+          OWNER: ${{ vars.LIBRARIES_OWNER }}
           SERVER: ${{ github.server_url }}
         run: bash ci-image/install-php-tools.sh
       # requirements-dev.txt, composer.json and requirements-system.txt's
@@ -253,7 +253,7 @@ jobs:
       - name: Tools for mutmut
         env:
           FLEET_READ_TOKEN: ${{ secrets.FLEET_READ_TOKEN }}
-          OWNER: ${{ vars.ITERATION8_LIBRARIES_OWNER }}
+          OWNER: ${{ vars.LIBRARIES_OWNER }}
           SERVER: ${{ github.server_url }}
         run: bash ci-image/mutation-tools.sh
       - name: Mutants of the changed functions
@@ -293,7 +293,7 @@ jobs:
       - name: Tools for mutmut
         env:
           FLEET_READ_TOKEN: ${{ secrets.FLEET_READ_TOKEN }}
-          OWNER: ${{ vars.ITERATION8_LIBRARIES_OWNER }}
+          OWNER: ${{ vars.LIBRARIES_OWNER }}
           SERVER: ${{ github.server_url }}
         run: bash ci-image/mutation-tools.sh
       - name: The merge's changed functions, then the state

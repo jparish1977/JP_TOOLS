@@ -1,11 +1,11 @@
 #!/bin/bash
-# ci-image/build.sh -- build the fleet CI image inside iteration8's runner
-# daemon and tag it for the runner label.
+# ci-image/build.sh -- build the fleet CI image inside the runner's daemon
+# and tag it for the runner label.
 #
-#   ssh iteration8 'cd ~/projects/JP_TOOLS && bash ci-image/build.sh'
+#   bash ci-image/build.sh [--no-current]     (on the runner's host, in a checkout)
 #
 # Jobs run in the runner's docker-in-docker sidecar, so the image is built in
-# THAT daemon, where the runner finds it; iteration8's own docker never holds
+# THAT daemon, where the runner finds it; the host's own docker never holds
 # it. The build context is a tar of ci-image/Dockerfile and the manifests it
 # copies, from this checkout, piped into `docker build -`.
 #
@@ -27,8 +27,8 @@
 #   uid and gid; without the account it stops.
 # The runner's shared cache volumes are owned by the image's fleet-ci, so
 # jobs can write them; a volume created afresh is root's and would silently
-# stop caching. Each is mounted into every job by the runner's config
-# (iteration8_server forgejo-runner): pip-cache (PIP_CACHE_DIR), npm-cache
+# stop caching. Each is mounted into every job by the runner's own config:
+# pip-cache (PIP_CACHE_DIR), npm-cache
 # (npm_config_cache), composer-cache (COMPOSER_CACHE_DIR), and toolcache at
 # /opt/hostedtoolcache, where setup-python and setup-node look before they
 # download. build.sh fills toolcache from ci-image/toolcache.txt, so jobs
