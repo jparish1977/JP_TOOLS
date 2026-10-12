@@ -89,7 +89,7 @@ also_copy = [
     "install-pwsh.sh", "install-recovery.ps1", "install-recovery.sh", "install.ps1",
     "install.sh", "jp_eslint.mjs", "jp_measure.mjs", "jp_node_hooks.mjs",
     "jp_node_resolve.mjs", "jp_php_ast.php", "jp_stylelint.mjs", "lib/", "oob/",
-    "package.json", "requirements-dev.txt", "requirements-system.txt", "templates/",
-    "tools/",
+    "package.json", "prove-head.sh", "requirements-dev.txt", "requirements-system.txt",
+    "run-suites.sh", "templates/", "tools/",
     "install-hooks.py", "fix-dashes.py", "mutate-on-target.py", "mutate-spec.py",
 ]
