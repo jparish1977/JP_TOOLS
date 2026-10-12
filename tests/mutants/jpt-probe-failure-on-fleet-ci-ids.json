@@ -1,0 +1,8 @@
+{
+ "about": "ci-image/fleet-ci-ids.sh: a daemon that cannot be asked exits 2 and is never read as 'does not remap'; name=userns is matched as a whole option; a remapping daemon gives 994/981, not the host account's ids. Run: mutate-on-target.py TREE ci-image/fleet-ci-ids.sh tests/test_ci_image_ids.py tests/mutants/jpt-probe-failure-on-fleet-ci-ids.json",
+ "mutants": [
+  {"name": "probe-failure-read-as-no-remap", "edits": [["    exit 2\nfi", "    opts=\"\"\nfi"]], "target": "probe failed, account=True: exit 2"},
+  {"name": "option-matched-as-substring", "edits": [["    *\" name=userns \"*)", "    *\"name=userns\"*)"]], "target": "an option only containing the word is not it"},
+  {"name": "remap-takes-the-host-account", "edits": [["        echo \"994 981\"", "        echo \"$(id -u fleet-ci) $(id -g fleet-ci)\""]], "target": "994 981, not the host's"}
+ ]
+}

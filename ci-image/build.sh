@@ -37,7 +37,8 @@
 # After it builds, it reads back inside the new image: that it runs as
 # fleet-ci's uid, not root, and cannot sudo; then every pinned tool
 # (check-pins.py's powershell arm, the PHP extensions, composer, shellcheck,
-# cppcheck, rg, pdftotext, ss). Exit 0 only when every step passes.
+# cppcheck, rg, pdftotext, ss). Exit 0 only when every step passes; 2 when
+# the daemon could not be asked whether it remaps users, so nothing was built.
 printf '%s' jpt-ci-image > /proc/$$/comm 2>/dev/null
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -45,19 +46,10 @@ dind=forgejo-runner-docker-in-docker-1
 tag="fleet-ci:$(git -C "$here" rev-parse --short HEAD)"
 current=1
 [ "${1:-}" = "--no-current" ] && current=0
-# fleet-ci's uid and gid for the image, into uid and gid (see the header).
-fleet_ci_ids() {
-    if sudo -n docker exec "$dind" docker info -f '{{range .SecurityOptions}}{{.}} {{end}}' \
-            | tr ' ' '\n' | grep -qx 'name=userns'; then
-        uid=994 gid=981
-        echo "ci-image: $dind remaps users, so no host account is needed"
-    elif ! uid=$(id -u fleet-ci 2>/dev/null) || ! gid=$(id -g fleet-ci 2>/dev/null); then
-        echo "ci-image: $dind does not remap users and there is no fleet-ci account on this host; create it first:" >&2
-        echo "  sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --user-group fleet-ci" >&2
-        exit 1
-    fi
-}
-fleet_ci_ids
+# fleet-ci's uid and gid for the image (see the header). Under set -e a
+# failing fleet-ci-ids.sh ends this script with its own exit code, 1 or 2.
+ids=$(bash "$here/ci-image/fleet-ci-ids.sh" "$dind")
+read -r uid gid <<<"$ids"
 
 echo "ci-image: building $tag in $dind as fleet-ci uid $uid gid $gid"
 tar -C "$here" -cf - ci-image/Dockerfile requirements-system.txt install-pwsh.sh \
