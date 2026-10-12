@@ -86,8 +86,8 @@ def test_a_probe_that_cannot_answer_is_not_no_remap() -> None:
 
 def test_the_option_is_matched_whole() -> None:
     rc, out, _ = _ids("name=userns-ish name=seccomp ", account="1")
-    check("an option only containing the word is not it: exit 0", rc, 0)
-    check_true("  the host account's ids", "ids 1500 1501" in out)
+    check("an option only containing the word: exit 0", rc, 0)
+    check_true("  is not a remap: the host account's ids", "ids 1500 1501" in out)
 
 
 if __name__ == "__main__":
