@@ -73,6 +73,64 @@ def test_php_tools_are_asked_through_php() -> None:
             check("no php is '' (cannot tell)", baseline._tool_version("phpstan"), "")
 
 
+def _which(found: dict[str, str]) -> mock.Mock:
+    """shutil.which as a box where only FOUND's names are installed."""
+    return mock.Mock(side_effect=found.get)
+
+
+def test_composer_is_asked_the_way_its_audit_runs() -> None:
+    """composer-audit's version command is its audit command with
+    `audit --format=json` replaced by --version, so each way run_composer_audit
+    can invoke composer is pinned whole."""
+    which = "jpcheck.baseline.shutil.which"
+    with mock.patch.object(baseline, "_php_cmd", return_value="/bin/php"):
+        with mock.patch(which, _which({"composer": "/bin/composer"})):
+            check("composer on PATH: run directly", baseline._composer(), ["/bin/composer", "--version"])
+        with mock.patch(which, _which({"composer.bat": "C:/composer.bat"})):
+            check("only a composer.bat: through php", baseline._composer(),
+                  ["/bin/php", "C:/composer.bat", "--version"])
+        with mock.patch(which, _which({})):
+            check("php only: php composer", baseline._composer(), ["/bin/php", "composer", "--version"])
+    with mock.patch.object(baseline, "_php_cmd", return_value=None):
+        with mock.patch(which, _which({"composer.bat": "C:/composer.bat"})):
+            check("a composer.bat and no php: the .bat itself", baseline._composer(),
+                  ["C:/composer.bat", "--version"])
+        with mock.patch(which, _which({})):
+            check("neither: no command", baseline._composer(), None)
+    with tempfile.TemporaryDirectory() as tmp:
+        _stub(Path(tmp), "composer", "Composer version 2.8.4 2024-12-11 11:57:47")
+        with mock.patch.dict(os.environ, {"PATH": tmp}), \
+             mock.patch.object(baseline, "_php_cmd", return_value=None):
+            check("composer-audit's version, read from that run",
+                  baseline._tool_version("composer-audit"), "2.8.4")
+
+
+def test_prettier_is_the_node_modules_copy() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        exe = _stub(Path(tmp), "prettier", "3.6.2")
+        with mock.patch.object(baseline, "_node_bin", return_value=exe):
+            check("prettier's version, from the copy _node_bin finds",
+                  baseline._tool_version("prettier"), "3.6.2")
+        with mock.patch.object(baseline, "_node_bin", return_value=None):
+            check("no prettier is '' (cannot tell)", baseline._tool_version("prettier"), "")
+
+
+def test_psscriptanalyzer_is_asked_through_pwsh() -> None:
+    with mock.patch.object(baseline, "_pwsh", return_value="/bin/pwsh"):
+        check("PSScriptAnalyzer: pwsh, no profile, the highest installed module",
+              baseline._pssa(), ["/bin/pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                                 baseline._PSSA_VERSION])
+    check_true("  which is the one Import-Module loads: sorted descending, first",
+               "Sort-Object Version -Descending" in baseline._PSSA_VERSION
+               and "Select-Object -First 1" in baseline._PSSA_VERSION)
+    with tempfile.TemporaryDirectory() as tmp:
+        pwsh = _stub(Path(tmp), "pwsh", "1.25.0")
+        with mock.patch.object(baseline, "_pwsh", return_value=pwsh):
+            check("its version, as pwsh prints it", baseline._tool_version("psscriptanalyzer"), "1.25.0")
+    with mock.patch.object(baseline, "_pwsh", return_value=None):
+        check("no pwsh is '' (cannot tell)", baseline._tool_version("psscriptanalyzer"), "")
+
+
 def test_node_packages_read_the_copy_the_runner_loads() -> None:
     """eslint is imported from the first tool root's node_modules that has it,
     which is not on PATH: that copy's package.json is its version."""

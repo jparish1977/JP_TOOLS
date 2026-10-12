@@ -72,8 +72,10 @@ def _parser() -> argparse.ArgumentParser:
                         help="With --baseline, on one file a commit changes: it "
                              "must have fewer findings than recorded, until it "
                              "has none, and a lowered count is written back to "
-                             "the baseline. mypy and phpstan are not counted "
-                             "either way. Exit 3 when no worse but none fixed. "
+                             "the baseline. Every tool counts against getting "
+                             "worse; mypy and phpstan need not fall, since "
+                             "other files move them, and are not written back. "
+                             "Exit 3 when no worse but none fixed. "
                              "The pre-commit hook passes it.")
     parser.add_argument("--record-baseline", metavar="FILE",
                         help="Measure per-file and write a baseline to FILE. "

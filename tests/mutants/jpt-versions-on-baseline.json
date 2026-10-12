@@ -25,6 +25,21 @@
       "name": "a PHP tool run directly, not through php",
       "edits": [["    return [php, bin_, \"--version\"] if php and bin_ else None", "    return [bin_, \"--version\"] if php and bin_ else None"]],
       "target": "phpstan's version, via php"
+    },
+    {
+      "name": "composer's command keeps a word of the audit tail",
+      "edits": [["    return [*cmd[:-2], \"--version\"] if cmd else None", "    return [*cmd[:-1], \"--version\"] if cmd else None"]],
+      "target": "composer on PATH: run directly"
+    },
+    {
+      "name": "prettier asked on PATH, not the node_modules copy",
+      "edits": [["    exe = _node_bin(\"prettier\")", "    exe = shutil.which(\"prettier\")"]],
+      "target": "prettier's version, from the copy _node_bin finds"
+    },
+    {
+      "name": "pwsh loads the profile",
+      "edits": [["    return [pwsh, \"-NoProfile\", \"-NonInteractive\", \"-Command\", _PSSA_VERSION]", "    return [pwsh, \"-NonInteractive\", \"-Command\", _PSSA_VERSION]"]],
+      "target": "PSScriptAnalyzer: pwsh, no profile"
     }
   ]
 }

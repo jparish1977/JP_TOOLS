@@ -445,20 +445,36 @@ def _not_reduced(path: str, now: dict[str, Any], was: dict[str, Any],
     return (before, after) if before > 0 and after >= before else None
 
 
+def _move_totals(totals: dict[str, Any], old: dict[str, Any], new: dict[str, Any]) -> None:
+    """TOTALS less what entry OLD held over entry NEW, in errors, warnings
+    and their sum, total."""
+    for key in ("errors", "warnings"):
+        fell = int(old.get(key, 0)) - int(new.get(key, 0))
+        totals[key] = int(totals.get(key, 0)) - fell
+        totals["total"] = int(totals.get("total", 0)) - fell
+
+
 def _lock_in(source: str, doc: dict[str, Any], path: str, now: dict[str, Any],
              skip: set[str]) -> list[str]:
     """Write each lowered count for PATH back to SOURCE; a line per tool lowered.
 
-    Only a lower count is written, never a higher one. "totals" stays as
-    recorded: it describes the recording run, and this is not one.
+    Only a lower count is written, never a higher one. "totals" moves with
+    it: errors, warnings and total fall by what each replaced entry held more
+    than its new one, so they match a fresh record of the same tree. fixable
+    and fixable_unsafe stay as recorded: the baseline does not hold them per
+    file, so a write-back cannot tell whether a fixed finding was fixable.
     """
     was = doc.setdefault("files", {})
+    totals = doc.get("totals")
     lowered = []
     for tool in _own_tools(path, now, was, skip):
         before, after = _errors(was, path, tool), _errors(now, path, tool)
         if after < before:
-            was.setdefault(path, {})[tool] = now.get(path, {}).get(
-                tool, {"errors": 0, "warnings": 0})
+            old = was.get(path, {}).get(tool, {})
+            new = now.get(path, {}).get(tool, {"errors": 0, "warnings": 0})
+            was.setdefault(path, {})[tool] = new
+            if isinstance(totals, dict):
+                _move_totals(totals, old, new)
             lowered.append(f"  {path}  {tool}  {before} -> {after}")
     if lowered:
         Path(source).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n",

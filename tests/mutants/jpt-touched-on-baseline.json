@@ -23,8 +23,18 @@
     },
     {
       "name": "the gain is not written back",
-      "edits": [["        if after < before:\n            was.setdefault", "        if False:\n            was.setdefault"]],
+      "edits": [["        if after < before:\n            old = ", "        if False:\n            old = "]],
       "target": "  and the lower count is written back"
+    },
+    {
+      "name": "totals left as recorded, as before #220",
+      "edits": [["                _move_totals(totals, old, new)", "                pass"]],
+      "target": "  and totals move with it"
+    },
+    {
+      "name": "a cross-file tool's rise not counted as worse",
+      "edits": [["        for tool in sorted(tools - skip):\n            before = int(was", "        for tool in sorted(tools - skip - _CROSS_FILE):\n            before = int(was"]],
+      "target": "but a mypy count that RISES is worse"
     }
   ]
 }

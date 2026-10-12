@@ -208,6 +208,17 @@ def git_test_touched_must_lower_and_keeps_the_gain() -> None:
         assert isinstance(files, dict)
         check_true("  and the lower count is written back", 0 < files["dirty.py"]["ruff"]["errors"] < n)
         check_true("  and said", "lowered in base.json" in p.stdout)
+        fresh = r / "fresh.json"
+        check_py(".", "--record-baseline", str(fresh), cwd=r)
+        kept, again = _doc(base)["totals"], _doc(fresh)["totals"]
+        assert isinstance(kept, dict) and isinstance(again, dict)
+        check("  and totals move with it: errors, warnings, total as a fresh record says",
+              {k: kept[k] for k in ("errors", "warnings", "total")},
+              {k: again[k] for k in ("errors", "warnings", "total")})
+        check_true("  CONTROL: the fresh record's errors did fall",
+                   again["errors"] < json.loads(recorded)["totals"]["errors"])
+        check("  fixable stays as recorded: no per-file count to move it by",
+              kept["fixable"], json.loads(recorded)["totals"]["fixable"])
         check("the same count again is refused: each change fixes one",
               check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r).returncode, 3)
 
@@ -236,6 +247,16 @@ def git_test_touched_never_counts_cross_file_tools() -> None:
     was2 = {"a.py": {"ruff": {"errors": 3, "warnings": 0}}}
     check("a tool that cannot be compared is not counted either",
           baseline._not_reduced("a.py", was2, was2, {"ruff"}), None)
+    rose = {"a.py": {"mypy": {"errors": 5, "warnings": 0}, "ruff": {"errors": 0, "warnings": 0}}}
+    worse, _ = baseline._deltas({"a.py"}, rose, was, set())
+    check("but a mypy count that RISES is worse, as any tool's is",
+          worse, [("a.py", "mypy", 4, 5)])
+    helptext = " ".join(subprocess.run([sys.executable, str(CHECK), "--help"], capture_output=True,
+                                       text=True, check=True).stdout.split())
+    check_true("--help says both halves: every tool counts against worse",
+               "Every tool counts against getting worse" in helptext)
+    check_true("  and mypy and phpstan need not fall",
+               "mypy and phpstan need not fall" in helptext)
 
 
 def git_test_no_baseline_behaves_as_before() -> None:

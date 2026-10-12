@@ -1,0 +1,15 @@
+{
+  "about": "composer-audit's recorded version comes from its audit command with the two-word tail `audit --format=json` cut off, so a change to that tail must fail the versions suite rather than quietly change what is asked for a version. Run: mutate-on-target.py TREE jpcheck/php_tools.py tests/test_baseline_versions.py tests/mutants/jpt-composer-tail-on-php-tools.json",
+  "mutants": [
+    {
+      "name": "the audit tail grows a word",
+      "edits": [["        return [composer, \"audit\", \"--format=json\"]\n    if php:", "        return [composer, \"audit\", \"--format=json\", \"--locked\"]\n    if php:"]],
+      "target": "composer on PATH: run directly"
+    },
+    {
+      "name": "the .bat through php grows a word",
+      "edits": [["        return [php, composer or \"composer\", \"audit\", \"--format=json\"]", "        return [php, composer or \"composer\", \"audit\", \"--no-dev\", \"--format=json\"]"]],
+      "target": "only a composer.bat: through php"
+    }
+  ]
+}
