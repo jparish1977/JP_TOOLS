@@ -4,13 +4,21 @@ JP_TOOLS/tests/test_lab_not_executed.py
 No tracked file outside tools/lab/ runs a tools/lab/ file (METHODOLOGY 2.9: a
 lab tool that grows a dependency is promoted), jpcheck/lab_use.py.
 
-    - Planted in a throwaway repo, each of these is found: Python running a
-      lab script through subprocess, through a variable, through a local
-      helper, and by Path parts; shell running one directly, through an
-      interpreter, behind env and nice, and inside bash -c; a workflow's run:.
-    - Mentions are not: a comment, a docstring, a file opened for reading,
-      echo and cat naming one, a YAML name:, a Markdown doc, and a lab file
-      running another lab file.
+    - Python (tests/_lab_python_cases.py): running a lab path is found whatever
+      carries it (a runner by module or alias, a variable through two
+      assignments, an attribute, a held argv list, a local helper or method,
+      shell=True, executable=, os.exec*, spawn*, posix_spawn, popen,
+      getoutput, asyncio), and so is loading one (import, sys.path,
+      importlib, runpy, exec, load_script). A lab path that is only an
+      argument is not: git log, grep, an env value, mock.call, a method
+      named run, a helper whose parameter is not the program.
+    - Shell (tests/_lab_shell_cases.py): the command word after VAR=, control words and wrappers with
+      their value options; an interpreter's script past its value options;
+      -c and -m; find -exec; $(...) and backticks, also inside double quotes.
+      Not: cat, echo, git log, a comment, single-quoted or escaped text, a
+      YAML name:.
+    - Files: .py, shell and YAML by suffix, and a file with no suffix by its
+      #! line (Python or shell); Markdown and lab files are not scanned.
     - This repo: the only places are the two tests that prove the old lab
       paths still forward to the promoted scripts.
 
@@ -23,33 +31,42 @@ import sys
 import tempfile
 from pathlib import Path
 
+from _lab_python_cases import PY_CASES
+from _lab_shell_cases import SH_CASES
+
 from _harness import ROOT, check, run
 from jpcheck.lab_use import lab_runs, python_runs, shell_runs
+
+
+def test_python_cases() -> None:
+    for label, runs, text in PY_CASES:
+        check(label, bool(python_runs(text)), runs)
+
+
+def test_shell_cases() -> None:
+    for label, runs, line in SH_CASES:
+        check(label, bool(shell_runs(line + "\n")), runs)
+
 
 # Each file in the throwaway repo, and the lines lab_runs must report for it.
 PLANTED = {
     "py_direct.py": ('import subprocess\nsubprocess.run(["python3", "tools/lab/x.py"])\n', [2]),
-    "py_variable.py": ('import subprocess\nTOOL = "tools/lab/x.py"\nsubprocess.run([TOOL])\n', [3]),
-    "py_helper.py": (("import subprocess\nfrom pathlib import Path\n"
-                      "def go(script):\n    return subprocess.run(['bash', str(script)])\n"
-                      "go(Path('.') / 'tools' / 'lab' / 'x.sh')\n"), [5]),
-    "py_mentions.py": (('"""Measured with tools/lab/x.py."""\n# see tools/lab/x.py\n'
-                        'text = open("tools/lab/README.md").read()\n'), []),
-    "sh_direct.sh": ("#!/bin/bash\ntools/lab/x.sh --flag\n", [2]),
-    "sh_interpreter.sh": ("#!/bin/bash\nset -e\npython3 tools/lab/x.py arg\n", [3]),
-    "sh_wrapped.sh": ("#!/bin/bash\nenv FOO=1 nice -n 5 tools/lab/x.sh\n", [2]),
-    "sh_dash_c.sh": ("#!/bin/bash\nbash -c 'tools/lab/x.sh'\n", [2]),
-    "sh_after_and.sh": ("#!/bin/bash\ncd /tmp && bash tools/lab/x.sh\n", [2]),
-    "sh_mentions.sh": (('#!/bin/bash\n# tools/lab/x.sh measured this\necho "see tools/lab/x.sh"\n'
-                        "cat tools/lab/README.md\n"), []),
+    "sh_direct.sh": ("#!/bin/bash\nset -e\ntools/lab/x.sh --flag\n", [3]),
     "workflow.yml": (("jobs:\n  a:\n    steps:\n      - name: tools/lab/x.py is how\n"
                       "        run: python3 tools/lab/x.py\n"), [5]),
+    "bin/pyscript": ('#!/usr/bin/env python3\nimport subprocess\nsubprocess.run(["tools/lab/x.sh"])\n', [3]),
+    "bin/shscript": ("#!/bin/sh\nbash tools/lab/x.sh\n", [2]),
+    "bin/data": ("tools/lab/x.sh\n", []),
     "notes.md": ("Run `bash tools/lab/x.sh` to measure.\n", []),
     "tools/lab/inner.sh": ("#!/bin/bash\nbash tools/lab/x.sh\n", []),
+    # Made unreadable after git add: it runs nothing this can see.
+    "bin/locked": ("#!/bin/sh\nbash tools/lab/x.sh\n", []),
+    # Tracked, then deleted from the working tree.
+    "gone.sh": ("bash tools/lab/x.sh\n", []),
 }
 
 
-def test_planted_runs_are_found_and_mentions_are_not() -> None:
+def test_planted_files_are_routed_by_kind() -> None:
     root = Path(tempfile.mkdtemp())
     try:
         for name, (body, _) in PLANTED.items():
@@ -57,6 +74,8 @@ def test_planted_runs_are_found_and_mentions_are_not() -> None:
             (root / name).write_text(body, encoding="utf-8")
         subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
         subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        (root / "bin" / "locked").chmod(0)
+        (root / "gone.sh").unlink()
         found: dict[str, list[int]] = {}
         for rel, line in lab_runs(root):
             found.setdefault(rel, []).append(line)

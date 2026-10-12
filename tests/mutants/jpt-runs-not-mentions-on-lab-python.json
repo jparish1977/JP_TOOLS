@@ -1,0 +1,17 @@
+{
+ "about": "jpcheck/lab_python.py flags Python that RUNS or LOADS a lab path (the program of a runner matched by module, through variables, attributes and local helpers; imports, sys.path, shell=True, os.exec*) and passes a lab path that is only an argument (git log, mock.call, a helper's non-program parameter). Run: mutate-on-target.py TREE jpcheck/lab_python.py tests/test_lab_not_executed.py tests/mutants/jpt-runs-not-mentions-on-lab-python.json",
+ "mutants": [
+  {"name": "path-parts-not-seen", "edits": [["    return any(a == \"tools\" and b == \"lab\" for a, b in pairwise(parts))", "    return False"]], "target": "py: Path parts"},
+  {"name": "strings-in-walk-order", "edits": [["    return [value for _, _, value in sorted(found)]", "    return [value for _, _, value in found]"]], "target": "py: Path parts"},
+  {"name": "any-argv-word-counts", "edits": [["    return command_runs_lab(scope.words(program))", "    return any(is_lab(w) for w in scope.words(program))"]], "target": "py: git log -- a lab path"},
+  {"name": "callee-by-bare-name", "edits": [["    judge = _LIBRARY.get(name)\n", "    judge = _LIBRARY.get(name) or _LIBRARY.get(\"subprocess.\" + name.rsplit(\".\", 1)[-1])\n"]], "target": "py: mock.call"},
+  {"name": "holders-one-step", "edits": [["                if key and (_names_lab_path(value) or self.mentions(value)):", "                if key and _names_lab_path(value):"]], "target": "py: two assignments"},
+  {"name": "attributes-not-held", "edits": [["        return f\"{head}.{node.attr}\" if head else None", "        return None"]], "target": "py: an attribute"},
+  {"name": "helper-any-argument", "edits": [["    given = [v for p, v in zip(params, positional, strict=False) if p in programs]", "    given = list(positional)"]], "target": "py: a helper given a lab path in a non-program place"},
+  {"name": "no-local-runners", "edits": [["                    runners.setdefault(f.name, (params, set()))[1].add(p)\n                    changed = True", "                    pass"]], "target": "py: a local helper"},
+  {"name": "imports-not-seen", "edits": [["             if isinstance(node, (ast.Import, ast.ImportFrom, ast.Call))", "             if isinstance(node, ast.Call)"]], "target": "py: import tools.lab.x"},
+  {"name": "sys-path-not-seen", "edits": [["    **dict.fromkeys((\"sys.path.insert\", \"sys.path.append\", \"sys.path.extend\"), _sys_path),", ""]], "target": "py: sys.path then import"},
+  {"name": "shell-true-read-as-argv", "edits": [["    if isinstance(shell, ast.Constant) and shell.value:", "    if False:"]], "target": "py: shell=True string"},
+  {"name": "exec-argv-ignored", "edits": [["            rest = scope.words(argv)[1:] if argv is not None else []", "            rest = []"]], "target": "py: os.execv"}
+ ]
+}

@@ -1,0 +1,20 @@
+{
+ "about": "jpcheck/lab_shell.py flags a shell line that RUNS a lab path (the command word past VAR=, control words and wrappers with their values; an interpreter's script past its value options; -c, -m; find -exec; $(...) and backticks) and passes one that only MENTIONS one (cat, a comment, quoted or escaped text, a script's argument). Run: mutate-on-target.py TREE jpcheck/lab_shell.py tests/test_lab_not_executed.py tests/mutants/jpt-runs-not-mentions-on-lab-shell.json",
+ "mutants": [
+  {"name": "control-words-not-skipped", "edits": [["_CONTROL = {\"if\", \"then\", \"elif\", \"else\", \"while\", \"until\", \"do\", \"!\", \"{\"}", "_CONTROL: set[str] = set()"]], "target": "sh: if"},
+  {"name": "wrapper-values-not-taken", "edits": [["    return 2 if word in takes or bundled else 1", "    return 1"]], "target": "sh: sudo -u"},
+  {"name": "bundled-options-not-read", "edits": [["    bundled = word[:1] == \"-\" and word[1:2] != \"-\" and f\"-{word[-1]}\" in takes", "    bundled = False"]], "target": "sh: sudo -Eu bundled"},
+  {"name": "interpreter-values-not-taken", "edits": [["        i += 2 if w in spec.value else 1", "        i += 1"]], "target": "sh: python3 -W value"},
+  {"name": "dash-m-not-read", "edits": [["            return is_lab_module(value)", "            return False"]], "target": "sh: python3 -m"},
+  {"name": "dash-c-not-read", "edits": [["            return _code_runs_lab(value, spec.code[w])", "            return False"]], "target": "sh: bash -c"},
+  {"name": "python-c-not-read", "edits": [["    if lang == \"python\":", "    if False:"]], "target": "sh: python3 -c"},
+  {"name": "substitutions-not-read", "edits": [["        if any(shell_runs(body) for body in inner) or _line_runs(outer):", "        if _line_runs(outer):"]], "target": "sh: $(...) in double quotes"},
+  {"name": "single-quotes-not-honoured", "edits": [["        if quote == \"'\":\n            quote = \"\" if c == \"'\" else quote\n", "        if False:\n            pass\n"]], "target": "sh: single-quoted backticks"},
+  {"name": "comments-read", "edits": [["        elif c == \"#\" and not quote and (i == 0 or line[i - 1].isspace()):", "        elif False:"]], "target": "sh: a comment with backticks"},
+  {"name": "escapes-not-skipped", "edits": [["            step = 2", "            step = 1"]], "target": "sh: an escaped backtick"},
+  {"name": "find-exec-not-read", "edits": [["        return at is not None and command_runs_lab(words[at + 1:])", "        return False"]], "target": "sh: find -exec"},
+  {"name": "any-command-counts", "edits": [["    return spec is not None and _interpreter_runs_lab(spec, words[1:])", "    return any(is_lab(w) for w in words)"]], "target": "sh: cat"},
+  {"name": "script-arguments-count", "edits": [["            return is_lab(w)\n        i += 2", "            if is_lab(w):\n                return True\n        i += 2"]], "target": "sh: python3 a script given a lab path"},
+  {"name": "only-the-first-command", "edits": [["            cmd = []\n        else:", "            break\n        else:"]], "target": "sh: after &&"}
+ ]
+}
