@@ -30,6 +30,12 @@ run, from what it keeps in mutants/. The nightly full run leaves that state;
 CI restores it, so a PR re-tests only what it touched. `run --full` starts
 from nothing.
 
+Which tests reach which function (mutants/mutmut-stats.json) is NOT kept:
+every run traces it afresh. mutmut 3.8.0 re-traces only tests with new names,
+so an existing test that comes to reach a new function, through main() say,
+would leave that function "no tests", and the rule above would fail it for a
+test it has.
+
 mutants/ is a git worktree of HEAD with an index and NO checked-out files:
 mutmut writes every file in it, and some suites ask git about the checkout, so
 it has to answer there too. A normal checkout made mutmut take every file as
@@ -52,6 +58,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import NoReturn
 
@@ -62,6 +69,7 @@ import jpexit
 from platformtools.procname import name_process
 
 LINKED = ("node_modules", "vendor")
+STATS = "mutmut-stats.json"
 SURVIVED = "survived"
 NO_TESTS = "no tests"
 # Statuses that are a verdict on the mutant; anything else is not.
@@ -118,11 +126,11 @@ def run(root: Path, full: bool, children: int) -> None:
     """Prepare, then mutmut run. Its Python goes first on PATH: the git hooks
     start `python3`, and in mutants/ every script imports mutmut."""
     if full:
-        mutants = root / "mutants"
-        if mutants.exists():
-            shutil.rmtree(mutants)
+        if (root / "mutants").exists():
+            shutil.rmtree(root / "mutants")
         _git("-C", str(root), "worktree", "prune")
-    prepare(root)
+    mutants = prepare(root)
+    (mutants / STATS).unlink(missing_ok=True)  # traced afresh: see THE STATE
     env = dict(os.environ, PATH=os.pathsep.join(
         [str(Path(sys.executable).parent), os.environ.get("PATH", "")]))
     p = subprocess.run([sys.executable, "-m", "mutmut", "run", "--max-children", str(children)],
@@ -167,19 +175,19 @@ def violations(baseline: dict[str, dict[str, int]],
     than the baseline, or any of either in a function the baseline lacks."""
     out = []
     for function, counts in sorted(current.items()):
-        survived, untested = counts.get(SURVIVED, 0), counts.get(NO_TESTS, 0)
+        now = Counter(counts)  # a status a function lacks reads as 0
         if function not in baseline:
-            if survived:
-                out.append(f"{function}: NEW, {survived} mutant(s) survived; a new function kills all of its")
-            if untested:
-                out.append(f"{function}: NEW, {untested} mutant(s) no test reaches; "
+            if now[SURVIVED]:
+                out.append(f"{function}: NEW, {now[SURVIVED]} mutant(s) survived; "
+                           "a new function kills all of its")
+            if now[NO_TESTS]:
+                out.append(f"{function}: NEW, {now[NO_TESTS]} mutant(s) no test reaches; "
                            "a new function's tests reach all of its")
             continue
-        was = baseline[function]
-        if survived > was.get(SURVIVED, 0):
-            out.append(f"{function}: survived {was.get(SURVIVED, 0)} -> {survived}")
-        if untested > was.get(NO_TESTS, 0):
-            out.append(f"{function}: no tests {was.get(NO_TESTS, 0)} -> {untested}")
+        was = Counter(baseline[function])
+        for status in (SURVIVED, NO_TESTS):
+            if now[status] > was[status]:
+                out.append(f"{function}: {status} {was[status]} -> {now[status]}")
     return out
 
 
@@ -190,11 +198,11 @@ def no_verdicts(baseline: dict[str, dict[str, int]],
     The same number is the baseline's own, carried in the kept state."""
     out = []
     for function, counts in sorted(current.items()):
-        was = baseline.get(function, {})
+        was = Counter(baseline.get(function))  # Counter(None) is empty
         for status, n in sorted(counts.items()):
-            if status not in VERDICTS and n != was.get(status, 0):
+            if status not in VERDICTS and n != was[status]:
                 out.append(f"{function}: {n} mutant(s) {status!r}, which is no verdict "
-                           f"(the baseline has {was.get(status, 0)})")
+                           f"(the baseline has {was[status]})")
     return out
 
 
