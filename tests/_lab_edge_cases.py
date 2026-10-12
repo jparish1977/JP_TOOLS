@@ -73,6 +73,7 @@ SH_EDGES = [
     ("sh: a substitution after a closed single quote", True, "echo 'a' $(tools/lab/x.sh)"),
     ("sh: a comment after a closed single quote", False, "echo 'a' # $(tools/lab/x.sh)"),
     ("sh: a comment after a closed double quote", False, 'echo "a" # $(tools/lab/x.sh)'),
+    ("sh: '#' inside double quotes is no comment", True, 'echo "a # b" $(tools/lab/x.sh)'),
     ("sh: '#' inside a word", True, "echo a#b $(tools/lab/x.sh)"),
     ("sh: '#' first on the line", False, "#$(tools/lab/x.sh)"),
     ("sh: '#' after a space, none after it", False, "echo x #$(tools/lab/x.sh)"),

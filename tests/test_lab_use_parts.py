@@ -76,7 +76,7 @@ def test_an_option_value_is_the_word_after_it() -> None:
 
 def test_substitutions_keep_the_rest_of_the_line() -> None:
     subs = lab_shell._substitutions
-    check("an escape is kept, both characters", subs("a\\bc"), ("a\\bc", []))
+    check("an escape is kept, both characters", subs("ab\\cdef"), ("ab\\cdef", []))
     check("a single-quoted span is kept whole", subs("a 'b `c`' d"), ("a 'b `c`' d", []))
     check("a substitution leaves its place marked", subs("a $(b) c"), ("a ? c", ["b"]))
 

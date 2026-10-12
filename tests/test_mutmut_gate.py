@@ -208,9 +208,9 @@ def test_run_traces_reach_afresh_and_keeps_results() -> None:
         (mutants / gate.STATS).write_text("{}", encoding="utf-8")
         (mutants / "a.py.meta").write_text("{}", encoding="utf-8")
         asked = _run_mutmut(root, full=False)
-        check("mutmut was run, with the children asked for",
-              [list(c["cmd"])[3:] for c in asked if isinstance(c["cmd"], list)],
-              [["run", "--max-children", "2"]])
+        check("mutmut was run as a module of this python, with the children asked for",
+              [c["cmd"] for c in asked],
+              [[sys.executable, "-m", "mutmut", "run", "--max-children", "2"]])
         check("  from the checkout", [c["cwd"] for c in asked], [root])
         check_true("  after the kept test reach was dropped", not (mutants / gate.STATS).exists())
         check_true("  and with the kept mutant results left in place", (mutants / "a.py.meta").exists())
