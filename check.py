@@ -29,12 +29,20 @@ from typing import Any, NoReturn
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import jpexit
-from jpcheck.baseline import compare_baseline, record_baseline
+from jpcheck.baseline import check_raised, compare_baseline, per_file_checks, record_baseline
 from jpcheck.common import _repo_root
 from jpcheck.coverage import is_project_file
-from jpcheck.files import _IGNORE_FILE, Ignore, _detect_lang, _IgnoreError, ignored_by, load_ignores
-from jpcheck.lab import lab_claim
-from jpcheck.registry import _exit_code
+from jpcheck.files import (
+    _IGNORE_FILE,
+    Ignore,
+    _collect_files,
+    _detect_lang,
+    _IgnoreError,
+    ignored_by,
+    load_ignores,
+)
+from jpcheck.lab import _mark_lab_exempt, lab_claim
+from jpcheck.registry import AUDIT_TOOLS, _exit_code, _run_tools, _summarize
 from jpcheck.runs import NoSourceError, NoToolsError, check_directory, check_target, tool_names
 from jpcheck.smells import _SMELLS, _smell_measure
 
@@ -82,6 +90,12 @@ def _parser() -> argparse.ArgumentParser:
                              "Per-file because that is what the gate does; see "
                              "METHODOLOGY, 'Adopting this in a codebase you "
                              "inherited', step 2.")
+    parser.add_argument("--raised-over", metavar="OLD",
+                        help="TARGET is a baseline file: exit 1 when it raises "
+                             "any count over the baseline OLD (a file it adds "
+                             "with findings included), naming each; 0 when it "
+                             "raises none. The pre-commit hook passes HEAD's "
+                             "copy, and CI the pull request base's.")
     parser.add_argument("--force-baseline", action="store_true",
                         help="Allow --record-baseline to write a baseline that "
                              "drops files the existing one recorded. Needed "
@@ -124,6 +138,20 @@ def _single(args: argparse.Namespace, target: str, root: Path,
     return check_target(target, lang, names, root, ignores), "per-file"
 
 
+def _per_file_output(args: argparse.Namespace, target: str) -> dict[str, Any]:
+    """Every file under TARGET on its own, as a baseline was recorded, plus
+    the audits once over the directory when --audit asks for them."""
+    tools = args.tools.split(",") if args.tools else None
+    checks = per_file_checks(target, args.lang, tools)
+    if args.audit:
+        groups, _ = _collect_files(target)
+        langs = [args.lang] if args.lang != "auto" else sorted(lang for lang, fs in groups.items() if fs)
+        checks.extend(_run_tools([t for lang in langs for t in AUDIT_TOOLS.get(lang, [])], target))
+    _mark_lab_exempt(checks)
+    return {"target": target, "language": args.lang, "checks": checks,
+            "summary": _summarize(checks)}
+
+
 def main() -> None:
     args = _parser().parse_args()
     _SMELLS["base"] = args.smells_base
@@ -131,6 +159,8 @@ def main() -> None:
     target = str(Path(args.target).resolve())
     if not Path(target).exists():
         _stop({"error": f"Path not found: {target}"}, jpexit.NOT_RUN)
+    if args.raised_over:
+        sys.exit(check_raised(args.raised_over, target))
 
     # Read before any measuring, so a bad entry refuses every mode alike.
     root = _repo_root(target)
@@ -141,11 +171,17 @@ def main() -> None:
 
     # Recording MEASURES DIFFERENTLY: it runs every file on its own even when
     # handed a directory, which is exactly what `check.py .` does not do.
+    # Audits are never recorded (see jpcheck/baseline.py), so --audit does
+    # not apply here.
     if args.record_baseline:
-        sys.exit(record_baseline(target, args.record_baseline, args.audit,
-                                 args.force_baseline))
+        sys.exit(record_baseline(target, args.record_baseline, args.force_baseline))
 
-    if not Path(target).is_dir() or args.lang != "auto" or args.tools:
+    if args.baseline and Path(target).is_dir():
+        # A baseline holds per-file counts, so a directory compared against
+        # one is measured the same way: each file on its own. Handed whole to
+        # mypy or phpstan, a directory gives the whole-repo count instead.
+        output, mode = _per_file_output(args, target), "per-file"
+    elif not Path(target).is_dir() or args.lang != "auto" or args.tools:
         output, mode = _single(args, target, root, ignores)
     else:
         try:

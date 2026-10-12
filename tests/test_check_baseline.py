@@ -78,6 +78,28 @@ def git_test_recording() -> None:
         check_true("records per-tool status, so a tool that did not run stays visible",
                    isinstance(doc.get("status"), dict))
         check("keys files relative to the repo root; a clean file is absent", _files(base), ["dirty.py"])
+        check("records version 2", doc.get("baseline_version"), 2)
+        files = doc["files"]
+        assert isinstance(files, dict)
+        entry = files["dirty.py"]["ruff"]
+        check("each tool's entry holds every count, fixable ones included",
+              sorted(entry), ["errors", "fixable", "fixable_unsafe", "warnings"])
+        check_true("  and the unused imports are counted as fixable", entry["fixable"] >= 2)
+
+
+def git_test_a_version_1_baseline_is_refused_with_the_command() -> None:
+    with repo() as r:
+        base = r / "base.json"
+        check_py(".", "--record-baseline", str(base), cwd=r)
+        doc = _doc(base)
+        doc["baseline_version"] = 1
+        base.write_text(json.dumps(doc), encoding="utf-8")
+        p = check_py("dirty.py", "--baseline", str(base), cwd=r)
+        check("a version 1 baseline is not compared: NOT_RUN", p.returncode, 2)
+        check_true("  and the refusal gives the command that re-records it",
+                   f"check.py . --record-baseline {base}" in p.stderr)
+        p = check_py(".", "--record-baseline", str(base), cwd=r)
+        check("re-recording over it works", (p.returncode, _doc(base).get("baseline_version")), (0, 2))
 
 
 def git_test_the_three_acceptance_cases() -> None:
@@ -119,13 +141,35 @@ def git_test_a_per_file_run_compares_only_what_it_measured() -> None:
                        for ln in p.stdout.splitlines()))
 
 
+def git_test_a_directory_against_a_baseline_is_measured_per_file() -> None:
+    """A baseline holds per-file counts, so a directory compared with one is
+    measured file by file, as recorded: the run CI makes over the repo."""
+    with repo() as r:
+        base = r / "base.json"
+        check_py(".", "--record-baseline", str(base), cwd=r)
+        for args in ((".",), (".", "--lang", "python")):
+            p = check_py(*args, "--baseline", str(base), cwd=r)
+            check(f"{' '.join(args)}: unchanged, so no change and exit 0",
+                  (p.returncode, "baseline: no change" in p.stdout), (0, True))
+        (r / "dirty.py").write_text(WORSE, encoding="utf-8")
+        p = check_py(".", "--baseline", str(base), cwd=r)
+        check_true("a file that got worse fails the directory run, named",
+                   p.returncode == 1 and "dirty.py  ruff  3 -> 4" in p.stderr)
+        p = check_py(".", "--lang", "js", "--baseline", str(base), cwd=r)
+        check("--lang keeps only that language's files: none here, so nothing worse", p.returncode, 0)
+
+
 def git_test_modes_and_versions_are_never_compared_across() -> None:
     with repo() as r:
         base = r / "base.json"
         check_py(".", "--record-baseline", str(base), cwd=r)
-        p = check_py(".", "--baseline", str(base), cwd=r)
-        check("a whole-repo run against a per-file baseline REFUSES", p.returncode, 2)
+        doc = _doc(base)
+        doc["mode"] = "whole-repo"
+        base.write_text(json.dumps(doc), encoding="utf-8")
+        p = check_py("dirty.py", "--baseline", str(base), cwd=r)
+        check("a per-file run against a whole-repo baseline REFUSES", p.returncode, 2)
         check_true("and says which two modes disagree", "per-file" in p.stderr and "whole-repo" in p.stderr)
+        check_py(".", "--record-baseline", str(base), "--force-baseline", cwd=r)
         doc = _doc(base)
         tools = doc["tools"]
         assert isinstance(tools, dict)
@@ -212,13 +256,12 @@ def git_test_touched_must_lower_and_keeps_the_gain() -> None:
         check_py(".", "--record-baseline", str(fresh), cwd=r)
         kept, again = _doc(base)["totals"], _doc(fresh)["totals"]
         assert isinstance(kept, dict) and isinstance(again, dict)
-        check("  and totals move with it: errors, warnings, total as a fresh record says",
-              {k: kept[k] for k in ("errors", "warnings", "total")},
-              {k: again[k] for k in ("errors", "warnings", "total")})
-        check_true("  CONTROL: the fresh record's errors did fall",
-                   again["errors"] < json.loads(recorded)["totals"]["errors"])
-        check("  fixable stays as recorded: no per-file count to move it by",
-              kept["fixable"], json.loads(recorded)["totals"]["fixable"])
+        counts = ("errors", "warnings", "total", "fixable", "fixable_unsafe")
+        check("  and totals move with it: every count as a fresh record says",
+              {k: kept[k] for k in counts}, {k: again[k] for k in counts})
+        check_true("  CONTROL: the fresh record's errors and fixable did fall",
+                   again["errors"] < json.loads(recorded)["totals"]["errors"]
+                   and again["fixable"] < json.loads(recorded)["totals"]["fixable"])
         check("the same count again is refused: each change fixes one",
               check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r).returncode, 3)
 
@@ -293,6 +336,70 @@ def git_test_a_linked_worktree_under_the_hooks_git_dir() -> None:
         env = dict(os.environ, GIT_DIR=git("rev-parse", "--absolute-git-dir", cwd=wt))
         check("with the hook's GIT_DIR set, the same unchanged count still exits 0",
               check_py("sub/dirty.py", "--baseline", base, cwd=wt, env=env).returncode, 0)
+
+
+def _entry(errors: int = 0, warnings: int = 0, fixable: int = 0, unsafe: int = 0) -> dict[str, int]:
+    return {"errors": errors, "warnings": warnings, "fixable": fixable, "fixable_unsafe": unsafe}
+
+
+def git_test_a_baseline_may_only_fall() -> None:
+    """raised_counts names every count a newer baseline holds above an older
+    one; check.py BASELINE --raised-over OLD is the hook's and CI's use of it."""
+    from jpcheck import baseline
+    old = {"files": {"a.py": {"ruff": _entry(3, 1, 2)}, "v1.py": {"ruff": {"errors": 1, "warnings": 0}}}}
+    same = json.loads(json.dumps(old))
+    check("the same baseline raises nothing", baseline.raised_counts(old, same), [])
+    lower = {"files": {"a.py": {"ruff": _entry(2, 1, 1)}}}
+    check("a lower one, a file dropped included, raises nothing", baseline.raised_counts(old, lower), [])
+    each = {"files": {"a.py": {"ruff": _entry(4, 2, 3, 1)}, "v1.py": {"ruff": _entry(1, 0, 5, 5)}}}
+    check("each count that rose is named; one the old entry never held is not compared",
+          baseline.raised_counts(old, each),
+          [("a.py", "ruff", "errors", 3, 4), ("a.py", "ruff", "warnings", 1, 2),
+           ("a.py", "ruff", "fixable", 2, 3), ("a.py", "ruff", "fixable_unsafe", 0, 1)])
+    added = {"files": {"a.py": {"ruff": _entry(3, 1, 2), "mypy": _entry(1)}, "new.py": {"ruff": _entry(0, 2)}}}
+    check("a tool or a file the old one lacks counts from zero",
+          baseline.raised_counts(old, added),
+          [("a.py", "mypy", "errors", 0, 1), ("new.py", "ruff", "warnings", 0, 2)])
+    with tempfile.TemporaryDirectory() as tmp:
+        o, n = Path(tmp) / "old.json", Path(tmp) / "new.json"
+        o.write_text(json.dumps(old), encoding="utf-8")
+        n.write_text(json.dumps(lower), encoding="utf-8")
+        p = check_py(str(n), "--raised-over", str(o), cwd=Path(tmp))
+        check("--raised-over, nothing raised: exit 0 and said", (p.returncode, "raises no count" in p.stdout),
+              (0, True))
+        n.write_text(json.dumps(each), encoding="utf-8")
+        p = check_py(str(n), "--raised-over", str(o), cwd=Path(tmp))
+        check_true("raised: exit 1, naming each count", p.returncode == 1 and "RAISES 4 count(s)" in p.stderr
+                   and "a.py  ruff  errors  3 -> 4" in p.stderr)
+        o.write_text("{ not json", encoding="utf-8")
+        p = check_py(str(n), "--raised-over", str(o), cwd=Path(tmp))
+        check_true("an unreadable old baseline: NOT_RUN, saying which",
+                   p.returncode == 2 and "cannot read" in p.stderr and str(o) in p.stderr)
+
+
+def git_test_audits_are_reported_and_never_baselined() -> None:
+    """An audit's count moves when an advisory is published, with no change to
+    any file, so it is neither recorded nor part of a baseline's verdict."""
+    from jpcheck import baseline
+    audit = {"tool": "pip-audit", "status": "fail",
+             "issues": [{"file": "requirements.txt", "severity": "error"}] * 2}
+    ruff = {"tool": "ruff", "status": "pass", "issues": []}
+    check("the audits are left out of what a baseline counts",
+          baseline._not_audits([audit, ruff]), [ruff])
+    with repo() as r:
+        base = r / "base.json"
+        (r / "requirements.txt").write_text("requests==2.0.0\n", encoding="utf-8")
+        check_py(".", "--record-baseline", str(base), cwd=r)
+        doc = _doc(base)
+        tools, status = doc["tools"], doc["status"]
+        assert isinstance(tools, dict) and isinstance(status, dict)
+        check("no audit tool is recorded", sorted(baseline._AUDITS & (set(tools) | set(status))), [])
+        err = __import__("io").StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(__import__("io").StringIO()):
+            rc = baseline.compare_baseline([audit, ruff], str(r / "clean.py"), str(base), "per-file")
+        check("an audit's findings do not fail the verdict", rc, 0)
+        check_true("  and are said to be reported and not compared",
+                   "pip-audit is an audit: 2 finding(s)" in err.getvalue())
 
 
 if __name__ == "__main__":
