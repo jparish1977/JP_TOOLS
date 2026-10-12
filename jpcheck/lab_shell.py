@@ -102,8 +102,19 @@ def _tokens(line: str) -> list[str] | None:
 _BACKTICK = "`"
 _DOLLAR_PAREN = "$("
 _DEPTH = {"(": 1, ")": -1}
-_QUOTES = ("'", '"')
+_SINGLE = "'"
+_DOUBLE = '"'
 _ESCAPED = 2  # a backslash and the character it escapes
+
+
+def _partner(line: str, i: int) -> tuple[int, int]:
+    """(where what LINE[I] opens ends, the index just past its partner): the
+    next copy of LINE[I] after I. An unclosed quote or backtick runs to the
+    end of the line, so both are len(LINE)."""
+    end = line.find(line[i], i + 1)
+    if end == -1:
+        return len(line), len(line)
+    return end, end + 1
 
 
 def _substitution(line: str, i: int) -> tuple[str, int]:
@@ -111,11 +122,8 @@ def _substitution(line: str, i: int) -> tuple[str, int]:
     I: up to a backtick's partner, or to the ")" closing "$(" (counting the
     parentheses inside it). An unclosed one runs to the end of the line."""
     if line.startswith(_BACKTICK, i):
-        start = i + len(_BACKTICK)
-        end = line.find(_BACKTICK, start)
-        if end == -1:
-            return line[start:], len(line)
-        return line[start:end], end + len(_BACKTICK)
+        end, past = _partner(line, i)
+        return line[i + len(_BACKTICK):end], past
     start = i + len(_DOLLAR_PAREN)
     depth = 1
     for j in range(start, len(line)):
@@ -136,19 +144,22 @@ def _substitutions(line: str) -> tuple[str, list[str]]:
     outside single quotes replaced by UNKNOWN; and the commands those
     substitutions run, each to be read as a line of its own."""
     out, inner = [], []
-    i, quote = 0, ""
+    i, in_double = 0, False
     while i < len(line):
         c = line[i]
-        if quote == "'":
-            if c == "'":
-                quote = ""
-        elif c == "\\":
+        if c == "\\":
             out.append(line[i:i + _ESCAPED])
             i += _ESCAPED
             continue
-        elif c in _QUOTES:
-            quote = "" if quote == c else quote or c
-        elif not quote and _is_comment(line, i):
+        if c == _SINGLE and not in_double:
+            # Taken whole, to its partner: nothing inside single quotes runs.
+            _, past = _partner(line, i)
+            out.append(line[i:past])
+            i = past
+            continue
+        if c == _DOUBLE:
+            in_double = not in_double
+        elif not in_double and _is_comment(line, i):
             break
         elif line.startswith((_BACKTICK, _DOLLAR_PAREN), i):
             body, i = _substitution(line, i)

@@ -25,7 +25,6 @@ the function.
 """
 
 import ast
-import functools
 from collections.abc import Callable
 from itertools import pairwise, takewhile
 
@@ -76,7 +75,7 @@ class _Scope:
     def __init__(self, tree: ast.AST) -> None:
         self.modules: dict[str, str] = {}
         self.names: dict[str, str] = {}
-        self.held: dict[str, str | list[str]] = {}
+        self.held: dict[str | None, str | list[str]] = {}
         self._imports(tree)
         self._holders(_assignments(tree))
 
@@ -133,9 +132,9 @@ class _Scope:
                    if isinstance(n, (ast.Name, ast.Attribute)))
 
     def holding(self, node: ast.AST) -> str | list[str] | None:
-        """What the name or attribute NODE holds, if it holds a lab path."""
-        key = _dotted(node)
-        return None if key is None else self.held.get(key)
+        """What the name or attribute NODE holds, if it holds a lab path.
+        A node with no dotted name looks up None, which nothing holds."""
+        return self.held.get(_dotted(node))
 
     def text(self, node: ast.AST) -> str:
         """What NODE would hold as a string, as far as this file says:
@@ -154,16 +153,12 @@ class _Scope:
         return MARK if held is not None or _names_lab_path(node) or self.mentions(node) else UNKNOWN
 
     def words(self, node: ast.AST) -> list[str]:
-        """An argv: a list or tuple word by word (a *NAME holding a list
-        spread into it), a held list as held, any other value as one word."""
+        """An argv: a list or tuple word by word (a *VALUE spread into it as
+        its own words), a held list as held, any other value as one word."""
         if isinstance(node, (ast.List, ast.Tuple)):
             out: list[str] = []
             for e in node.elts:
-                spread = self.holding(e.value) if isinstance(e, ast.Starred) else None
-                if isinstance(spread, list):
-                    out += spread
-                else:
-                    out.append(UNKNOWN if isinstance(e, ast.Starred) else self.text(e))
+                out += self.words(e.value) if isinstance(e, ast.Starred) else [self.text(e)]
             return out
         held = self.holding(node)
         if isinstance(held, list):
@@ -229,11 +224,16 @@ def _exec_runs(call: ast.Call, scope: _Scope, at: int, argv_at: int | None) -> b
     return command_runs_lab([scope.text(path), *rest])
 
 
-def _exec_runner(at: int, argv_at: int | None) -> Callable[[ast.Call, _Scope], bool]:
-    # A partial over a module-level function, not a closure: the table below
-    # is built at import, and a closure made then would be the only code a
-    # mutation test could never switch.
-    return functools.partial(_exec_runs, at=at, argv_at=argv_at)
+# os.exec*/spawn*/posix_spawn*, by "module.name": (where the program is,
+# where argv is or None). Data, not functions: _by_library hands them to
+# _exec_runs at the call, so nothing about them is fixed at import.
+_EXEC_AT: dict[str, tuple[int, int | None]] = {
+    **dict.fromkeys((f"os.{n}" for n in ("execv", "execve", "execvp", "execvpe",
+                                         "posix_spawn", "posix_spawnp")), (0, 1)),
+    **dict.fromkeys((f"os.{n}" for n in ("execl", "execle", "execlp", "execlpe")), (0, None)),
+    **dict.fromkeys((f"os.{n}" for n in ("spawnv", "spawnve", "spawnvp", "spawnvpe")), (1, 2)),
+    **dict.fromkeys((f"os.{n}" for n in ("spawnl", "spawnle", "spawnlp", "spawnlpe")), (1, None)),
+}
 
 
 def _file_loader(call: ast.Call, scope: _Scope) -> bool:
@@ -256,11 +256,6 @@ _LIBRARY: dict[str, Callable[[ast.Call, _Scope], bool]] = {
     **dict.fromkeys(("os.system", "os.popen", "subprocess.getoutput", "subprocess.getstatusoutput",
                      "asyncio.create_subprocess_shell"), _shell_runner),
     "asyncio.create_subprocess_exec": _vararg_runner,
-    **{f"os.{n}": _exec_runner(0, 1) for n in ("execv", "execve", "execvp", "execvpe",
-                                               "posix_spawn", "posix_spawnp")},
-    **{f"os.{n}": _exec_runner(0, None) for n in ("execl", "execle", "execlp", "execlpe")},
-    **{f"os.{n}": _exec_runner(1, 2) for n in ("spawnv", "spawnve", "spawnvp", "spawnvpe")},
-    **{f"os.{n}": _exec_runner(1, None) for n in ("spawnl", "spawnle", "spawnlp", "spawnlpe")},
     **dict.fromkeys(("runpy.run_path", "importlib.util.spec_from_file_location",
                      "importlib.machinery.SourceFileLoader", "exec", "compile",
                      "site.addsitedir"), _file_loader),
@@ -271,6 +266,8 @@ _LIBRARY: dict[str, Callable[[ast.Call, _Scope], bool]] = {
 
 def _by_library(call: ast.Call, scope: _Scope) -> bool:
     name = scope.qualified(call.func)
+    if name in _EXEC_AT:
+        return _exec_runs(call, scope, *_EXEC_AT[name])
     judge = _LIBRARY.get(name)
     if judge is None and name.endswith(".load_script"):  # the suites' helper, imported from _harness
         judge = _file_loader
@@ -303,8 +300,7 @@ def _local_runners(tree: ast.AST, scope: _Scope) -> _Runners:
         found = sum(len(programs) for _, programs in runners.values())
         for f in funcs:
             params = _params(f)
-            known = runners.get(f.name, ([], set()))[1]
-            for p in (p for p in params if p not in known):
+            for p in params:
                 trial = scope.with_held(p)
                 if any(_call_runs(c, trial, runners) for c in ast.walk(f) if isinstance(c, ast.Call)):
                     runners.setdefault(f.name, (params, set()))[1].add(p)

@@ -220,17 +220,14 @@ def test_run_traces_reach_afresh_and_keeps_results() -> None:
 def _run_mutmut(root: Path, full: bool, rc: int = 0,
                 env: dict[str, str] | None = None) -> list[dict[str, object]]:
     """Each mutmut invocation gate.run makes, mutmut itself stood in for and
-    answering RC; git runs for real. ENV replaces os.environ for the run."""
-    real = subprocess.run
+    exiting RC; git runs for real. ENV replaces os.environ for the run."""
     asked: list[dict[str, object]] = []
 
-    def fake(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
-        if cmd[1:3] == ["-m", "mutmut"]:
-            asked.append({"cmd": cmd, **kw})
-            return subprocess.CompletedProcess(cmd, rc)
-        return real(cmd, **kw)  # type: ignore[call-overload,no-any-return]  # reason: the real subprocess.run for git, passed through unchanged
+    def fake(cmd: list[str], **kw: object) -> int:
+        asked.append({"cmd": cmd, **kw})
+        return rc
 
-    with mock.patch.object(gate.subprocess, "run", side_effect=fake), \
+    with mock.patch.object(gate.subprocess, "call", side_effect=fake), \
             mock.patch.dict(gate.os.environ, env or {}, clear=env is not None):
         gate.run(root, full, 2)
     return asked

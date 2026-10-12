@@ -65,6 +65,22 @@ def test_an_interpreter_option_missing_its_value() -> None:
         check(f"{' '.join(words)} and nothing after it runs nothing", runs(words), False)
 
 
+def test_an_option_value_is_the_word_after_it() -> None:
+    runs = lab_shell.command_runs_lab
+    code = 'import runpy; runpy.run_path("tools/lab/x.py")'
+    check("python3 -c CODE, then an argument", runs(["python3", "-c", code, "arg"]), True)
+    check("python3 -m MODULE, then an argument", runs(["python3", "-m", "tools.lab.x", "arg"]), True)
+    check("php -f SCRIPT, then an argument", runs(["php", "-f", "tools/lab/x.php", "arg"]), True)
+    check("find with no -exec runs nothing", runs(["find", "tools/lab/", "-name", "x"]), False)
+
+
+def test_substitutions_keep_the_rest_of_the_line() -> None:
+    subs = lab_shell._substitutions
+    check("an escape is kept, both characters", subs("a\\bc"), ("a\\bc", []))
+    check("a single-quoted span is kept whole", subs("a 'b `c`' d"), ("a 'b `c`' d", []))
+    check("a substitution leaves its place marked", subs("a $(b) c"), ("a ? c", ["b"]))
+
+
 def _call(source: str) -> ast.Call:
     node = ast.parse(source).body[-1]
     assert isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
@@ -118,16 +134,18 @@ def test_a_methods_parameters() -> None:
 def test_which_reader_a_file_gets() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp)
+        # "i": a #! line longer than the 200 bytes read names python past them.
         files = {"a.py": "", "b.sh": "", "c.yml": "", "d.md": "",
                  "e": "#!/usr/bin/env python3\n", "f": "#!/bin/sh\n",
-                 "g": "#!/usr/bin/perl\n", "h": "no shebang\n"}
+                 "g": "#!/usr/bin/perl\n", "h": "no shebang\n",
+                 "i": "#!/opt/" + "x" * 300 + "/python\n"}
         for name, body in files.items():
             (d / name).write_text(body, encoding="utf-8")
         got = {name: lab_use._reader(d / name) for name in files}
     py, sh = lab_python.python_runs, lab_shell.shell_runs
     check("by suffix, then by #! line; None for the rest", got,
           {"a.py": py, "b.sh": sh, "c.yml": sh, "d.md": None,
-           "e": py, "f": sh, "g": None, "h": None})
+           "e": py, "f": sh, "g": None, "h": None, "i": None})
 
 
 if __name__ == "__main__":

@@ -133,10 +133,11 @@ def run(root: Path, full: bool, children: int) -> None:
     (mutants / STATS).unlink(missing_ok=True)  # traced afresh: see THE STATE
     env = dict(os.environ, PATH=os.pathsep.join(
         [str(Path(sys.executable).parent), os.environ.get("PATH", "")]))
-    p = subprocess.run([sys.executable, "-m", "mutmut", "run", "--max-children", str(children)],
-                       cwd=root, env=env, check=False)
-    if p.returncode != 0:
-        raise GateError(f"mutmut run exited {p.returncode}")
+    # call, not run: only the exit code is read, and a nonzero one is ours to name.
+    rc = subprocess.call([sys.executable, "-m", "mutmut", "run", "--max-children", str(children)],
+                         cwd=root, env=env)
+    if rc != 0:
+        raise GateError(f"mutmut run exited {rc}")
 
 
 def results_text(root: Path, source: str | None) -> str:
