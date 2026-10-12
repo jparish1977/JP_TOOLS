@@ -88,7 +88,9 @@ def problems(text: str) -> list[str]:
     lines = text.splitlines()
     found = []
     for n, line in enumerate(lines, 1):
-        if CALL.match(line) and "--smells-base" not in line:
+        # --raised-over compares two baseline files and runs no tool, so it
+        # has no smell to judge against a base.
+        if CALL.match(line) and "--smells-base" not in line and "--raised-over" not in line:
             found.append(f"line {n}: check.py without --smells-base")
     for span in job_spans(lines):
         if not any(CALL.match(lines[i]) for i in span):
@@ -117,6 +119,13 @@ def main() -> int:
     found = problems(other)
     check("a shallow checkout of ANOTHER repository is not reported; the rest still are",
           not any("shallow" in f for f in found) and len(found) == 2, "\n".join(found))
+    raised = BAD.replace("check.py . --pretty", "check.py quality-baseline.json --raised-over base.json")
+    found = problems(raised)
+    check("a --raised-over call, which runs no tool, is not asked for a base; the rest still are",
+          not any("without --smells-base" in f for f in found) and len(found) == 2, "\n".join(found))
+    found = problems(raised + "          python ../JP_TOOLS/check.py . --pretty\n")
+    check("  but a measuring call beside it still is",
+          sum("without --smells-base" in f for f in found) == 1, "\n".join(found))
     found = problems(TWO_JOBS)
     check("a shallow checkout in a job that runs check.py is reported, one in a job that does not is not",
           found == ["line 5: a shallow checkout"], "\n".join(found))
