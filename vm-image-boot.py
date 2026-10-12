@@ -120,7 +120,7 @@ def ppm_to_png(ppm_path: str, png_path: str) -> tuple[int, int]:
 
     png = (b"\x89PNG\r\n\x1a\n"
            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-           + chunk(b"IDAT", zlib.compress(raw, 6))
+           + chunk(b"IDAT", zlib.compress(raw))
            + chunk(b"IEND", b""))
     with open(png_path, "wb") as out:
         out.write(png)
