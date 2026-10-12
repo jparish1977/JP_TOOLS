@@ -238,22 +238,60 @@ def test_only_the_reach_a_change_can_move_is_traced_again() -> None:
         traced = _commit(root, {"pkg/mod.py": "y = 1\n", "b.py": "z = 1\n",
                                 "tests/test_c.py": "", "tests/test_d.py": ""}, "traced")
         stats = Path(td) / "stats.json"
-        reach = {"a.x_f": ["tests/test_d.py::t1"], "pkg.mod.x_g": ["tests/test_d.py::t2"],
-                 "b.x_h": ["tests/test_d.py::t3"]}
-        durations = dict.fromkeys(("tests/test_d.py::t1", "tests/test_d.py::t2",
-                                   "tests/test_d.py::t3", "tests/test_c.py::t4"), 1.0)
+        # t6 is reached but has no duration kept; t5 is a class's test; t7's
+        # module (c) does not change and stays.
+        reach = {"a.x_f": ["tests/test_d.py::t1"],
+                 "pkg.mod.x_g": ["tests/test_d.py::t2", "tests/test_e.py::t6"],
+                 "b.x_h": ["tests/test_d.py::t3"], "c.x_k": ["tests/test_d.py::t7"]}
+        durations = dict.fromkeys(("tests/test_d.py::t1", "tests/test_d.py::t2", "tests/test_d.py::t3",
+                                   "tests/test_c.py::t4", "tests/test_c.py::K::t5",
+                                   "tests/test_d.py::t7"), 1.0)
         stats.write_text(json.dumps({"git_commit": traced, "tests_by_mangled_function_name": reach,
                                      "duration_by_test": durations}), encoding="utf-8")
         _commit(root, {"a.py": "x = 3\n", "pkg/mod.py": "y = 2\n", "tests/test_c.py": "# changed\n"},
                 "the change")
+        (root / "b.py").write_text("z = 2\n", encoding="utf-8")  # changed, not committed
         said = gate.forget_moved_reach(root, stats)
         doc = json.loads(stats.read_text(encoding="utf-8"))
         check("the tests reaching a changed module, and in a changed test file, go",
-              sorted(doc["duration_by_test"]), ["tests/test_d.py::t3"])
+              sorted(doc["duration_by_test"]), ["tests/test_d.py::t7"])
         check("  and leave the reach they had", doc["tests_by_mangled_function_name"],
-              {"a.x_f": [], "pkg.mod.x_g": [], "b.x_h": ["tests/test_d.py::t3"]})
-        check("  and it says how many", said,
-              "3 file(s) changed since the traced commit: 3 test(s) traced again")
+              {"a.x_f": [], "pkg.mod.x_g": [], "b.x_h": [], "c.x_k": ["tests/test_d.py::t7"]})
+        check("  and it says how many: an uncommitted change counts too", said,
+              "4 file(s) changed since the traced commit: 6 test(s) traced again")
+
+
+def test_kept_reach_missing_its_tables_is_read_as_empty() -> None:
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        stats = Path(td) / "stats.json"
+        stats.write_text(json.dumps({"git_commit": _head(root)}), encoding="utf-8")
+        check("no reach or duration tables: nothing to take out",
+              gate.forget_moved_reach(root, stats),
+              "0 file(s) changed since the traced commit: 0 test(s) traced again")
+        check("  and the file keeps them, empty", json.loads(stats.read_text(encoding="utf-8")),
+              {"git_commit": _head(root), "tests_by_mangled_function_name": {}, "duration_by_test": {}})
+
+
+def test_run_keeps_the_reach_nothing_moved() -> None:
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        mutants = gate.prepare(root)
+        kept = {"git_commit": _head(root), "tests_by_mangled_function_name": {"a.x_f": ["tests/t.py::t"]},
+                "duration_by_test": {"tests/t.py::t": 1.0}}
+        (mutants / gate.STATS).write_text(json.dumps(kept), encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _run_mutmut(root, full=False)
+        check("run keeps reach traced at its own commit, whole",
+              json.loads((mutants / gate.STATS).read_text(encoding="utf-8")), kept)
+        check_true("  and says so", "0 test(s) traced again" in out.getvalue())
 
 
 def test_kept_reach_that_cannot_be_read_or_placed_is_traced_whole() -> None:

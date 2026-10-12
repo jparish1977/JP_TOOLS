@@ -140,7 +140,7 @@ def forget_moved_reach(root: Path, stats: Path) -> str:
     can have moved (see THE STATE), so mutmut traces just those; say what
     was done."""
     try:
-        doc = json.loads(stats.read_text(encoding="utf-8"))
+        doc = json.loads(stats.read_bytes())
     except FileNotFoundError:  # reason: no state kept is the full run's case; mutmut traces it all and the message says so
         return "no test reach kept: all of it traced"
     except ValueError:
@@ -148,20 +148,22 @@ def forget_moved_reach(root: Path, stats: Path) -> str:
         return "kept test reach unreadable: all of it traced"
     since = doc.get("git_commit")
     try:
-        changed = set(_git("-C", str(root), "diff", "--name-only", str(since), "HEAD").splitlines())
+        # Against the working tree, not HEAD: mutmut mutates the files as they are.
+        changed = set(_git("-C", str(root), "diff", "--name-only", str(since)).splitlines())
     except GateError:
         stats.unlink()
         return f"cannot diff against the traced commit {since}: all test reach traced"
     modules = {m for m in map(_module, changed) if m}
-    reach: dict[str, list[str]] = doc.get("tests_by_mangled_function_name", {})
+    reach: dict[str, list[str]] = doc.setdefault("tests_by_mangled_function_name", {})
+    durations: dict[str, float] = doc.setdefault("duration_by_test", {})
     moved = {t for key, tests in reach.items() if key.rpartition(".")[0] in modules for t in tests}
-    durations: dict[str, float] = doc.get("duration_by_test", {})
+    # A test id is FILE::NAME, or FILE::CLASS::NAME: the file is before the first ::.
     moved |= {t for t in durations if t.partition("::")[0] in changed}
     for t in moved:
-        durations.pop(t, None)
+        durations.pop(t, None)  # a test reach names may have no duration kept
     for key, tests in reach.items():
         reach[key] = [t for t in tests if t not in moved]
-    stats.write_text(json.dumps(doc), encoding="utf-8")
+    stats.write_bytes(json.dumps(doc).encode())
     return f"{len(changed)} file(s) changed since the traced commit: {len(moved)} test(s) traced again"
 
 
