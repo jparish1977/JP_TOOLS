@@ -261,6 +261,30 @@ def test_only_the_reach_a_change_can_move_is_traced_again() -> None:
               "4 file(s) changed since the traced commit: 6 test(s) traced again")
 
 
+def test_a_file_tests_share_has_all_reach_traced() -> None:
+    check("which files the tests share",
+          {p: gate._shared_by_tests(p) for p in (
+              "tests/conftest.py", "conftest.py", "tests/_harness.py", "tests/fixtures/a.json",
+              "tests/_lab_python_cases.py", "tests/test_x.py", "tests/mutants/spec.json",
+              "jpcheck/lab_use.py", "README.md")},
+          {"tests/conftest.py": True, "conftest.py": True, "tests/_harness.py": True,
+           "tests/fixtures/a.json": True, "tests/_lab_python_cases.py": True,
+           "tests/test_x.py": False, "tests/mutants/spec.json": False,
+           "jpcheck/lab_use.py": False, "README.md": False})
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        stats = Path(td) / "stats.json"
+        stats.write_text(json.dumps({"git_commit": _head(root), "duration_by_test": {"tests/t.py::t": 1.0}}),
+                         encoding="utf-8")
+        _commit(root, {"tests/_harness.py": "# changed\n"}, "a helper")
+        check("a helper changed: all reach traced, naming it", gate.forget_moved_reach(root, stats),
+              "tests/_harness.py changed, which tests share: all test reach traced")
+        check_true("  and the kept reach is gone", not stats.exists())
+
+
 def test_kept_reach_missing_its_tables_is_read_as_empty() -> None:
     if not shutil.which("git"):
         print("SKIP: git not found")

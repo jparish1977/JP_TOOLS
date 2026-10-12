@@ -290,17 +290,7 @@ jobs:
       - name: Mutants of the changed functions
         shell: bash
         run: |
-          # mutmut-nightly.yml swaps a whole new state in as current/.
-          state=/mutmut-state/current
-          if [ -d "$state/mutants" ] && [ -f "$state/baseline.json" ]; then
-            cp -a "$state/mutants" ./mutants
-            cp "$state/baseline.json" ./mutmut-baseline.json
-            echo "state: the nightly run's, from the mutmut-state volume"
-          else
-            echo "NO STATE in the mutmut-state volume: the nightly full run has not left one," >&2
-            echo "so there is no baseline to judge against. Not judged (could not look)." >&2
-            exit 2
-          fi
+          bash ci-image/fetch-mutmut-state.sh /mutmut-state
           python mutmut-gate.py run --max-children "$CI_WORKERS"
           python -m mutmut results --all true > mutmut-results.txt
           python mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt
@@ -357,13 +347,7 @@ jobs:
       - name: The merge's changed functions, then the state
         shell: bash
         run: |
-          state=/mutmut-state/current
-          if [ ! -d "$state/mutants" ] || [ ! -f "$state/baseline.json" ]; then
-            echo "NO STATE in the mutmut-state volume to move on: the nightly makes one." >&2
-            exit 2
-          fi
-          cp -a "$state/mutants" ./mutants
-          cp "$state/baseline.json" ./mutmut-baseline.json
+          bash ci-image/fetch-mutmut-state.sh /mutmut-state
           python mutmut-gate.py run --max-children "$CI_WORKERS"
           python -m mutmut results --all true > mutmut-results.txt
           python mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt

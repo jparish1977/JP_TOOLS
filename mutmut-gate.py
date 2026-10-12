@@ -37,8 +37,10 @@ say, would leave that function "no tests", and the rule above would fail it
 for a test it has. So before mutmut runs, the tests in any file changed since
 the state was traced (its git_commit), and the tests recorded as reaching a
 function in any changed source file, are taken out of the stats; mutmut then
-counts them as new and traces just those. A state whose commit this clone
-cannot diff against is traced afresh, whole: slower, never wrong.
+counts them as new and traces just those. A change to a file the tests share
+(a conftest.py; a helper, case table or fixture under tests/) can move any
+test's reach without touching its file, so it, and a state whose commit this
+clone cannot diff against, has all reach traced afresh: slower, never wrong.
 
 mutants/ is a git worktree of HEAD with an index and NO checked-out files:
 mutmut writes every file in it, and some suites ask git about the checkout, so
@@ -135,6 +137,18 @@ def _module(path: str) -> str | None:
     return path.removesuffix(".py").removesuffix("/__init__").replace("/", ".")
 
 
+def _shared_by_tests(path: str) -> bool:
+    """A file whose change can move the reach of tests that are not in it:
+    a conftest.py anywhere, and under tests/ anything but a test_*.py suite
+    and the mutant specs (helpers, case tables, fixtures)."""
+    name = path.rpartition("/")[2]
+    if name == "conftest.py":
+        return True
+    if not path.startswith("tests/") or path.startswith("tests/mutants/"):
+        return False
+    return not (name.startswith("test_") and name.endswith(".py"))
+
+
 def forget_moved_reach(root: Path, stats: Path) -> str:
     """Take out of STATS the tests whose reach a change since it was traced
     can have moved (see THE STATE), so mutmut traces just those; say what
@@ -153,6 +167,10 @@ def forget_moved_reach(root: Path, stats: Path) -> str:
     except GateError:
         stats.unlink()
         return f"cannot diff against the traced commit {since}: all test reach traced"
+    shared = sorted(p for p in changed if _shared_by_tests(p))
+    if shared:
+        stats.unlink()
+        return f"{shared[0]} changed, which tests share: all test reach traced"
     modules = {m for m in map(_module, changed) if m}
     reach: dict[str, list[str]] = doc.setdefault("tests_by_mangled_function_name", {})
     durations: dict[str, float] = doc.setdefault("duration_by_test", {})
