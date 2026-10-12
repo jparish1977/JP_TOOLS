@@ -91,7 +91,7 @@ def test_a_failing_suite_fails_it() -> None:
 def test_a_suite_that_only_skipped_fails_it() -> None:
     rc, out = _prove(_tree({**PASS, "test_skip.py": 'print("SKIP: no tool")\n'}))
     check("a skip: exit 1", rc, 1)
-    check_true("  suites rc=2 reported", "suites rc=2 specs rc=0" in out)
+    check_true("  suites rc=3 reported", "suites rc=3 specs rc=0" in out)
 
 
 def test_a_spec_off_target_fails_it_and_shows_why() -> None:

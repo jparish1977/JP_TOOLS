@@ -13,9 +13,13 @@
 # ran none of its cases (its tool was missing, say). It is counted as skipped,
 # never as passed, and named after the count.
 #
-# Exit: 0 every suite passed; 1 a suite failed (nonzero exit), whatever else
-# happened; 2 none failed but at least one skipped, or REPO_ROOT could not be
-# entered. So a caller that wants "everything ran and passed" tests for 0.
+# Exit, and the last line says which, as "run-suites: exit N, MEANING":
+#   0 every suite passed;
+#   1 a suite failed (nonzero exit), whatever else happened;
+#   2 could not look: REPO_ROOT could not be entered, so nothing ran;
+#   3 none failed but at least one skipped.
+# So a caller that wants "everything ran and passed" tests for 0, and one
+# that tells a skip from a run that never happened tests for 2 and 3.
 #
 # Parallel: JOBS suites at once (default every core), each into its own file,
 # printed afterwards in suite order. The suites share nothing but the tree:
@@ -30,7 +34,10 @@
 printf '%s' jp-run-suites > /proc/$$/comm 2>/dev/null || true
 set -u
 root=${1:-$(git rev-parse --show-toplevel)}
-cd "$root" || exit 2
+if ! cd "$root"; then
+  echo "run-suites: exit 2, could not look: cannot enter $root"
+  exit 2
+fi
 jobs=${JOBS:-$(nproc)}
 fail_lines=${FAIL_LINES:-40}
 suite_timeout=${SUITE_TIMEOUT:-300}
@@ -98,6 +105,13 @@ skipped=()
 run_all
 tally
 report
-if [ "${#failed[@]}" -gt 0 ]; then exit 1; fi
-if [ "${#skipped[@]}" -gt 0 ]; then exit 2; fi
+if [ "${#failed[@]}" -gt 0 ]; then
+  echo "run-suites: exit 1, ${#failed[@]} failed"
+  exit 1
+fi
+if [ "${#skipped[@]}" -gt 0 ]; then
+  echo "run-suites: exit 3, none failed, ${#skipped[@]} skipped"
+  exit 3
+fi
+echo "run-suites: exit 0, every suite passed"
 exit 0

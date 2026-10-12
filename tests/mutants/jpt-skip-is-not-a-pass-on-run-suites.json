@@ -1,9 +1,11 @@
 {
- "about": "run-suites.sh counts a suite that exits 0 with a SKIP last line as skipped, never passed; a failure exits 1 and a skip with no failure exits 2. Run: mutate-on-target.py TREE run-suites.sh tests/test_run_suites.py tests/mutants/jpt-skip-is-not-a-pass-on-run-suites.json",
+ "about": "run-suites.sh counts a suite that exits 0 with a SKIP last line as skipped, never passed; a failure exits 1, a root it cannot enter 2 (could not look), and a skip with no failure 3, so the two never share a code. Run: mutate-on-target.py TREE run-suites.sh tests/test_run_suites.py tests/mutants/jpt-skip-is-not-a-pass-on-run-suites.json",
  "mutants": [
   {"name": "skip-counted-as-pass", "edits": [["  elif [ \"${last#SKIP}\" != \"$last\" ]; then", "  elif false; then"]], "target": "counted as skipped, not passed"},
-  {"name": "skip-exits-0", "edits": [["if [ \"${#skipped[@]}\" -gt 0 ]; then exit 2; fi", "true"]], "target": "a skip and no failure: exit 2"},
-  {"name": "failure-exits-0", "edits": [["if [ \"${#failed[@]}\" -gt 0 ]; then exit 1; fi", "true"]], "target": "a failure: exit 1, whatever else"},
+  {"name": "skip-exits-0", "edits": [["  echo \"run-suites: exit 3, none failed, ${#skipped[@]} skipped\"\n  exit 3", "  true"]], "target": "a skip and no failure: exit 3"},
+  {"name": "skip-exits-2-as-before", "edits": [["  exit 3\n", "  exit 2\n"]], "target": "a skip and no failure: exit 3"},
+  {"name": "could-not-look-exits-3", "edits": [["  exit 2\nfi", "  exit 3\nfi"]], "target": "could not look: exit 2"},
+  {"name": "failure-exits-0", "edits": [["  echo \"run-suites: exit 1, ${#failed[@]} failed\"\n  exit 1", "  true"]], "target": "a failure: exit 1, whatever else"},
   {"name": "skips-not-named", "edits": [["  echo \"SKIPPED ${suites[$((n - 1))]}\"", "  true"]], "target": "and named"},
   {"name": "count-says-all-passed", "edits": [["echo \"suites: $passed/${#suites[@]} passed", "echo \"suites: ${#suites[@]}/${#suites[@]} passed"]], "target": "counted as skipped, not passed"}
  ]

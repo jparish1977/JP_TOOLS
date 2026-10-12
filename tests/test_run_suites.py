@@ -6,10 +6,12 @@ to keep, not its happy path:
 
     - A failing suite fails the run (exit 1) and is named, with its output.
     - A suite that exits 0 with a last line starting SKIP is counted as
-      skipped, never as passed, and named; with no failure the run exits 2.
+      skipped, never as passed, and named; with no failure the run exits 3.
     - Only the last line decides: a SKIP printed earlier is not a skip.
     - The count line is exact: "P/N passed, S skipped, F failed".
-    - Exit 0 only when every suite passed. A root that cannot be entered: 2.
+    - Exit 0 only when every suite passed. A root that cannot be entered: 2,
+      could not look, which is not 3, a skip.
+    - The run's last line names its exit code and what it means.
     - The old path, tools/lab/run-suites.sh, forwards to it.
 
     python3 tests/test_run_suites.py
@@ -59,10 +61,15 @@ def _count(out: str) -> str:
     return m.group(1) if m else f"no count line in: {out!r}"
 
 
+def _last(out: str) -> str:
+    return out.rstrip("\n").rsplit("\n", 1)[-1]
+
+
 def test_every_suite_passing_is_the_only_exit_0() -> None:
     rc, out = _run(_tree(["test_pass.py", "test_early_skip.py", "test_silent.py",
                           "test_shell.sh"]))
     check("every suite passed, so exit 0", rc, 0)
+    check("  the last line says so", _last(out), "run-suites: exit 0, every suite passed")
     check("  the count", _count(out), "4/4 passed, 0 skipped, 0 failed")
     check_true("  a SKIP that is not the last line does not make a skip",
                "SKIPPED" not in out)
@@ -73,9 +80,10 @@ def test_every_suite_passing_is_the_only_exit_0() -> None:
 
 def test_a_skip_is_not_a_pass() -> None:
     rc, out = _run(_tree(["test_pass.py", "test_skip.py"]))
-    check("a skip and no failure: exit 2", rc, 2)
+    check("a skip and no failure: exit 3", rc, 3)
     check("  counted as skipped, not passed", _count(out), "1/2 passed, 1 skipped, 0 failed")
     check_true("  and named", "SKIPPED tests/test_skip.py" in out)
+    check("  the last line says so", _last(out), "run-suites: exit 3, none failed, 1 skipped")
 
 
 def test_a_failure_fails_the_run_and_is_named() -> None:
@@ -84,17 +92,21 @@ def test_a_failure_fails_the_run_and_is_named() -> None:
     check("  the count", _count(out), "1/3 passed, 1 skipped, 1 failed")
     check_true("  named with its rc", "---- FAILED rc=1 tests/test_fail.py" in out)
     check_true("  and its own output shown", "FAIL something" in out.split("---- FAILED", 1)[-1])
+    check("  the last line says so", _last(out), "run-suites: exit 1, 1 failed")
 
 
 def test_a_root_that_cannot_be_entered() -> None:
-    rc, _ = _run(Path(tempfile.gettempdir()) / "no-such-tree-for-run-suites")
-    check("exit 2", rc, 2)
+    missing = Path(tempfile.gettempdir()) / "no-such-tree-for-run-suites"
+    rc, out = _run(missing)
+    check("could not look: exit 2, not a skip's 3", rc, 2)
+    check("  the last line says so", _last(out), f"run-suites: exit 2, could not look: cannot enter {missing}")
+    check_true("  and no suite ran", "suites:" not in out)
 
 
 def test_the_old_lab_path_forwards() -> None:
     root = _tree(["test_pass.py", "test_skip.py"])
     check("tools/lab/run-suites.sh gives the same verdict",
-          _run(root, ROOT / "tools" / "lab" / "run-suites.sh")[0], 2)
+          _run(root, ROOT / "tools" / "lab" / "run-suites.sh")[0], 3)
 
 
 if __name__ == "__main__":

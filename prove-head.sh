@@ -7,7 +7,8 @@
 # Steps; 2 and 3 both run whatever the other found, so one report shows all:
 #   1. composer install, so the suites that need the PHP libraries run rather
 #      than skip; if it fails, stop: exit 1, since what follows would skip.
-#   2. this tree's run-suites.sh: every suite, a skip is not a pass.
+#   2. this tree's run-suites.sh: every suite, a skip is not a pass (its rc:
+#      1 a suite failed, 2 could not look, 3 a suite skipped).
 #   3. mutate-spec.py over tests/mutants/*.json: every spec's mutants killed on
 #      target. A spec whose last line does not say so has its output printed.
 # Exit 0 only when every suite passed (none failed, none skipped) and every
