@@ -28,7 +28,8 @@ import re
 import subprocess
 import sys
 
-REPO = pathlib.Path(__file__).resolve().parent.parent
+from _harness import ROOT as REPO
+
 TOOL = REPO / "spool-audit.py"
 # Every spool-audit suite, found rather than listed, so a renamed or added
 # suite cannot drop out of the comparison.

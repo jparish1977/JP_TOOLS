@@ -24,7 +24,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from _harness import ROOT
+
 CHECK_PY = ROOT / "check.py"
 
 HEADER = '"""A probe.\n\nANSWERS: x.\nTESTED AGAINST: y.\nNOT TESTED AGAINST: z.\n"""\n'

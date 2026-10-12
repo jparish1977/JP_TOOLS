@@ -31,7 +31,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent.parent
+from _harness import ROOT
+
 CHECK_PY = ROOT / "check.py"
 
 fails = 0

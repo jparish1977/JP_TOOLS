@@ -29,7 +29,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from _harness import ROOT
+
 CHECK_PY = ROOT / "check.py"
 
 DIRTY = "#!/usr/bin/env python3\nimport os\n"          # F401

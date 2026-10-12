@@ -11,10 +11,19 @@ A script whose file name is not a module name is loaded with load_script().
 The ruff config forces it to the top of its import section. Bytecode is off,
 so a mutation run that rewrites a module in place is never answered by a
 cached copy of the original.
+
+Importing it also takes git's repository variables out of the environment
+(GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE and the rest: the list is git's own,
+`git rev-parse --local-env-vars`). Under `git bisect run` or a git hook they
+name the REAL repository, and a suite's `git init` or `git commit` in a
+scratch directory would act on it instead. Every suite imports this module
+(tests/test_harness.py holds that), so no suite runs git with them.
 """
 
 import importlib.util
+import os
 import shutil
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -22,6 +31,20 @@ from types import ModuleType
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def clear_git_repo_env() -> list[str]:
+    """Remove git's repository variables from os.environ; return those that
+    were set. Without git there is nothing a suite could run them with."""
+    git = shutil.which("git")
+    if git is None:
+        return []
+    names = subprocess.run([git, "rev-parse", "--local-env-vars"], capture_output=True,
+                           text=True, check=False).stdout.split()
+    return [n for n in names if os.environ.pop(n, None) is not None]
+
+
+CLEARED_GIT_ENV = clear_git_repo_env()
 
 # What a copy of the whole checkout leaves out: git data, installed packages,
 # and what tools write into the checkout while other suites run beside the

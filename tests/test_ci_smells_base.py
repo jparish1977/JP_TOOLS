@@ -25,9 +25,9 @@ must fail, or the checks below could never fail.
 
 import re
 import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from _harness import ROOT
+
 WORKFLOWS = (ROOT / ".github" / "workflows" / "check.yml", ROOT / "templates" / "ci-check.yml")
 CALL = re.compile(r"^\s*python3?\s+\S*check\.py\s")
 JOB_HEAD = re.compile(r"^  [A-Za-z_][\w-]*:\s*$")  # a job's key, two spaces in under `jobs:`

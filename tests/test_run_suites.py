@@ -5,9 +5,10 @@ run-suites.sh, against throwaway trees of tiny suites. The invariants it exists
 to keep, not its happy path:
 
     - A failing suite fails the run (exit 1) and is named, with its output.
-    - A suite that exits 0 with a last line starting SKIP is counted as
-      skipped, never as passed, and named; with no failure the run exits 3.
-    - Only the last line decides: a SKIP printed earlier is not a skip.
+    - A suite that exits 0 having printed a line starting SKIP is counted as
+      skipped, never as passed, and named with that line; with no failure the
+      run exits 3. That holds when the SKIP came before a later "3 passed".
+    - The suites do not see git's repository variables (GIT_DIR, ...).
     - The count line is exact: "P/N passed, S skipped, F failed".
     - Exit 0 only when every suite passed. A root that cannot be entered: 2,
       could not look, which is not 3, a skip.
@@ -38,6 +39,8 @@ SUITES = {
     "test_early_skip.py": 'print("SKIP: one case")\nprint("3 passed")\n',
     "test_silent.py": "",
     "test_shell.sh": 'echo "shell ok"\n',
+    "test_git_env.py": 'import os\nprint("GIT_DIR=" + os.environ.get("GIT_DIR", "unset"))\n',
+    "test_git_env.sh": 'echo "GIT_WORK_TREE=${GIT_WORK_TREE:-unset}"\n',
 }
 
 
@@ -50,9 +53,10 @@ def _tree(names: list[str]) -> Path:
     return root
 
 
-def _run(root: Path, script: Path = ROOT / "run-suites.sh") -> tuple[int, str]:
+def _run(root: Path, script: Path = ROOT / "run-suites.sh",
+         env: dict[str, str] | None = None) -> tuple[int, str]:
     p = subprocess.run(["bash", str(script), str(root)], capture_output=True, text=True,
-                       env=dict(os.environ, JOBS="2", FAIL_LINES="5"), check=False)
+                       env=dict(os.environ, JOBS="2", FAIL_LINES="5", **(env or {})), check=False)
     return p.returncode, p.stdout
 
 
@@ -66,16 +70,30 @@ def _last(out: str) -> str:
 
 
 def test_every_suite_passing_is_the_only_exit_0() -> None:
-    rc, out = _run(_tree(["test_pass.py", "test_early_skip.py", "test_silent.py",
-                          "test_shell.sh"]))
+    rc, out = _run(_tree(["test_pass.py", "test_silent.py", "test_shell.sh"]))
     check("every suite passed, so exit 0", rc, 0)
     check("  the last line says so", _last(out), "run-suites: exit 0, every suite passed")
-    check("  the count", _count(out), "4/4 passed, 0 skipped, 0 failed")
-    check_true("  a SKIP that is not the last line does not make a skip",
-               "SKIPPED" not in out)
+    check("  the count", _count(out), "3/3 passed, 0 skipped, 0 failed")
     check_true("  each suite has its line, rc and last line",
-               "rc=0 tests/test_early_skip.py :: 3 passed" in out
+               "rc=0 tests/test_pass.py :: all good" in out
                and "rc=0 tests/test_shell.sh :: shell ok" in out)
+
+
+def test_a_skip_before_the_last_line_is_a_skip() -> None:
+    rc, out = _run(_tree(["test_pass.py", "test_early_skip.py"]))
+    check("a SKIP printed before a later \"3 passed\": exit 3", rc, 3)
+    check("  counted as skipped", _count(out), "1/2 passed, 1 skipped, 0 failed")
+    check_true("  named with the SKIP line, not the last line",
+               "SKIPPED tests/test_early_skip.py :: SKIP: one case" in out)
+    check_true("  its own row still shows its last line", "rc=0 tests/test_early_skip.py :: 3 passed" in out)
+
+
+def test_suites_run_without_git_repository_variables() -> None:
+    root = _tree(["test_git_env.py", "test_git_env.sh"])
+    rc, out = _run(root, env={"GIT_DIR": str(root / "elsewhere"), "GIT_WORK_TREE": str(root)})
+    check("run with GIT_DIR and GIT_WORK_TREE set: still exit 0", rc, 0)
+    check_true("  a Python suite does not see GIT_DIR", "rc=0 tests/test_git_env.py :: GIT_DIR=unset" in out)
+    check_true("  nor a shell suite GIT_WORK_TREE", "rc=0 tests/test_git_env.sh :: GIT_WORK_TREE=unset" in out)
 
 
 def test_a_skip_is_not_a_pass() -> None:

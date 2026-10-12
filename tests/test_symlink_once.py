@@ -28,7 +28,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent.parent
+from _harness import ROOT
+
 UNUSED = "import os\nimport sys\n"
 INSIDE = "(symlink inside the tree, measured at its target)"
 OUTSIDE = "(symlink out of the tree, not this repo's file)"

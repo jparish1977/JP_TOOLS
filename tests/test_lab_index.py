@@ -26,7 +26,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from _harness import ROOT
+
 LAB = ROOT / "tools" / "lab"
 ROW = re.compile(r"^\|\s*`([^`]+)`", re.MULTILINE)
 

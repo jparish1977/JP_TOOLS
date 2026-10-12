@@ -9,9 +9,15 @@
 # REPO_ROOT defaults to the repo you are standing in, not the one this file
 # lives in, so it runs a branch's suites from any worktree.
 #
-# A SKIP IS NOT A PASS. A suite that exits 0 with a last line starting "SKIP"
-# ran none of its cases (its tool was missing, say). It is counted as skipped,
-# never as passed, and named after the count.
+# A SKIP IS NOT A PASS. A suite that exits 0 having printed any line starting
+# "SKIP" did not run all of its cases (a tool was missing, say), whether it
+# said so on its last line or before a later "N/N passed". It is counted as
+# skipped, never as passed, and named after the count with that first line.
+#
+# The suites run without git's repository variables (GIT_DIR and the rest, by
+# git's own list, `git rev-parse --local-env-vars`): under `git bisect run` or
+# a git hook they name the real repository, and a suite's git in a scratch
+# repo would act on that instead.
 #
 # Exit, and the last line says which, as "run-suites: exit N, MEANING":
 #   0 every suite passed;
@@ -38,6 +44,9 @@ if ! cd "$root"; then
   echo "run-suites: exit 2, could not look: cannot enter $root"
   exit 2
 fi
+while IFS= read -r var; do
+  unset "$var"
+done < <(git rev-parse --local-env-vars 2>/dev/null)
 jobs=${JOBS:-$(nproc)}
 fail_lines=${FAIL_LINES:-40}
 suite_timeout=${SUITE_TIMEOUT:-300}
@@ -74,7 +83,7 @@ tally() {
     last=$(tail -n 1 "$out/$n.out")
     if [ "$rc" -ne 0 ]; then
       failed+=("$n")
-    elif [ "${last#SKIP}" != "$last" ]; then
+    elif grep -q '^SKIP' "$out/$n.out"; then
       skipped+=("$n")
     else
       passed=$((passed + 1))
@@ -83,13 +92,14 @@ tally() {
   done
 }
 
-# The count, then the skipped suites by name, then each failure's own output.
+# The count, then the skipped suites by name with their first SKIP line, then
+# each failure's own output.
 # ${arr[@]+...}: an empty array under set -u is an error before bash 4.4.
 report() {
   local n
   echo "suites: $passed/${#suites[@]} passed, ${#skipped[@]} skipped, ${#failed[@]} failed in $(($(date +%s) - start))s"
   for n in ${skipped[@]+"${skipped[@]}"}; do
-    echo "SKIPPED ${suites[$((n - 1))]}"
+    echo "SKIPPED ${suites[$((n - 1))]} :: $(grep -m 1 '^SKIP' "$out/$n.out" | cut -c1-110)"
   done
   for n in ${failed[@]+"${failed[@]}"}; do
     printf '\n---- FAILED rc=%s %s, its last %s lines:\n' "$(cat "$out/$n.rc")" "${suites[$((n - 1))]}" "$fail_lines"

@@ -24,7 +24,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent.parent
+from _harness import ROOT
+
 REASON = "byte-exact vendor pages kept as provenance"
 UNUSED = "import os\n"
 

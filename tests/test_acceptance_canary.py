@@ -40,7 +40,8 @@ import subprocess
 import sys
 import tempfile
 
-REPO = pathlib.Path(__file__).resolve().parent.parent
+from _harness import ROOT as REPO
+
 DEFAULT_SUITE = REPO / "tests" / "test_spool_audit_acceptance.sh"
 
 STUBS = {
