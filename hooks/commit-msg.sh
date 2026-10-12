@@ -74,11 +74,12 @@ refuse_lint_debt() {
     fi
     echo ""
     echo "====================================="
-    echo " JP_TOOLS: commit REFUSED: these changed and fixed none of their"
-    echo " recorded findings, and the message gives no reason:"
+    echo " JP_TOOLS: commit REFUSED: these need a reason in the message, and it"
+    echo " gives none:"
     echo "$held" | sed 's/^/   /'
-    echo " Fix: fix at least one finding in each, or add a line to the message:"
-    echo "   LINT-DEBT-OK: <why this change cannot fix one>"
+    echo " Fix: fix at least one finding in each file (and leave the baseline no"
+    echo " higher than HEAD's), or add a line to the message:"
+    echo "   LINT-DEBT-OK: <why this change cannot>"
     echo "====================================="
     exit 1
 }

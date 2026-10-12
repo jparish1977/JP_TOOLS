@@ -766,6 +766,44 @@ def lint_debt_ok_cases(tmp: Path) -> None:
           r.stdout + r.stderr)
 
 
+def raised_baseline_cases(tmp: Path) -> None:
+    """A staged quality-baseline.json that raises a count over HEAD's is held
+    for a LINT-DEBT-OK line, however it came to be raised."""
+    print("\nA baseline that rises:")
+    repo = debt_repo(tmp)
+    doc = json.loads((repo / "quality-baseline.json").read_text(encoding="utf-8"))
+    doc["files"]["a.py"]["ruff"]["errors"] = 9
+    raised = json.dumps(doc, indent=1, sort_keys=True) + "\n"
+    (repo / "quality-baseline.json").write_text(raised, encoding="utf-8")
+    (repo / "fresh.py").write_text(CLEAN_PY, encoding="utf-8")
+    git(repo, "add", "--", "quality-baseline.json", "fresh.py")
+    r = git(repo, "commit", "-m", "an unrelated change")
+    out = r.stdout + r.stderr
+    check("a hand edit raising a count, with no reason: refused, naming the count",
+          r.returncode != 0 and "a.py  ruff  errors  2 -> 9" in out
+          and "quality-baseline.json: raises a count over HEAD's" in out, out)
+    check("  and the baseline stays as staged",
+          (repo / "quality-baseline.json").read_text(encoding="utf-8") == raised
+          and git(repo, "diff", "--quiet", "--", "quality-baseline.json").returncode == 0)
+    r = git(repo, "commit", "-m", "re-record\n\nLINT-DEBT-OK: re-recorded on a new ruff")
+    check("with a reason: committed, and the raised count is HEAD's",
+          r.returncode == 0 and baseline_errors(repo, "HEAD", "a.py") == 9, r.stdout + r.stderr)
+
+    # A path commit lowers the count in HEAD and leaves the index's older copy;
+    # `git restore` then puts that older copy in the working tree.
+    (tmp / "again").mkdir()
+    repo = debt_repo(tmp / "again")
+    (repo / "a.py").write_text("import os\n\nx = 1\n", encoding="utf-8")
+    git(repo, "commit", "-m", "fix one, by path", "a.py")
+    git(repo, "restore", "--", "quality-baseline.json")
+    r = commit_file(repo, "fresh.py", CLEAN_PY)
+    out = r.stdout + r.stderr
+    check("`git restore` putting the older copy back: refused, saying how to stage HEAD's",
+          r.returncode != 0 and "git checkout HEAD -- quality-baseline.json" in out, out)
+    kept = baseline_errors(repo, "HEAD", "a.py")
+    check("  and HEAD keeps the gain", kept == 1, str(kept))
+
+
 def ratchet_index_cases(tmp: Path) -> None:
     """What a commit records is what its own tree has: `git commit <path>` and
     a partial stage."""
@@ -878,6 +916,8 @@ def main() -> int:
         ratchet_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:
         lint_debt_ok_cases(Path(td))
+    with tempfile.TemporaryDirectory() as td:
+        raised_baseline_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:
         ratchet_index_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:

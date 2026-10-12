@@ -1,5 +1,5 @@
 {
-  "about": "With quality-baseline.json the hook passes --touched, stages a lowered baseline with the commit, restores it when the commit fails, refuses an unstaged edit to it, puts back the index a `git commit <path>` leaves, refuses a file staged in part, and holds a not-lowered file for the message only when a commit-msg hook can read it. Run: mutate-on-target.py TREE hooks/pre-commit.sh tests/test_install_hooks.py tests/mutants/jpt-ratchet-on-hook.json",
+  "about": "With quality-baseline.json the hook passes --touched, stages a lowered baseline with the commit, restores it when the commit fails, refuses an unstaged edit to it, puts back the index a `git commit <path>` leaves, refuses a file staged in part, holds a staged baseline that raises a count over HEAD's, and holds a not-lowered file for the message only when a commit-msg hook can read it. Run: mutate-on-target.py TREE hooks/pre-commit.sh tests/test_install_hooks.py tests/mutants/jpt-ratchet-on-hook.json",
   "mutants": [
     {
       "name": "--touched not passed",
@@ -35,6 +35,21 @@
       "name": "a hold with no commit-msg hook to read it",
       "edits": [["    commit_msg_hook_installed && return 0\n", "    return 0\n"]],
       "target": "with no commit-msg hook to read the line, a held file is refused"
+    },
+    {
+      "name": "a staged baseline never compared with HEAD's",
+      "edits": [["check_staged\ncheck_raised\n", "check_staged\n"]],
+      "target": "a hand edit raising a count, with no reason: refused, naming the count"
+    },
+    {
+      "name": "a raised baseline read as the comparison breaking, not held",
+      "edits": [["        1)\n            printf '%s\\n' \"$raised\"", "        9)\n            printf '%s\\n' \"$raised\""]],
+      "target": "with a reason: committed, and the raised count is HEAD's"
+    },
+    {
+      "name": "the restore case not named",
+      "edits": [["            echo \"   git checkout HEAD -- quality-baseline.json\"\n", ""]],
+      "target": "`git restore` putting the older copy back: refused, saying how to stage HEAD's"
     },
     {
       "name": "the hold never written",
