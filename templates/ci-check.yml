@@ -55,6 +55,13 @@ on:
 jobs:
   check:
     runs-on: fleet-ci
+    # Both checkouts go INSIDE the workspace, this repo at project/ and
+    # JP_TOOLS beside it at JP_TOOLS/, and every step runs from project/. A
+    # job runs as an unprivileged user, who can write the workspace but not
+    # its parent, so JP_TOOLS cannot be put beside the workspace itself.
+    defaults:
+      run:
+        working-directory: project
     strategy:
       fail-fast: false
       matrix:
@@ -70,6 +77,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          path: project
 
       - name: Does this repo have ${{ matrix.lang }} files?
         id: present
@@ -137,21 +145,16 @@ jobs:
           echo "on GitHub, and actions/checkout fetches from ${{ github.server_url }}." >&2
           exit 1
 
+      # BESIDE the project, at ../JP_TOOLS from it, not in /tmp: a project
+      # ruff.toml that extends ../JP_TOOLS/configs/ruff.toml loads only from
+      # there. Cloned to /tmp, the config failed to load and ruff read "pass".
       - name: Check out JP_TOOLS
         if: steps.present.outputs.found == 'yes'
         uses: actions/checkout@v6
         with:
           repository: ${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}
           token: ${{ secrets.JP_TOOLS_TOKEN || github.token }}
-          path: _jp_tools
-
-      # BESIDE the checkout, not in /tmp. A project ruff.toml that extends
-      # ../JP_TOOLS/configs/ruff.toml loads only from here; cloned to /tmp,
-      # the config failed to load and ruff read "pass". actions/checkout
-      # writes only inside the workspace, so the copy is moved out after.
-      - name: Put JP_TOOLS beside the checkout
-        if: steps.present.outputs.found == 'yes'
-        run: mv _jp_tools ../JP_TOOLS
+          path: JP_TOOLS
 
       # From JP_TOOLS' own manifests, because that is where check.py looks:
       #   requirements-dev.txt  pinned ruff, mypy, pip-audit and coverage
@@ -214,8 +217,14 @@ jobs:
         if: steps.present.outputs.found == 'yes' && matrix.lang != 'shell'
         run: python ../JP_TOOLS/check-pins.py ${{ matrix.lang }}
 
+      # A repo adopted with a quality-baseline.json at its root (METHODOLOGY
+      # section 9) is held to it: a file fails only where it got WORSE than
+      # recorded. Each file is measured on its own, as the baseline was. The
+      # rule that a changed file must LOWER its count is the pre-commit hook's,
+      # which writes the lower count back; CI only reads.
       - name: Run check
         if: steps.present.outputs.found == 'yes'
+        shell: bash
         env:
           SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
@@ -231,7 +240,43 @@ jobs:
             echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
             base=HEAD
           fi
-          python ../JP_TOOLS/check.py . --lang ${{ matrix.lang }} --pretty --smells-base "$base"
+          baseline=()
+          if [ -f quality-baseline.json ]; then
+            echo "quality-baseline.json is here: each file is compared with its recorded count."
+            baseline=(--baseline quality-baseline.json)
+          fi
+          python ../JP_TOOLS/check.py . --lang ${{ matrix.lang }} --pretty --smells-base "$base" "${baseline[@]}"
+
+      # THE BASELINE ONLY FALLS. A change that raises a count in
+      # quality-baseline.json would pass the step above by construction, so it
+      # is compared with the base's copy here, and refused unless one of its
+      # commits says why on a line 'LINT-DEBT-OK: <reason>', as the pre-commit
+      # hook asks of a commit that raises one.
+      - name: The baseline raises no count over the base's
+        if: steps.present.outputs.found == 'yes'
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ ! -f quality-baseline.json ]; then
+            echo "No quality-baseline.json: nothing to compare."
+            exit 0
+          fi
+          case "$BASE" in *[!0]*) ;; *) echo "No base commit: the baseline is not compared with one."; exit 0 ;; esac
+          if ! git cat-file -e "$BASE:quality-baseline.json" 2>/dev/null; then
+            echo "The base has no quality-baseline.json: this change adds it, so there is nothing to compare."
+            exit 0
+          fi
+          git show "$BASE:quality-baseline.json" > "$RUNNER_TEMP/base-baseline.json"
+          rc=0
+          python ../JP_TOOLS/check.py quality-baseline.json --raised-over "$RUNNER_TEMP/base-baseline.json" || rc=$?
+          reasons=$(git log --format=%B "$BASE..HEAD" | grep -E '^LINT-DEBT-OK:[[:space:]]*[^[:space:]]' || true)
+          if [ "$rc" -eq 1 ] && [ -n "$reasons" ]; then
+            echo "A commit in this change gives the reason, so the raise is let through:"
+            echo "$reasons"
+            exit 0
+          fi
+          exit "$rc"
 
   # NOTHING RELIED ON RUNS FROM SCRATCH (METHODOLOGY 2.11, rule 6). The
   # pre-commit hook refuses a commit whose files name a scratch path; this
@@ -268,8 +313,14 @@ jobs:
   # project provides.
   tests:
     runs-on: fleet-ci
+    # The check job's layout: this repo at project/, JP_TOOLS beside it.
+    defaults:
+      run:
+        working-directory: project
     steps:
       - uses: actions/checkout@v6
+        with:
+          path: project
 
       # A test that did not run is not a pass (METHODOLOGY 8), checked PER
       # LANGUAGE: PHPUnit tests PHP only, so a mixed repo's other code needs a
@@ -347,11 +398,7 @@ jobs:
         with:
           repository: ${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}
           token: ${{ secrets.JP_TOOLS_TOKEN || github.token }}
-          path: _jp_tools
-
-      - name: Put JP_TOOLS beside the checkout
-        if: steps.entry.outputs.phpunit == 'yes'
-        run: mv _jp_tools ../JP_TOOLS
+          path: JP_TOOLS
 
       # The runner's own python3, not actions/setup-python: the gate is
       # stdlib only, and setup-python downloads a whole CPython into every
