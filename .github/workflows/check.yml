@@ -240,11 +240,12 @@ jobs:
   # with more survivors than the nightly baseline fails, and a new function
   # fails on any survivor. With no state in the volume there is no baseline, so
   # the job fails as could-not-look rather than pass.
-  # PRs only: master is judged whole by the nightly, and a push to master
-  # against the previous night's state re-tests everything merged since.
+  # On a PR the volume is read-only and the job's results are thrown away; a
+  # push to master (the job below) is what keeps the state current, so a PR
+  # re-tests only its own changes, not everything merged since the nightly.
   mutation:
     name: Mutation (mutmut, changed functions)
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request'  # a push to master moves the state instead (mutation-state)
     runs-on: fleet-ci
     container:
       image: fleet-ci:current
@@ -303,6 +304,71 @@ jobs:
           python mutmut-gate.py run --max-children "$CI_WORKERS"
           python -m mutmut results --all true > mutmut-results.txt
           python mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt
+
+  # After each merge: the state moves to master. Only the functions the merge
+  # changed are re-tested, from the state the volume holds; the result is
+  # gated against the old baseline first (a merge that broke the rule
+  # publishes nothing and fails here), then recorded as the new baseline and
+  # swapped in. The nightly still re-runs everything.
+  mutation-state:
+    name: Mutation state onto master
+    if: github.event_name == 'push'
+    runs-on: fleet-ci
+    container:
+      image: fleet-ci:current
+      options: -v mutmut-state:/mutmut-state
+    steps:
+      - name: CI does not run as root
+        run: |
+          echo "user: $(id -un) uid $(id -u)"
+          if [ "$(id -u)" = 0 ]; then echo "CI is running as root: use the fleet-ci label" >&2; exit 1; fi
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: pip install -r requirements-dev.txt
+      - run: npm install
+      - name: PowerShell and PSScriptAnalyzer
+        run: bash install-pwsh.sh
+      # As the Python job's step of the same name.
+      - name: Install PHP tools
+        shell: bash
+        env:
+          FLEET_READ_TOKEN: ${{ secrets.FLEET_READ_TOKEN }}
+          OWNER: ${{ vars.ITERATION8_LIBRARIES_OWNER }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          if [ -z "$FLEET_READ_TOKEN" ] || [ -z "$OWNER" ]; then
+            echo "Set the secret FLEET_READ_TOKEN and the variable ITERATION8_LIBRARIES_OWNER." >&2
+            exit 1
+          fi
+          for lib in core utilities; do
+            composer config -g "repositories.iteration8-$lib" vcs "$SERVER/$OWNER/iteration8-$lib.git"
+          done
+          case "$SERVER" in http://*) composer config -g secure-http false ;; esac
+          auth=$(python -c 'import json, os, sys
+          print(json.dumps({"http-basic": {sys.argv[1]: {"username": "ci", "password": os.environ["FLEET_READ_TOKEN"]}}}))' "${SERVER#*://}")
+          COMPOSER_AUTH=$auth composer install --no-interaction --no-progress
+      - name: The merge's changed functions, then the state
+        shell: bash
+        run: |
+          state=/mutmut-state/current
+          if [ ! -d "$state/mutants" ] || [ ! -f "$state/baseline.json" ]; then
+            echo "NO STATE in the mutmut-state volume to move on: the nightly makes one." >&2
+            exit 2
+          fi
+          cp -a "$state/mutants" ./mutants
+          cp "$state/baseline.json" ./mutmut-baseline.json
+          python mutmut-gate.py run --max-children "$CI_WORKERS"
+          python -m mutmut results --all true > mutmut-results.txt
+          python mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt
+          python mutmut-gate.py record baseline.json --results mutmut-results.txt
+          bash ci-image/publish-mutmut-state.sh /mutmut-state
 
   js:
     name: JS (eslint, prettier)

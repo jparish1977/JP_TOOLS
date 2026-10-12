@@ -89,28 +89,4 @@ jobs:
           python -m mutmut results --all true > mutmut-results.txt
           python mutmut-gate.py record baseline.json --results mutmut-results.txt
       - name: Into the volume
-        shell: bash
-        run: |
-          set -euo pipefail
-          next=/mutmut-state/next
-          rm -rf "$next"
-          mkdir -p "$next"
-          # Only what mutmut wrote and git does not track as stray: tar takes
-          # mutants/ less its .git link and anything git reports as untracked
-          # there that is not mutmut's own (.meta, .spans, mutmut-stats.json).
-          git -C mutants status --porcelain --untracked-files=all \
-            | sed -n 's/^?? //p' \
-            | { grep -v -e '\.meta$' -e '\.spans$' -e '^mutmut-stats\.json$' || true; } \
-            > stray.txt
-          echo "left out, written by mutants: $(wc -l < stray.txt) path(s)"
-          tar -cf - --exclude=mutants/.git --exclude-from=<(sed 's|^|mutants/|' stray.txt) \
-              mutants baseline.json | tar -C "$next" -xf -
-          # The job's checkout is made under umask 0, and tar keeps the modes:
-          # without this, 555 of 571 files in the state were world-writable.
-          chmod -R go-w "$next"
-          rm -rf /mutmut-state/old
-          if [ -d /mutmut-state/current ]; then mv /mutmut-state/current /mutmut-state/old; fi
-          mv "$next" /mutmut-state/current
-          rm -rf /mutmut-state/old
-          du -sh /mutmut-state/current
-          ls /mutmut-state/current
+        run: bash ci-image/publish-mutmut-state.sh /mutmut-state
