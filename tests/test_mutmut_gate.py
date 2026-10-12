@@ -196,6 +196,30 @@ def test_prepare() -> None:
               sorted(p.name for p in root.iterdir() if p.name.startswith(".mutants-wt-")), [])
 
 
+def test_is_worktree_of() -> None:
+    """Asked directly: prepare() rebuilds whenever this says no, so a wrong
+    "no" never shows through prepare alone."""
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        mutants = gate.prepare(root)
+        check("a worktree of ROOT's repository: yes", gate._is_worktree_of(mutants, root), True)
+        check("  asked from either end's path as given, relative to another cwd",
+              gate._is_worktree_of(Path(os.path.relpath(mutants)), Path(os.path.relpath(root))), True)
+        check("ROOT itself (a .git directory, not a link): no", gate._is_worktree_of(root, root), False)
+        plain = Path(td) / "plain"
+        plain.mkdir()
+        check("a directory with no .git: no", gate._is_worktree_of(plain, root), False)
+        (Path(td) / "elsewhere").mkdir()
+        other = _repo(Path(td) / "elsewhere")
+        check("a worktree of ROOT asked about another repository: no",
+              gate._is_worktree_of(mutants, other), False)
+        (mutants / ".git").write_text("gitdir: /nonexistent/worktrees/mutants\n", encoding="utf-8")
+        check("a .git link git cannot follow: no, not an error", gate._is_worktree_of(mutants, root), False)
+
+
 def test_run_traces_reach_afresh_and_keeps_results() -> None:
     """Kept stats naming no traced commit cannot say what moved: run drops
     them whole, so all reach is traced, and keeps the mutant results."""
