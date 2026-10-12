@@ -197,8 +197,8 @@ def test_prepare() -> None:
 
 
 def test_run_traces_reach_afresh_and_keeps_results() -> None:
-    """mutmut re-traces only tests with new names, so a kept stats file would
-    leave a new function an old test reaches as "no tests": run drops it."""
+    """Kept stats naming no traced commit cannot say what moved: run drops
+    them whole, so all reach is traced, and keeps the mutant results."""
     if not shutil.which("git"):
         print("SKIP: git not found")
         return
@@ -215,6 +215,70 @@ def test_run_traces_reach_afresh_and_keeps_results() -> None:
         check_true("  after the kept test reach was dropped", not (mutants / gate.STATS).exists())
         check_true("  and with the kept mutant results left in place", (mutants / "a.py.meta").exists())
         check("a run with no stats kept runs just the same", len(_run_mutmut(root, full=False)), 1)
+
+
+def _commit(root: Path, files: dict[str, str], message: str) -> str:
+    for name, body in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(body, encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True, env=_ENV)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "--no-verify", "-m", message],
+                   check=True, env=_ENV)
+    return _head(root)
+
+
+def test_only_the_reach_a_change_can_move_is_traced_again() -> None:
+    """The tests in a changed file, and the tests reaching a function in a
+    changed source file, are taken out of the kept stats; the rest stay."""
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        traced = _commit(root, {"pkg/mod.py": "y = 1\n", "b.py": "z = 1\n",
+                                "tests/test_c.py": "", "tests/test_d.py": ""}, "traced")
+        stats = Path(td) / "stats.json"
+        reach = {"a.x_f": ["tests/test_d.py::t1"], "pkg.mod.x_g": ["tests/test_d.py::t2"],
+                 "b.x_h": ["tests/test_d.py::t3"]}
+        durations = dict.fromkeys(("tests/test_d.py::t1", "tests/test_d.py::t2",
+                                   "tests/test_d.py::t3", "tests/test_c.py::t4"), 1.0)
+        stats.write_text(json.dumps({"git_commit": traced, "tests_by_mangled_function_name": reach,
+                                     "duration_by_test": durations}), encoding="utf-8")
+        _commit(root, {"a.py": "x = 3\n", "pkg/mod.py": "y = 2\n", "tests/test_c.py": "# changed\n"},
+                "the change")
+        said = gate.forget_moved_reach(root, stats)
+        doc = json.loads(stats.read_text(encoding="utf-8"))
+        check("the tests reaching a changed module, and in a changed test file, go",
+              sorted(doc["duration_by_test"]), ["tests/test_d.py::t3"])
+        check("  and leave the reach they had", doc["tests_by_mangled_function_name"],
+              {"a.x_f": [], "pkg.mod.x_g": [], "b.x_h": ["tests/test_d.py::t3"]})
+        check("  and it says how many", said,
+              "3 file(s) changed since the traced commit: 3 test(s) traced again")
+
+
+def test_kept_reach_that_cannot_be_read_or_placed_is_traced_whole() -> None:
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        stats = Path(td) / "stats.json"
+        check("none kept", gate.forget_moved_reach(root, stats), "no test reach kept: all of it traced")
+        stats.write_text("{not json", encoding="utf-8")
+        check("unreadable: dropped", gate.forget_moved_reach(root, stats),
+              "kept test reach unreadable: all of it traced")
+        check_true("  and gone", not stats.exists())
+        stats.write_text(json.dumps({"git_commit": "0" * 40}), encoding="utf-8")
+        said = gate.forget_moved_reach(root, stats)
+        check_true("a commit this clone does not have: all traced, saying which",
+                   said.startswith("cannot diff against the traced commit " + "0" * 40))
+        check_true("  and gone", not stats.exists())
+
+
+def test_a_module_name_is_its_path() -> None:
+    check("module names", [gate._module(p) for p in
+                           ("jpcheck/lab_use.py", "jpcheck/__init__.py", "mutmut-gate.py", "README.md")],
+          ["jpcheck.lab_use", "jpcheck", "mutmut-gate", None])
 
 
 def _run_mutmut(root: Path, full: bool, rc: int = 0,

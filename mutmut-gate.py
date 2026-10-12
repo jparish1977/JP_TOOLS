@@ -30,11 +30,15 @@ run, from what it keeps in mutants/. The nightly full run leaves that state;
 CI restores it, so a PR re-tests only what it touched. `run --full` starts
 from nothing.
 
-Which tests reach which function (mutants/mutmut-stats.json) is NOT kept:
-every run traces it afresh. mutmut 3.8.0 re-traces only tests with new names,
-so an existing test that comes to reach a new function, through main() say,
-would leave that function "no tests", and the rule above would fail it for a
-test it has.
+Which tests reach which function (mutants/mutmut-stats.json) is kept, except
+for the tests a change can move: mutmut 3.8.0 re-traces only tests with new
+names, so an existing test that comes to reach a new function, through main()
+say, would leave that function "no tests", and the rule above would fail it
+for a test it has. So before mutmut runs, the tests in any file changed since
+the state was traced (its git_commit), and the tests recorded as reaching a
+function in any changed source file, are taken out of the stats; mutmut then
+counts them as new and traces just those. A state whose commit this clone
+cannot diff against is traced afresh, whole: slower, never wrong.
 
 mutants/ is a git worktree of HEAD with an index and NO checked-out files:
 mutmut writes every file in it, and some suites ask git about the checkout, so
@@ -122,6 +126,45 @@ def prepare(root: Path) -> Path:
     return mutants
 
 
+def _module(path: str) -> str | None:
+    """The module mutmut keys a source file's functions by: jpcheck/lab_use.py
+    is jpcheck.lab_use, a package's __init__.py the package, mutmut-gate.py
+    mutmut-gate. None for a file that is not Python."""
+    if not path.endswith(".py"):
+        return None
+    return path.removesuffix(".py").removesuffix("/__init__").replace("/", ".")
+
+
+def forget_moved_reach(root: Path, stats: Path) -> str:
+    """Take out of STATS the tests whose reach a change since it was traced
+    can have moved (see THE STATE), so mutmut traces just those; say what
+    was done."""
+    try:
+        doc = json.loads(stats.read_text(encoding="utf-8"))
+    except FileNotFoundError:  # reason: no state kept is the full run's case; mutmut traces it all and the message says so
+        return "no test reach kept: all of it traced"
+    except ValueError:
+        stats.unlink()
+        return "kept test reach unreadable: all of it traced"
+    since = doc.get("git_commit")
+    try:
+        changed = set(_git("-C", str(root), "diff", "--name-only", str(since), "HEAD").splitlines())
+    except GateError:
+        stats.unlink()
+        return f"cannot diff against the traced commit {since}: all test reach traced"
+    modules = {m for m in map(_module, changed) if m}
+    reach: dict[str, list[str]] = doc.get("tests_by_mangled_function_name", {})
+    moved = {t for key, tests in reach.items() if key.rpartition(".")[0] in modules for t in tests}
+    durations: dict[str, float] = doc.get("duration_by_test", {})
+    moved |= {t for t in durations if t.partition("::")[0] in changed}
+    for t in moved:
+        durations.pop(t, None)
+    for key, tests in reach.items():
+        reach[key] = [t for t in tests if t not in moved]
+    stats.write_text(json.dumps(doc), encoding="utf-8")
+    return f"{len(changed)} file(s) changed since the traced commit: {len(moved)} test(s) traced again"
+
+
 def run(root: Path, full: bool, children: int) -> None:
     """Prepare, then mutmut run. Its Python goes first on PATH: the git hooks
     start `python3`, and in mutants/ every script imports mutmut."""
@@ -130,7 +173,7 @@ def run(root: Path, full: bool, children: int) -> None:
             shutil.rmtree(root / "mutants")
         _git("-C", str(root), "worktree", "prune")
     mutants = prepare(root)
-    (mutants / STATS).unlink(missing_ok=True)  # traced afresh: see THE STATE
+    print(f"mutmut-gate: {forget_moved_reach(root, mutants / STATS)}")
     env = dict(os.environ, PATH=os.pathsep.join(
         [str(Path(sys.executable).parent), os.environ.get("PATH", "")]))
     # call, not run: only the exit code is read, and a nonzero one is ours to name.

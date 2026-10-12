@@ -240,8 +240,11 @@ jobs:
   # with more survivors than the nightly baseline fails, and a new function
   # fails on any survivor. With no state in the volume there is no baseline, so
   # the job fails as could-not-look rather than pass.
+  # PRs only: master is judged whole by the nightly, and a push to master
+  # against the previous night's state re-tests everything merged since.
   mutation:
     name: Mutation (mutmut, changed functions)
+    if: github.event_name == 'pull_request'
     runs-on: fleet-ci
     container:
       image: fleet-ci:current
