@@ -17,7 +17,9 @@ WHAT IS CHECKED
       and templates/ci-check.yml. It is required, so its absence FAILS here.
     - Parsed with PyYAML: JP_TOOLS is checked out from vars.JP_TOOLS_REPOSITORY
       with the public GitHub copy as the default and secrets.JP_TOOLS_TOKEN as
-      the token, then moved beside the checkout; no step clones JP_TOOLS from a
+      the token, at JP_TOOLS/ beside the project's checkout at project/, both
+      inside the workspace, with every step run from project/ (a job's user
+      cannot write the workspace's parent); no step clones JP_TOOLS from a
       fixed URL; every `uses:` is an actions/* action.
     - The template's text names no host or owner internal to one forge.
     Control: master's template before this change fails all of it.
@@ -37,6 +39,7 @@ WHAT IS CHECKED
 """
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -59,6 +62,7 @@ INTERNAL = ("iteration8", "ts.net", "joe/", ":3000", ":2222")
 # that is not in the clone fails the control rather than skipping it.
 BEFORE = "7e00ba9"      # master before the template took its source from a variable
 BEFORE_TESTS_JOB = "93fc0d4"  # master before #140 added the tests job
+BEFORE_LAYOUT = "5da564d"     # master while JP_TOOLS was moved to the workspace's parent
 
 
 def template_at(commit: str) -> str | None:
@@ -96,11 +100,26 @@ def _checkout_findings(all_steps: list[dict[str, Any]]) -> list[str]:
 
 def _run_findings(all_steps: list[dict[str, Any]]) -> list[str]:
     runs = [str(s.get("run", "")) for s in all_steps]
+    return ["a fixed JP_TOOLS clone URL"] if any("git clone" in r and "JP_TOOLS" in r for r in runs) else []
+
+
+def _layout_findings(text: str) -> list[str]:
+    """A job runs as a user who can write the workspace and not its parent, so
+    in every job that takes JP_TOOLS, both checkouts are inside the workspace,
+    the project at project/ and JP_TOOLS at JP_TOOLS/, and steps run from
+    project/, where ../JP_TOOLS resolves."""
     wrong = []
-    if not any("mv _jp_tools ../JP_TOOLS" in r for r in runs):
-        wrong.append("JP_TOOLS is not moved beside the checkout")
-    if any("git clone" in r and "JP_TOOLS" in r for r in runs):
-        wrong.append("a fixed JP_TOOLS clone URL")
+    for name, job in yaml.safe_load(text).get("jobs", {}).items():
+        job_steps = job.get("steps", [])
+        checkouts = [s.get("with", {}) for s in job_steps if str(s.get("uses", "")).startswith("actions/checkout")]
+        if not any(c.get("repository") == REPOSITORY for c in checkouts):
+            continue
+        if sorted(str(c.get("path")) for c in checkouts) != ["JP_TOOLS", "project"]:
+            wrong.append(f"{name}: the project is not checked out at project/ and JP_TOOLS at JP_TOOLS/")
+        if job.get("defaults", {}).get("run", {}).get("working-directory") != "project":
+            wrong.append(f"{name}: steps do not run from project/")
+        if any("../JP_TOOLS" in str(s.get("run", "")) and "mv " in str(s.get("run", "")) for s in job_steps):
+            wrong.append(f"{name}: a step moves JP_TOOLS out of the workspace")
     return wrong
 
 
@@ -120,6 +139,7 @@ def findings(text: str) -> list[str]:
     all_steps = steps(text)
     uses = [str(s["uses"]) for s in all_steps if "uses" in s]
     return (_checkout_findings(all_steps) + _guard_findings(all_steps) + _run_findings(all_steps)
+            + _layout_findings(text)
             + [f"{u}: not an actions/* action" for u in uses if not u.startswith("actions/")]
             + [f"names {name!r}" for name in INTERNAL if name in text])
 
@@ -150,6 +170,16 @@ def test_control_master_before_the_change_fails() -> None:
         old.write_text(old_text, encoding="utf-8")
         rc, out = actionlint(old)
     check_true("control: actionlint reports the old template's SC2086", rc == 1 and "SC2086" in out)
+    old_text = template_at(BEFORE_LAYOUT)
+    if old_text is not None:
+        check("control: the template that moved JP_TOOLS to the workspace's parent is caught, in both jobs",
+              _layout_findings(old_text),
+              ["check: the project is not checked out at project/ and JP_TOOLS at JP_TOOLS/",
+               "check: steps do not run from project/",
+               "check: a step moves JP_TOOLS out of the workspace",
+               "tests: the project is not checked out at project/ and JP_TOOLS at JP_TOOLS/",
+               "tests: steps do not run from project/",
+               "tests: a step moves JP_TOOLS out of the workspace"])
 
 
 # What check.py's PHP runners and measures call from vendor: phpstan, phpcs and
@@ -295,8 +325,85 @@ def test_the_template_checks_powershell() -> None:
                and any("'*.ps1' '*.psm1' '*.psd1'" in str(s.get("run", "")) for s in own))
 
 
+RAISED_STEP = "The baseline raises no count over the base's"
+PASS_THROUGH = {"python": "os.execv(sys.executable, [sys.executable, *sys.argv[1:]])\n"}
+
+
+def step_run(name: str, lang: str = "python") -> str:
+    step = next(s for s in steps(TEMPLATE.read_text(encoding="utf-8")) if s.get("name") == name)
+    return str(step["run"]).replace("${{ matrix.lang }}", lang)
+
+
+def check_args(baseline: bool) -> tuple[int, list[list[str]]]:
+    """The Run check step's exit code and its check.py arguments, in a repo
+    with a quality-baseline.json when BASELINE."""
+    with fake_tools(keep_path=True, named={"python": ""}) as (work, log):
+        if baseline:
+            (work / "quality-baseline.json").write_text("{}\n", encoding="utf-8")
+        r = subprocess.run(["bash", "-e", "-c", step_run("Run check")], cwd=work,
+                           env=dict(os.environ, SMELLS_BASE="abc123"),
+                           capture_output=True, text=True, check=False)
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+    return r.returncode, [c[1:] for c in calls if c[0] == "python"]
+
+
+def test_a_repo_with_a_baseline_is_checked_against_it() -> None:
+    plain = ["../JP_TOOLS/check.py", ".", "--lang", "python", "--pretty", "--smells-base", "abc123"]
+    check("no quality-baseline.json: check.py with no baseline", check_args(False), (0, [plain]))
+    check("a quality-baseline.json: check.py compares with it",
+          check_args(True), (0, [[*plain, "--baseline", "quality-baseline.json"]]))
+
+
+def _baseline(errors: int) -> str:
+    entry = {"errors": errors, "warnings": 0, "fixable": 0, "fixable_unsafe": 0}
+    return json.dumps({"baseline_version": 2, "mode": "per-file", "files": {"a.py": {"ruff": entry}}})
+
+
+def raised_step(base_errors: int | None, head_errors: int | None, message: str = "change",
+                base: str | None = None) -> tuple[int, str]:
+    """The raised step's exit code and output, in a repo whose base commit has
+    a baseline recording BASE_ERRORS (none when None) and whose head commit,
+    with MESSAGE, records HEAD_ERRORS (none when None). BASE overrides the
+    base commit given to the step."""
+    with fake_tools(keep_path=True, named=PASS_THROUGH) as (work, _):
+        (work.parent / "JP_TOOLS").symlink_to(ROOT)
+        git = ["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        subprocess.run([*git, "init", "-q", "."], cwd=work, check=True)
+        for errors, msg in ((base_errors, "base"), (head_errors, message)):
+            if errors is not None:
+                (work / "quality-baseline.json").write_text(_baseline(errors), encoding="utf-8")
+            (work / "f.txt").write_text(msg, encoding="utf-8")
+            subprocess.run([*git, "add", "-A"], cwd=work, check=True)
+            subprocess.run([*git, "commit", "-q", "-m", msg], cwd=work, check=True)
+            if msg == "base":
+                sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work, capture_output=True,
+                                     text=True, check=True).stdout.strip()
+        r = subprocess.run(["bash", "-e", "-c", step_run(RAISED_STEP)], cwd=work,
+                           env=dict(os.environ, BASE=base if base is not None else sha,
+                                    RUNNER_TEMP=str(work.parent)),
+                           capture_output=True, text=True, check=False)
+    return r.returncode, r.stdout + r.stderr
+
+
+def test_a_raised_baseline_is_refused_without_a_reason() -> None:
+    rc, out = raised_step(3, 2)
+    check("a lowered baseline passes", (rc, "raises no count" in out), (0, True))
+    rc, out = raised_step(3, 4)
+    check_true("a raised one fails, naming the count", rc == 1 and "a.py  ruff  errors  3 -> 4" in out)
+    rc, out = raised_step(3, 4, "re-record\n\nLINT-DEBT-OK: ruff upgraded")
+    check_true("a raised one with a LINT-DEBT-OK commit passes, quoting it",
+               rc == 0 and "LINT-DEBT-OK: ruff upgraded" in out)
+    rc, out = raised_step(3, 4, "re-record\n\nLINT-DEBT-OK:")
+    check("  but not with an empty reason", rc, 1)
+    rc, out = raised_step(None, 4)
+    check_true("a base with no baseline: this change adds it, nothing to compare",
+               rc == 0 and "this change adds it" in out)
+    rc, out = raised_step(3, 4, base="0" * 40)
+    check_true("no base commit: said, not compared", rc == 0 and "No base commit" in out)
+
+
 ENTRY_STEP = "How are this repo's tests run?"
-GATE_RUN = ("python3 ../JP_TOOLS/coverage-gate.py clover.xml"
+GATE_RUN =("python3 ../JP_TOOLS/coverage-gate.py clover.xml"
             " --fail-under ${{ vars.COVERAGE_FAIL_UNDER || '95' }}")
 
 
