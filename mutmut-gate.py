@@ -6,11 +6,24 @@
     mutmut-gate.py record OUT.json [--results FILE]
     mutmut-gate.py gate BASELINE.json [--results FILE]
 
-THE RULE (Joe, 2026-10-10, "yes for the srict rule"): survivors are counted per
-function, because mutmut renumbers a function's mutants whenever it changes. A
-function in the baseline fails if it now has MORE survivors; a function the
-baseline does not have (new, or renamed) fails on ANY survivor. A mutant no
-test reaches ("no tests") is not counted: that gap has its own issues.
+THE RULE (Joe, 2026-10-10, "yes for the srict rule"; no tests added 2026-10-11):
+mutants are counted per function, because mutmut renumbers a function's
+mutants whenever it changes.
+
+- A function in the baseline fails if it now has MORE survivors, or more
+  mutants no test reaches ("no tests"): the untested part may shrink, never
+  grow, so a PR that drops the test reaching a function does not pass by
+  turning its kills into "no tests".
+- A function the baseline does not have (new, or renamed) fails on ANY
+  survivor and ANY "no tests": its tests reach and kill all of its mutants.
+- "killed" and "timeout" (a mutant that looped was caught) count as detected.
+  Any other status mutmut gives ("suspicious", "segfault", "skipped", "not
+  checked", ...) is no verdict, so a function holding a different number of
+  one than its baseline is NOT_RUN, naming the status.
+
+Scripts whose suites can only run them as a process (tests/test_mutmut_config.py's
+ON_SPECS) are not in [tool.mutmut] source_paths, so they are never judged here;
+tests/mutants specs hold them.
 
 THE STATE. mutmut re-tests only the functions whose code changed since its last
 run, from what it keeps in mutants/. The nightly full run leaves that state;
@@ -27,9 +40,10 @@ not copied (see pyproject.toml). A state restored from elsewhere carries a
 --results FILE reads `mutmut results --all true` output from FILE instead of
 running it, so a run's results are read once and judged twice (record, gate).
 
-Exit codes (jpexit): 0 OK; 1 FINDINGS, a function broke the rule; 2 NOT_RUN,
-mutmut or git failed, or a baseline or results could not be read. A run that
-did not happen is never a pass.
+Exit codes (jpexit): 0 OK; 1 FINDINGS, a function broke the rule (whatever
+else); 2 NOT_RUN, mutmut or git failed, a baseline or results could not be
+read, or a mutant's status is no verdict. A run that did not happen is never a
+pass, per mutant as much as per run.
 """
 
 import argparse
@@ -48,7 +62,10 @@ import jpexit
 from platformtools.procname import name_process
 
 LINKED = ("node_modules", "vendor")
+SURVIVED = "survived"
 NO_TESTS = "no tests"
+# Statuses that are a verdict on the mutant; anything else is not.
+VERDICTS = {"killed", "timeout", SURVIVED, NO_TESTS}
 
 
 class GateError(Exception):
@@ -146,18 +163,38 @@ def by_function(text: str) -> dict[str, dict[str, int]]:
 
 def violations(baseline: dict[str, dict[str, int]],
                current: dict[str, dict[str, int]]) -> list[str]:
-    """Each function breaking the rule: more survivors than the baseline, or
-    any survivor in a function the baseline does not have."""
+    """Each function breaking the rule: more survivors or more "no tests"
+    than the baseline, or any of either in a function the baseline lacks."""
     out = []
     for function, counts in sorted(current.items()):
-        now = counts.get("survived", 0)
+        survived, untested = counts.get(SURVIVED, 0), counts.get(NO_TESTS, 0)
         if function not in baseline:
-            if now:
-                out.append(f"{function}: NEW, {now} mutant(s) survived; a new function kills all of its")
+            if survived:
+                out.append(f"{function}: NEW, {survived} mutant(s) survived; a new function kills all of its")
+            if untested:
+                out.append(f"{function}: NEW, {untested} mutant(s) no test reaches; "
+                           "a new function's tests reach all of its")
             continue
-        was = baseline[function].get("survived", 0)
-        if now > was:
-            out.append(f"{function}: survived {was} -> {now}")
+        was = baseline[function]
+        if survived > was.get(SURVIVED, 0):
+            out.append(f"{function}: survived {was.get(SURVIVED, 0)} -> {survived}")
+        if untested > was.get(NO_TESTS, 0):
+            out.append(f"{function}: no tests {was.get(NO_TESTS, 0)} -> {untested}")
+    return out
+
+
+def no_verdicts(baseline: dict[str, dict[str, int]],
+                current: dict[str, dict[str, int]]) -> list[str]:
+    """Each function holding a different number of mutants with a status that
+    is no verdict ("suspicious", "not checked", ...) than its baseline does.
+    The same number is the baseline's own, carried in the kept state."""
+    out = []
+    for function, counts in sorted(current.items()):
+        was = baseline.get(function, {})
+        for status, n in sorted(counts.items()):
+            if status not in VERDICTS and n != was.get(status, 0):
+                out.append(f"{function}: {n} mutant(s) {status!r}, which is no verdict "
+                           f"(the baseline has {was.get(status, 0)})")
     return out
 
 
@@ -169,6 +206,23 @@ def _load(path: str) -> dict[str, dict[str, int]]:
     if not isinstance(doc, dict):
         raise GateError(f"baseline {path} is not a JSON object")
     return doc
+
+
+def _gate(baseline: dict[str, dict[str, int]], current: dict[str, dict[str, int]]) -> int:
+    """Print each finding and each mutant with no verdict; a finding wins."""
+    found, unjudged = violations(baseline, current), no_verdicts(baseline, current)
+    for line in found:
+        print(f"FAIL {line}")
+    for line in unjudged:
+        print(f"NOT RUN {line}")
+    if found:
+        print(f"mutmut-gate: {len(found)} rule(s) broken")
+        return jpexit.FINDINGS
+    if unjudged:
+        print(f"mutmut-gate: could not judge {len(unjudged)} function(s)")
+        return jpexit.NOT_RUN
+    print("mutmut-gate: PASS")
+    return jpexit.OK
 
 
 class _Parser(argparse.ArgumentParser):
@@ -213,11 +267,7 @@ def main(argv: list[str] | None = None) -> int:
                                        encoding="utf-8")
             print(f"mutmut-gate: {len(counts)} function(s) recorded to {args.file}")
         else:
-            found = violations(_load(args.file), by_function(results_text(root, args.results)))
-            for line in found:
-                print(f"FAIL {line}")
-            print(f"mutmut-gate: {'PASS' if not found else f'{len(found)} function(s) broke the rule'}")
-            return jpexit.FINDINGS if found else jpexit.OK
+            return _gate(_load(args.file), by_function(results_text(root, args.results)))
     except GateError as e:
         print(f"mutmut-gate: {e}", file=sys.stderr)
         return jpexit.NOT_RUN

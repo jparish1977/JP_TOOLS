@@ -3,9 +3,12 @@
 JP_TOOLS/tests/test_mutmut_gate.py
 mutmut-gate.py holds each function to its baseline, and gets mutants/ ready.
 
-    - The rule (Joe, 2026-10-10, strict): a baseline function fails when its
-      survivors rise; a function the baseline lacks fails on any survivor;
-      "no tests" mutants never count.
+    - The rule (Joe, 2026-10-10, strict; 2026-10-11, no tests): a baseline
+      function fails when its survivors or its "no tests" rise; a function
+      the baseline lacks fails on any of either. Kills turning into "no
+      tests" (the test reaching it gone) fail; "timeout" counts as detected.
+    - A status that is no verdict ("suspicious", "not checked") in a number
+      the baseline does not hold is NOT_RUN (2), naming it; a finding wins.
     - Results are counted per function, the name before `__mutmut_`.
     - prepare makes mutants/ a worktree of HEAD whose index lists the tracked
       files while none is checked out, links node_modules/ and vendor/, follows
@@ -61,10 +64,47 @@ def test_the_strict_rule() -> None:
            "f.new_weak": {"killed": 3, "survived": 1}, "f.untested": {"no tests": 6},
            "f.new_untested": {"no tests": 2}}
     found = gate.violations(base, now)
-    check("only a rise and a new function's survivor break the rule",
-          [line.split(":")[0] for line in found], ["f.more", "f.new_weak"])
+    check("a rise in either, and a new function's survivor or untested mutant, break the rule",
+          [line.split(":")[0] for line in found],
+          ["f.more", "f.new_untested", "f.new_weak", "f.untested"])
     check_true("  the rise names both numbers", any("survived 1 -> 2" in f for f in found))
-    check_true("  the new function is called NEW", any("NEW" in f for f in found))
+    check_true("  so does a rise in no tests", any("no tests 4 -> 6" in f for f in found))
+    check_true("  the new function is called NEW", any("f.new_weak: NEW" in f for f in found))
+    check_true("  and an untested new one says so",
+               any("f.new_untested: NEW, 2 mutant(s) no test reaches" in f for f in found))
+
+
+# The baseline: x_f kills all three; x_g kills two, one survives.
+BASE = {"m.x_f": {"killed": 3}, "m.x_g": {"killed": 2, "survived": 1}}
+
+
+def test_reach_lost_or_never_given_fails() -> None:
+    check("CONTROL: the baseline itself passes", gate.violations(BASE, BASE), [])
+    lost = {**BASE, "m.x_f": {"no tests": 3}}
+    check("f's kills becoming no tests (its test gone) fails",
+          gate.violations(BASE, lost), ["m.x_f: no tests 0 -> 3"])
+    fewer = {**BASE, "m.x_g": {"killed": 1, "no tests": 1, "survived": 1}}
+    check("  a single kill becoming no tests fails too",
+          gate.violations(BASE, fewer), ["m.x_g: no tests 0 -> 1"])
+    untested = {**BASE, "m.x_h": {"no tests": 2}}
+    check_true("a new function no test reaches fails",
+               [f.split(":")[0] for f in gate.violations(BASE, untested)] == ["m.x_h"])
+    timeout = {**BASE, "m.x_f": {"timeout": 3}}
+    check("kills becoming timeouts pass: a looping mutant was caught",
+          gate.violations(BASE, timeout) + gate.no_verdicts(BASE, timeout), [])
+
+
+def test_a_status_that_is_no_verdict_is_not_run() -> None:
+    for status in ("suspicious", "not checked", "segfault", "skipped"):
+        now = {**BASE, "m.x_f": {"killed": 2, status: 1}}
+        check(f"{status!r}: no finding", gate.violations(BASE, now), [])
+        check("  but no verdict, named", gate.no_verdicts(BASE, now),
+              [f"m.x_f: 1 mutant(s) {status!r}, which is no verdict (the baseline has 0)"])
+    held = {"m.x_f": {"killed": 2, "suspicious": 1}}
+    check("the baseline's own count of one is carried, not judged again",
+          gate.no_verdicts(held, held), [])
+    check("  in a new function it is judged",
+          len(gate.no_verdicts({}, held)), 1)
 
 
 _ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
@@ -145,6 +185,15 @@ def test_the_command_line() -> None:
         worse.write_text(RESULTS + "    pkg.mod.x_alpha__mutmut_4: survived\n", encoding="utf-8")
         check("one more survivor: FINDINGS (1)",
               gate.main(["gate", str(base), "--results", str(worse)]), 1)
+        odd = tmp / "odd.txt"
+        odd.write_text(RESULTS + "    pkg.mod.x_alpha__mutmut_4: suspicious\n", encoding="utf-8")
+        check("a mutant with no verdict: NOT_RUN (2)",
+              gate.main(["gate", str(base), "--results", str(odd)]), 2)
+        both = tmp / "both.txt"
+        both.write_text(RESULTS + "    pkg.mod.x_alpha__mutmut_4: suspicious\n"
+                        "    pkg.mod.x_alpha__mutmut_5: survived\n", encoding="utf-8")
+        check("  and with a finding too, the finding wins: FINDINGS (1)",
+              gate.main(["gate", str(base), "--results", str(both)]), 1)
         check("a missing baseline: NOT_RUN (2)",
               gate.main(["gate", str(tmp / "nope.json"), "--results", str(res)]), 2)
         check("missing results: NOT_RUN (2)",
