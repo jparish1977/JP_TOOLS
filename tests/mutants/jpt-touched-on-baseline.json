@@ -1,5 +1,5 @@
 {
-  "about": "check.py --touched: a changed file with findings must lower its own count, mypy and phpstan are never counted, and a lowered count is written back. Run: mutate-on-target.py TREE jpcheck/baseline.py tests/test_check_baseline.py tests/mutants/jpt-touched-on-baseline.json",
+  "about": "check.py --touched: a changed file with findings must lower its own count, a lowered count is written back with every total moved by it, and mypy and phpstan count against getting worse but need not fall, since other files move them. Run: mutate-on-target.py TREE jpcheck/baseline.py tests/test_check_baseline.py tests/mutants/jpt-touched-on-baseline.json",
   "mutants": [
     {
       "name": "an unchanged count passes, as before #35",
@@ -29,6 +29,11 @@
     {
       "name": "totals left as recorded, as before #220",
       "edits": [["                _move_totals(totals, old, new)", "                pass"]],
+      "target": "  and totals move with it"
+    },
+    {
+      "name": "fixable totals left as recorded, as before #228",
+      "edits": [["    for key in _COUNTS:\n        fell = ", "    for key in (\"errors\", \"warnings\"):\n        fell = "]],
       "target": "  and totals move with it"
     },
     {

@@ -26,9 +26,18 @@ never change the exit code.
 
 With `--baseline FILE` the same JSON is printed, and the exit code compares its
 error counts with the baseline instead: 0 no worse, 1 worse, 2 the baseline
-could not be used (unreadable, or recorded in another mode). A check whose
+could not be used (unreadable, recorded in another mode, or another
+`baseline_version`, which names the command that re-records it). A check whose
 status is not a verdict, `skip` included, or whose tool version changed since
-the baseline, is left out of the comparison and named on stderr.
+the baseline, is left out of the comparison and named on stderr. An audit
+(`pip-audit`, `npm-audit`, `composer-audit`) is never recorded and never
+compared: its findings are in the JSON and counted on stderr, and the exit code
+leaves them out. A directory with `--baseline` is measured one file at a time,
+as the baseline was recorded.
+
+`check.py NEW --raised-over OLD` reads two baselines and exits 0 when NEW
+raises no count over OLD, 1 when it raises one (each named on stderr; a file
+or tool OLD lacks counts from zero), 2 when either cannot be read.
 
 With `--touched` as well (one file, the one a commit changes), the file exits
 3 when it had recorded findings and its count did not drop (1 still wins when

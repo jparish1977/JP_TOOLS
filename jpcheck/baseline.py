@@ -54,8 +54,23 @@ from jpcheck.registry import AUDIT_TOOLS, DEFAULT_TOOLS, _run_tools, _summarize
 # The verdict is on ERRORS, because that is what the gate already exits on.
 # Warnings are recorded per file so a later change can use them, and are printed
 # in the report, but they do not fail a commit that errors would not fail.
+#
+# AUDITS ARE NOT BASELINED. pip-audit, npm audit and composer audit count
+# advisories against the dependencies, and their count moves when a new
+# advisory is published, with no change to any file. So an audit is never
+# recorded and never compared: its findings are reported on every run, and a
+# baseline verdict does not include them.
+#
+# Version 2 records fixable and fixable_unsafe per file, so a write-back moves
+# them with the rest and "totals" stays what a fresh record would hold.
+# Version 1 did not, and is refused with the command that re-records it.
 
-BASELINE_VERSION = 1
+BASELINE_VERSION = 2
+
+# The counts each file's entry holds, per tool.
+_COUNTS = ("errors", "warnings", "fixable", "fixable_unsafe")
+
+_AUDITS = frozenset(t for tools in AUDIT_TOOLS.values() for t in tools)
 
 # A version is read from the copy of the tool its runner runs, found the way
 # the runner finds it: PATH's eslint read while the gate loads node_modules'
@@ -161,28 +176,40 @@ def _tool_version(name: str) -> str:
 
 
 def _counts_by_file(checks: list[dict[str, Any]], root: Path) -> dict[str, Any]:
-    """{path: {tool: {"errors": n, "warnings": n}}} for one run."""
+    """{path: {tool: {count: n for each of _COUNTS}}} for one run."""
     out: dict[str, Any] = {}
     for c in checks:
         tool = c.get("tool", "?")
         for i in c.get("issues", []):
             slot = out.setdefault(_rel(i.get("file", ""), root), {})
-            counts = slot.setdefault(tool, {"errors": 0, "warnings": 0})
+            counts = slot.setdefault(tool, dict.fromkeys(_COUNTS, 0))
             counts["errors" if i.get("severity") == "error" else "warnings"] += 1
+            for flag in ("fixable", "fixable_unsafe"):
+                if i.get(flag):
+                    counts[flag] += 1
     return out
+
+
+def _not_audits(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [c for c in checks if c.get("tool") not in _AUDITS]
 
 
 def _statuses(checks: list[dict[str, Any]]) -> dict[str, str]:
     return {c.get("tool", "?"): c.get("status", "unknown") for c in checks}
 
 
-def _per_file_checks(target: str, audit: bool = False) -> list[dict[str, Any]]:
+def per_file_checks(target: str, lang: str = "auto",
+                    tools: list[str] | None = None) -> list[dict[str, Any]]:
     """Run the measurement the GATE performs: every file on its own.
 
     Deliberately not `check.py .`. The entire point of the mode field is that
     the two produce different numbers, so a recorder taking the cheaper
     whole-repo route would record exactly the quantity the gate cannot
-    reproduce.
+    reproduce. A directory compared against a baseline is measured this way
+    too, for the same reason.
+
+    LANG other than "auto" keeps only that language's files; TOOLS, when
+    given, runs those in place of each file's default ones.
     """
     p = Path(target)
     root = _repo_root(target)
@@ -195,10 +222,10 @@ def _per_file_checks(target: str, audit: bool = False) -> list[dict[str, Any]]:
         files = sorted(f for fs in groups.values() for f in fs)
     checks: list[dict[str, Any]] = []
     for f in files:
-        lang = _detect_lang(f)
-        names = list(DEFAULT_TOOLS.get(lang, []))
-        if audit:
-            names.extend(AUDIT_TOOLS.get(lang, []))
+        file_lang = _detect_lang(f)
+        if lang not in ("auto", file_lang):
+            continue
+        names = list(tools) if tools else list(DEFAULT_TOOLS.get(file_lang, []))
         if names:
             checks.extend(_run_tools(names, f))
     return checks
@@ -292,10 +319,9 @@ def _report_recorded(dest: str, files: dict[str, Any], tools: list[str],
               "or a later real count will read as a regression.")
 
 
-def record_baseline(target: str, dest: str, audit: bool = False,
-                    force: bool = False) -> int:
+def record_baseline(target: str, dest: str, force: bool = False) -> int:
     root   = _repo_root(target)
-    checks = _per_file_checks(target, audit)
+    checks = _not_audits(per_file_checks(target))
     files  = _counts_by_file(checks, root)
     tools  = sorted({c.get("tool", "?") for c in checks})
     status = _statuses(checks)
@@ -331,6 +357,14 @@ def _read_baseline(source: str, mode: str) -> dict[str, Any] | None:
         doc: dict[str, Any] = json.loads(Path(source).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         print(f"baseline: cannot read {source}: {exc}", file=sys.stderr)
+        return None
+    version = doc.get("baseline_version")
+    if version != BASELINE_VERSION:
+        print(f"baseline: REFUSING to compare. {source} is baseline version "
+              f"{version}, and this check.py reads version {BASELINE_VERSION}, "
+              f"which records fixable counts per file. Re-record it from the "
+              f"repository root: check.py . --record-baseline {source}",
+              file=sys.stderr)
         return None
     recorded_mode = doc.get("mode", "unknown")
     if recorded_mode != mode:
@@ -446,12 +480,13 @@ def _not_reduced(path: str, now: dict[str, Any], was: dict[str, Any],
 
 
 def _move_totals(totals: dict[str, Any], old: dict[str, Any], new: dict[str, Any]) -> None:
-    """TOTALS less what entry OLD held over entry NEW, in errors, warnings
-    and their sum, total."""
-    for key in ("errors", "warnings"):
+    """TOTALS less what entry OLD held over entry NEW, in each of _COUNTS,
+    and in total, which is errors plus warnings."""
+    for key in _COUNTS:
         fell = int(old.get(key, 0)) - int(new.get(key, 0))
         totals[key] = int(totals.get(key, 0)) - fell
-        totals["total"] = int(totals.get("total", 0)) - fell
+        if key in ("errors", "warnings"):
+            totals["total"] = int(totals.get("total", 0)) - fell
 
 
 def _lock_in(source: str, doc: dict[str, Any], path: str, now: dict[str, Any],
@@ -459,10 +494,8 @@ def _lock_in(source: str, doc: dict[str, Any], path: str, now: dict[str, Any],
     """Write each lowered count for PATH back to SOURCE; a line per tool lowered.
 
     Only a lower count is written, never a higher one. "totals" moves with
-    it: errors, warnings and total fall by what each replaced entry held more
-    than its new one, so they match a fresh record of the same tree. fixable
-    and fixable_unsafe stay as recorded: the baseline does not hold them per
-    file, so a write-back cannot tell whether a fixed finding was fixable.
+    it: each of its counts falls by what each replaced entry held more than
+    its new one, so they match a fresh record of the same tree.
     """
     was = doc.setdefault("files", {})
     totals = doc.get("totals")
@@ -471,7 +504,7 @@ def _lock_in(source: str, doc: dict[str, Any], path: str, now: dict[str, Any],
         before, after = _errors(was, path, tool), _errors(now, path, tool)
         if after < before:
             old = was.get(path, {}).get(tool, {})
-            new = now.get(path, {}).get(tool, {"errors": 0, "warnings": 0})
+            new = now.get(path, {}).get(tool, dict.fromkeys(_COUNTS, 0))
             was.setdefault(path, {})[tool] = new
             if isinstance(totals, dict):
                 _move_totals(totals, old, new)
@@ -504,6 +537,57 @@ def _touched_verdict(source: str, doc: dict[str, Any], path: str, now: dict[str,
     return True
 
 
+def _report_audits(checks: list[dict[str, Any]]) -> None:
+    """A line per audit tool that ran: its findings are in the report above,
+    and the verdict leaves them out."""
+    for c in checks:
+        if c.get("tool") in _AUDITS:
+            print(f"baseline: {c['tool']} is an audit: {len(c.get('issues', []))} "
+                  f"finding(s), reported above and never compared to the baseline, "
+                  f"since a new advisory is not this file getting worse.", file=sys.stderr)
+
+
+def raised_counts(old: dict[str, Any], new: dict[str, Any]) -> list[tuple[str, str, str, int, int]]:
+    """(path, tool, count, before, after) for each count baseline NEW holds
+    above OLD. A file or tool OLD has no entry for counts from zero, so a new
+    file recorded with findings is raised. A count OLD's entry does not hold
+    at all (an older version's entry) is not compared."""
+    was, now = old.get("files", {}), new.get("files", {})
+    out = []
+    for path in sorted(now):
+        for tool in sorted(now[path]):
+            entry = was.get(path, {}).get(tool)
+            for key in _COUNTS:
+                if entry is not None and key not in entry:
+                    continue
+                before = int((entry or {}).get(key, 0))
+                after = int(now[path][tool].get(key, 0))
+                if after > before:
+                    out.append((path, tool, key, before, after))
+    return out
+
+
+def check_raised(old_source: str, new_source: str) -> int:
+    """jpexit.OK when baseline NEW_SOURCE raises no count over OLD_SOURCE,
+    FINDINGS when it raises one, NOT_RUN when either cannot be read."""
+    docs = []
+    for source in (old_source, new_source):
+        try:
+            docs.append(json.loads(Path(source).read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"baseline: cannot read {source}: {exc}", file=sys.stderr)
+            return jpexit.NOT_RUN
+    raised = raised_counts(docs[0], docs[1])
+    if not raised:
+        print(f"baseline: {new_source} raises no count over {old_source}")
+        return jpexit.OK
+    print(f"baseline: {new_source} RAISES {len(raised)} count(s) over {old_source}:",
+          file=sys.stderr)
+    for path, tool, key, before, after in raised:
+        print(f"  {path}  {tool}  {key}  {before} -> {after}", file=sys.stderr)
+    return jpexit.FINDINGS
+
+
 def compare_baseline(checks: list[dict[str, Any]], target: str,
                      source: str, mode: str, touched: bool = False) -> int:
     """jpexit.OK no worse, FINDINGS worse, NOT_RUN cannot compare.
@@ -518,6 +602,8 @@ def compare_baseline(checks: list[dict[str, Any]], target: str,
     if touched and Path(target).is_dir():
         print("baseline: --touched takes one file, the one being changed", file=sys.stderr)
         return jpexit.NOT_RUN
+    _report_audits(checks)
+    checks = _not_audits(checks)
     now = _counts_by_file(checks, root)
     was = doc.get("files", {})
     skipped = _uncomparable(_statuses(checks), doc.get("tools", {}))
