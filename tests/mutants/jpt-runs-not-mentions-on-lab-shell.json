@@ -5,7 +5,7 @@
   {"name": "sudo-u-takes-no-value", "edits": [["    \"sudo\": {\"-u\", \"--user\",", "    \"sudo\": {\"--user\","]], "target": "sh: sudo -u"},
   {"name": "plus-is-no-option", "edits": [["_OPTION_MARKS = (\"-\", \"+\")", "_OPTION_MARKS = (\"-\",)"]], "target": "sh: bash +o"},
   {"name": "find-exec-unknown", "edits": [["_FIND_EXEC = {\"-exec\", \"-execdir\", \"-ok\", \"-okdir\"}", "_FIND_EXEC = {\"-execdir\", \"-ok\", \"-okdir\"}"]], "target": "sh: find -exec"},
-  {"name": "escape-is-one-character", "edits": [["_ESCAPED = 2", "_ESCAPED = 1"]], "target": "sh: an escaped backtick"},
-  {"name": "parentheses-do-not-nest", "edits": [["_DEPTH = {\"(\": 1, \")\": -1}", "_DEPTH = {\")\": -1}"]], "target": "sh: $(...)"}
+  {"name": "escape-is-one-character", "edits": [["_ESCAPED = 2", "_ESCAPED = 1"]], "target": "sh: an unpaired escaped backtick"},
+  {"name": "parentheses-do-not-nest", "edits": [["_DEPTH = {\"(\": 1, \")\": -1}", "_DEPTH = {\")\": -1}"]], "target": "sh: nested parentheses inside $()"}
  ]
 }

@@ -92,8 +92,13 @@ def test_planted_files_are_routed_by_kind() -> None:
         subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
         (root / "bin" / "locked").chmod(0)
         (root / "gone.sh").unlink()
+        try:
+            runs, stopped = lab_runs(root), ""
+        except ValueError as e:  # reason: a decode error is the failure this check is for
+            runs, stopped = [], str(e)
+        check("a byte that is not UTF-8 does not stop the scan", stopped, "")
         found: dict[str, list[int]] = {}
-        for rel, line in lab_runs(root):
+        for rel, line in runs:
             found.setdefault(rel, []).append(line)
         for name, (_, lines) in PLANTED.items():
             check(f"{name}", found.get(name, []), lines)

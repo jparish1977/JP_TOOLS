@@ -80,6 +80,7 @@ SH_EDGES = [
     ("sh: a capital X before a comment", False, "echo X # $(tools/lab/x.sh)"),
     ("sh: an escape just before backticks", True, "echo \\x`tools/lab/x.sh`"),
     ("sh: two substitutions, the lab one second", True, "a=$(true) b=$(tools/lab/x.sh)"),
+    ("sh: nested parentheses inside $()", True, "echo $(f (a) tools/lab/x.sh)"),
     ("sh: a quoted path inside backticks", True, "out=`bash 'tools/lab/x.sh'`"),
     ("sh: a quoted path inside $()", True, "out=$(bash 'tools/lab/x.sh')"),
     ("sh: backticks then a stray quote", True, "echo `bash tools/lab/x.sh`'"),
