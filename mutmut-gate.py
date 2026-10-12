@@ -139,10 +139,12 @@ def _module(path: str) -> str | None:
 
 def _shared_by_tests(path: str) -> bool:
     """A file whose change can move the reach of tests that are not in it:
-    a conftest.py anywhere, and under tests/ anything but a test_*.py suite
-    and the mutant specs (helpers, case tables, fixtures)."""
+    a conftest.py anywhere; at the root, each file pytest reads its
+    configuration from (testpaths and python_functions decide what it
+    collects at all); and under tests/ anything but a test_*.py suite and the
+    mutant specs (helpers, case tables, fixtures)."""
     name = path.rpartition("/")[2]
-    if name == "conftest.py":
+    if name == "conftest.py" or path in ("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini"):
         return True
     if not path.startswith("tests/") or path.startswith("tests/mutants/"):
         return False

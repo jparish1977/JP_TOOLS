@@ -266,11 +266,13 @@ def test_a_file_tests_share_has_all_reach_traced() -> None:
           {p: gate._shared_by_tests(p) for p in (
               "tests/conftest.py", "conftest.py", "tests/_harness.py", "tests/fixtures/a.json",
               "tests/_lab_python_cases.py", "tests/test_x.py", "tests/mutants/spec.json",
-              "jpcheck/lab_use.py", "README.md")},
+              "jpcheck/lab_use.py", "README.md", "pyproject.toml", "pytest.ini", "setup.cfg",
+              "tox.ini", "sub/pyproject.toml")},
           {"tests/conftest.py": True, "conftest.py": True, "tests/_harness.py": True,
            "tests/fixtures/a.json": True, "tests/_lab_python_cases.py": True,
            "tests/test_x.py": False, "tests/mutants/spec.json": False,
-           "jpcheck/lab_use.py": False, "README.md": False})
+           "jpcheck/lab_use.py": False, "README.md": False, "pyproject.toml": True,
+           "pytest.ini": True, "setup.cfg": True, "tox.ini": True, "sub/pyproject.toml": False})
     if not shutil.which("git"):
         print("SKIP: git not found")
         return
