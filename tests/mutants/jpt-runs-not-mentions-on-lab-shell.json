@@ -11,7 +11,7 @@
   {"name": "substitutions-not-read", "edits": [["        if any(shell_runs(body) for body in inner) or _line_runs(outer):", "        if _line_runs(outer):"]], "target": "sh: $(...) in double quotes"},
   {"name": "single-quotes-not-honoured", "edits": [["        if quote == \"'\":\n            quote = \"\" if c == \"'\" else quote\n", "        if False:\n            pass\n"]], "target": "sh: single-quoted backticks"},
   {"name": "comments-read", "edits": [["        elif c == \"#\" and not quote and (i == 0 or line[i - 1].isspace()):", "        elif False:"]], "target": "sh: a comment with backticks"},
-  {"name": "escapes-not-skipped", "edits": [["            step = 2", "            step = 1"]], "target": "sh: an escaped backtick"},
+  {"name": "escapes-not-skipped", "edits": [["            step = 2", "            step = 1"]], "target": "sh: an unpaired escaped backtick"},
   {"name": "find-exec-not-read", "edits": [["        return at is not None and command_runs_lab(words[at + 1:])", "        return False"]], "target": "sh: find -exec"},
   {"name": "any-command-counts", "edits": [["    return spec is not None and _interpreter_runs_lab(spec, words[1:])", "    return any(is_lab(w) for w in words)"]], "target": "sh: cat"},
   {"name": "script-arguments-count", "edits": [["            return is_lab(w)\n        i += 2", "            if is_lab(w):\n                return True\n        i += 2"]], "target": "sh: python3 a script given a lab path"},

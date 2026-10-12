@@ -100,7 +100,7 @@ def test_a_root_that_cannot_be_entered() -> None:
     rc, out = _run(missing)
     check("could not look: exit 2, not a skip's 3", rc, 2)
     check("  the last line says so", _last(out), f"run-suites: exit 2, could not look: cannot enter {missing}")
-    check_true("  and no suite ran", "suites:" not in out)
+    check_true("  and no suite ran: no count line", not re.search(r"^suites: ", out, re.M))
 
 
 def test_the_old_lab_path_forwards() -> None:

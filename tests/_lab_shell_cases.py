@@ -44,6 +44,7 @@ SH_CASES = [
     ("sh: single-quoted $(...)", False, "echo 'run $(tools/lab/x.sh)'"),
     ("sh: single-quoted backticks", False, "echo 'run `tools/lab/x.sh`'"),
     ("sh: an escaped backtick", False, 'echo "run \\`tools/lab/x.sh\\` to see"'),
+    ("sh: an unpaired escaped backtick", False, "echo \\`tools/lab/x.sh"),
     ("sh: only a VAR= naming a lab path", False, "env TOOL=tools/lab/x.sh"),
     ("sh: an interpreter with options only", False, "bash -e  # see tools/lab/x.sh"),
     ("sh: YAML name:", False, "  - name: bash tools/lab/x.sh"),

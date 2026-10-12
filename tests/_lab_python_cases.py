@@ -52,6 +52,7 @@ PY_CASES = [
     ("py: exec(open(...).read())", True, 'exec(open("tools/lab/x.py").read())\n'),
     ("py: load_script", True, 'from _harness import load_script\nload_script("tools/lab/x.py")\n'),
     # Mentions.
+    ("py: shell=True, cat of a lab file", False, 'import subprocess\nsubprocess.run("cat tools/lab/x.sh", shell=True)\n'),
     ("py: git log -- a lab path", False, 'import subprocess\nsubprocess.run(["git", "log", "--", "tools/lab/x.py"])\n'),
     ("py: grep -r a lab dir", False, 'import subprocess\nsubprocess.run(["grep", "-r", "p", "tools/lab/"])\n'),
     ("py: a lab path in env=", False, ('import subprocess\n'
