@@ -17,6 +17,10 @@ WHAT IS CHECKED
     matches, and each dropped file is returned with its relative path, glob
     and reason.
 
+    _drop_ignored_issues: a tool's findings in ignored files are dropped and
+    the rest kept in order; a finding that names no file is kept, since it
+    is no file's; a result with no issues list is left as it is.
+
     The default codec is made cp1252 by patching io.text_encoding, which
     pathlib asks when no encoding is given; a control read shows the patch
     took. That holds with Python's UTF-8 mode on or off.
@@ -32,7 +36,7 @@ from pathlib import Path
 from unittest import mock
 
 from _harness import check, run
-from jpcheck.files import _drop_ignored, ignored_by, load_ignores
+from jpcheck.files import _drop_ignored, _drop_ignored_issues, ignored_by, load_ignores
 
 
 def outcome(fn: Callable[[], object]) -> object:
@@ -127,6 +131,25 @@ def test_drop_ignored() -> None:
                  {"file": "oob/deep/c.sh", "pattern": "oob/*", "reason": "vendor pages"}])
     check("drop: each language keeps exactly the files no entry matches",
           groups, {"python": [str(root / "lib" / "b.py")], "shell": [], "js": [str(root / "web" / "d.js")]})
+
+
+def test_drop_ignored_issues() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td).resolve()
+        # Every file not hidden: a finding's real file matches, and a finding
+        # with no file must not be read as some file's.
+        ignores = [("[!.]*", "everything here is vendored")]
+        own = {"file": str(root / ".own" / "a.py"), "rule": "F401"}
+        vendored = {"file": str(root / "lib" / "b.py"), "rule": "F401"}
+        nameless = {"rule": "audit", "message": "a finding about the project, not a file"}
+        result = {"tool": "ruff", "status": "fail", "issues": [own, vendored, nameless]}
+        check("issues: a finding that names no file is kept, the ignored file's dropped",
+              (outcome(lambda: _drop_ignored_issues(result, root, ignores)), result),
+              (None, {"tool": "ruff", "status": "fail", "issues": [own, nameless]}))
+        bare = {"tool": "npm-audit", "status": "skip"}
+        check("issues: a result with no issues list is left as it is",
+              (outcome(lambda: _drop_ignored_issues(bare, root, ignores)), bare),
+              (None, {"tool": "npm-audit", "status": "skip"}))
 
 
 if __name__ == "__main__":

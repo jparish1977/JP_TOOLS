@@ -16,6 +16,9 @@ WHAT IS CHECKED
     directory. A failing git that printed one anyway is not trusted, and the
     start directory is the root. git is replaced in-process for this case.
 
+    _tool_missing: the whole report, with no install hint (the note says to
+    put it on PATH) and with one (the note carries the hint).
+
     python3 tests/test_common_runner_paths.py
 """
 
@@ -90,6 +93,17 @@ def test_repo_root_distrusts_a_failing_git() -> None:
               root_when_git_says(start, 0, "\n"), start)
         check("repo root: CONTROL a succeeding git's directory is used",
               root_when_git_says(start, 0, "/top/of/repo\n"), Path("/top/of/repo"))
+
+
+def test_tool_missing() -> None:
+    check("missing: with no install hint the note says to put it on PATH",
+          outcome(lambda: common._tool_missing("phpstan")),
+          {"tool": "phpstan", "status": "unavailable", "issues": [],
+           "note": "'phpstan' not found on PATH: install it to enable this check"})
+    check("missing: an install hint is the note",
+          outcome(lambda: common._tool_missing("phpstan", "composer install")),
+          {"tool": "phpstan", "status": "unavailable", "issues": [],
+           "note": "'phpstan' not found: composer install"})
 
 
 if __name__ == "__main__":
