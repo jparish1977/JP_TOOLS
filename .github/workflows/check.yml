@@ -25,8 +25,13 @@ on:
 # job container sees all of the runner host's cores (32), and the runner takes
 # three jobs at a time, so nproc-wide steps in each oversubscribe the box
 # (load 38.5 on 32 cores measured 2026-10-09, with CI jobs running).
+# MUTMUT_WORKERS is the mutation jobs' own: a run there is mutants times the
+# suites' time, the longest job by far, and at 8 a PR that re-traces its reach
+# waited about 70 minutes on one pass (2026-10-13). It takes the share the
+# other jobs leave once they finish, which they do well before it.
 env:
   CI_WORKERS: 8
+  MUTMUT_WORKERS: 24
 
 jobs:
   # Nothing relied on runs from scratch (METHODOLOGY 2.11, rule 6): the
@@ -274,7 +279,7 @@ jobs:
         shell: bash
         run: |
           bash ci-image/fetch-mutmut-state.sh /mutmut-state
-          python mutmut-gate.py run --max-children "$CI_WORKERS"
+          python mutmut-gate.py run --max-children "$MUTMUT_WORKERS"
           python -m mutmut results --all true > mutmut-results.txt
           python mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt
 
@@ -314,7 +319,7 @@ jobs:
         shell: bash
         run: |
           bash ci-image/fetch-mutmut-state.sh /mutmut-state
-          python mutmut-gate.py run --max-children "$CI_WORKERS"
+          python mutmut-gate.py run --max-children "$MUTMUT_WORKERS"
           python -m mutmut results --all true > mutmut-results.txt
           python mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt
           python mutmut-gate.py record baseline.json --results mutmut-results.txt

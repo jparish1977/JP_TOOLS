@@ -37,9 +37,13 @@ for a test it has. So before mutmut runs, the tests in any file changed since
 the state was traced (its git_commit), and the tests recorded as reaching a
 function in any changed source file, are taken out of the stats; mutmut then
 counts them as new and traces just those. A change to a file the tests share
-(a conftest.py; a helper, case table or fixture under tests/) can move any
-test's reach without touching its file, so it, and a state whose commit this
-clone cannot diff against, has all reach traced afresh: slower, never wrong.
+(a conftest.py; a helper, case table or fixture under tests/) can move a
+test's reach without touching its file. A data file that only suites name,
+by its file name, moves only those suites' tests, so just they are traced
+again; anything else shared (a conftest.py, the configuration, a Python
+helper, a data file no suite names or a helper names), and a state whose
+commit this clone cannot diff against, has all reach traced afresh: slower,
+never wrong.
 
 mutmut also keeps each mutant's verdict until its function's code changes,
 whatever happens to the tests: a function a test newly reaches would stay
@@ -157,6 +161,28 @@ def _shared_by_tests(path: str) -> bool:
     return not (name.startswith("test_") and name.endswith(".py"))
 
 
+def _is_suite(path: str) -> bool:
+    name = path.rpartition("/")[2]
+    return path.startswith("tests/") and name.startswith("test_") and name.endswith(".py")
+
+
+def _suites_naming(root: Path, path: str) -> set[str] | None:
+    """The suites whose own text names the changed shared file PATH by its file
+    name, so only their tests can have moved; None when the change can move
+    any test's reach: a conftest.py or a configuration file, any Python file
+    (a helper is imported, not named), or a data file that no suite names or
+    that a helper names (then whoever imports the helper reads it)."""
+    name = path.rpartition("/")[2]
+    if name == "conftest.py" or path in ("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini") \
+            or name.endswith(".py"):
+        return None
+    tests = [p for p in _git("-C", str(root), "ls-files", "tests").splitlines() if p.endswith(".py")]
+    naming = {p for p in tests if name in (root / p).read_text(encoding="utf-8", errors="replace")}
+    if not naming or not all(map(_is_suite, naming)):
+        return None
+    return naming
+
+
 def forget_moved_reach(root: Path, stats: Path) -> str:
     """Take out of STATS the tests whose reach a change since it was traced
     can have moved (see THE STATE), so mutmut traces just those; say what
@@ -175,22 +201,28 @@ def forget_moved_reach(root: Path, stats: Path) -> str:
     except GateError:
         stats.unlink()
         return f"cannot diff against the traced commit {since}: all test reach traced"
-    shared = sorted(p for p in changed if _shared_by_tests(p))
-    if shared:
-        stats.unlink()
-        return f"{shared[0]} changed, which tests share: all test reach traced"
+    # A shared file that only some suites name moves only their tests; one that
+    # any test can read moves them all.
+    readers: set[str] = set()
+    for p in sorted(p for p in changed if _shared_by_tests(p)):
+        naming = _suites_naming(root, p)
+        if naming is None:
+            stats.unlink()
+            return f"{p} changed, which tests share: all test reach traced"
+        readers |= naming
     modules = {m for m in map(_module, changed) if m}
     reach: dict[str, list[str]] = doc.setdefault("tests_by_mangled_function_name", {})
     durations: dict[str, float] = doc.setdefault("duration_by_test", {})
     moved = {t for key, tests in reach.items() if key.rpartition(".")[0] in modules for t in tests}
     # A test id is FILE::NAME, or FILE::CLASS::NAME: the file is before the first ::.
-    moved |= {t for t in durations if t.partition("::")[0] in changed}
+    moved |= {t for t in durations if t.partition("::")[0] in changed | readers}
     for t in moved:
         durations.pop(t, None)  # a test reach names may have no duration kept
     for key, tests in reach.items():
         reach[key] = [t for t in tests if t not in moved]
     stats.write_bytes(json.dumps(doc).encode())
-    return f"{len(changed)} file(s) changed since the traced commit: {len(moved)} test(s) traced again"
+    named = f", the shared files' readers among them ({', '.join(sorted(readers))})" if readers else ""
+    return f"{len(changed)} file(s) changed since the traced commit: {len(moved)} test(s) traced again{named}"
 
 
 def _reach(stats: Path) -> dict[str, frozenset[str]] | None:
