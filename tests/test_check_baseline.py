@@ -224,7 +224,10 @@ def git_test_counts_with_their_keys_missing() -> None:
         check_true("  and a baseline that is not JSON is named on stderr, not stdout",
                    p.returncode == 2 and p.stderr.startswith(f"baseline: cannot read {base}: ")
                    and "cannot read" not in p.stdout)
-        check_py(".", "--record-baseline", str(base), "--force-baseline", cwd=r)
+        p = check_py(".", "--record-baseline", str(base), "--force-baseline", cwd=r)
+        check("forced over a file that is not a baseline: says so, not 'a baseline of 0 file(s)'",
+              p.stdout.splitlines()[1:],
+              ["  replaced a file that could not be read as a baseline, on --force-baseline"])
         p = check_py(".", "--lang", "python", "--baseline", str(base), "--touched", cwd=r)
         check("--touched on a directory: refused on stderr, exactly",
               (p.returncode, p.stderr.splitlines()[-1]),

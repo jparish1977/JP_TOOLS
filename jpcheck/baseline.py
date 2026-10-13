@@ -301,15 +301,18 @@ def _refuse_write(dest: str, files: dict[str, Any], dropped: list[str], existing
 
 
 def _report_recorded(dest: str, files: dict[str, Any], tools: list[str],
-                     status: dict[str, str], existed: bool, existing: int,
+                     status: dict[str, str], existed: bool, existing: int | None,
                      dropped: list[str]) -> None:
     print(f"recorded {len(files)} file(s) from {len(tools)} tool(s), "
           f"mode=per-file, to {dest}")
     # Say what was displaced, not only what was written. Keyed on the file
     # having EXISTED, not on how much it recorded: a baseline of zero files is
     # a real baseline (every file was clean), and it is the one most easily
-    # mistaken for no baseline at all.
-    if existed:
+    # mistaken for no baseline at all. EXISTING is None when the file could
+    # not be read, which is not a baseline of zero files.
+    if existed and existing is None:
+        print("  replaced a file that could not be read as a baseline, on --force-baseline")
+    elif existed:
         note = f"  replaced a baseline of {existing} file(s)"
         if dropped:
             note += f", discarding {len(dropped)} on --force-baseline"
@@ -350,7 +353,7 @@ def record_baseline(target: str, dest: str, force: bool = False) -> int:
         return jpexit.NOT_RUN
     Path(dest).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n",
                           encoding=_UTF8)
-    _report_recorded(dest, files, tools, status, existed, existing, dropped)
+    _report_recorded(dest, files, tools, status, existed, None if unreadable else existing, dropped)
     return jpexit.OK
 
 
