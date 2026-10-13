@@ -18,7 +18,7 @@
     },
     {
       "name": "a tool with no runner is dropped",
-      "edits": [["            checks.extend(_run_tools([name], target))", "            continue"]],
+      "edits": [["            checks.append(_no_runner(name))", "            continue"]],
       "target": "a tool with no runner is named, not dropped"
     }
   ]

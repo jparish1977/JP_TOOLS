@@ -18,17 +18,17 @@
     },
     {
       "name": "a name defined in two base files still carries a measure",
-      "edits": [["    if len(sites) != 1:\n        return (0, 0, 0)", "    if not sites:\n        return (0, 0, 0)"]],
+      "edits": [["    if len(sites) != 1:\n        return (0, 0)", "    if not sites:\n        return (0, 0)"]],
       "target": "G: a main gone from keep.py, while twin.py has one too, is not known to have moved"
     },
     {
       "name": "a definition still in its base file still carries its measure",
-      "edits": [["    if _defines(lang, now.read_text(encoding=\"utf-8\", errors=\"replace\") if now.is_file() else None, name):\n        return (0, 0, 0)\n", ""]],
+      "edits": [["    if _defines(lang, now.read_text(encoding=_UTF8, errors=\"replace\") if now.is_file() else None, name):\n        return (0, 0)\n", ""]],
       "target": "F: a NEW main of complexity 12 does not inherit the 20 of a main still in keep.py"
     },
     {
       "name": "a function that really moved is measured as new",
-      "edits": [["    return (size, cx, 0)", "    return (0, 0, 0)"]],
+      "edits": [["    return (size, cx)", "    return (0, 0)"]],
       "target": "E: a smelly function moved out into a new file is existing"
     }
   ]
