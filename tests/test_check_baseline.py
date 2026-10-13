@@ -519,6 +519,12 @@ def git_test_a_lang_run_compares_only_that_language() -> None:
         p = check_py(".", "--lang", "python", "--baseline", str(base), cwd=r)
         check_true("--lang python still compares it", p.returncode == 0
                    and "baseline: no change against base.json" in p.stdout and "not measured" not in p.stdout)
+        from jpcheck import baseline as bl
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            bl.compare_baseline([], str(r), str(base), "per-file")
+        check_true("compare_baseline with no lang is every language: the python file is compared",
+                   "dirty.py  ruff  3 -> 0" in out.getvalue() and "not measured" not in out.getvalue())
 
 
 def git_test_audits_are_reported_and_never_baselined() -> None:
