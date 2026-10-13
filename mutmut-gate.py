@@ -177,7 +177,10 @@ def _suites_naming(root: Path, path: str) -> set[str] | None:
             or name.endswith(".py"):
         return None
     tests = [p for p in _git("-C", str(root), "ls-files", "tests").splitlines() if p.endswith(".py")]
-    naming = {p for p in tests if name in (root / p).read_text(encoding="utf-8", errors="replace")}
+    # Matched as bytes: a file name is ASCII here, and a test file that is not
+    # valid UTF-8 is still searched rather than refused.
+    needle = name.encode()
+    naming = {p for p in tests if needle in (root / p).read_bytes()}
     if not naming or not all(map(_is_suite, naming)):
         return None
     return naming

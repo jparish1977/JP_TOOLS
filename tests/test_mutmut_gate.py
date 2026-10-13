@@ -320,23 +320,36 @@ def test_a_fixture_only_suites_name_moves_only_their_tests() -> None:
         return
     with tempfile.TemporaryDirectory() as td:
         root = _repo(Path(td))
-        traced = _commit(root, {"tests/test_a.py": 'F = "fixtures/help.txt"\n',
-                                "tests/test_b.py": 'G = "fixtures/other.txt"\n',
+        # Each suite names its fixture by the file name alone, never by its
+        # directory, and test_d names every file whose change moves all reach
+        # (the configuration, a conftest.py, a Python fixture), so only the
+        # rule, not "nobody names it", can send those to a full trace.
+        traced = _commit(root, {"tests/test_a.py": 'F = FIXTURES / "help.txt"\n',
+                                "tests/test_b.py": 'G = FIXTURES / "other.txt"\n',
                                 "tests/test_c.py": "# names nothing\n",
-                                "tests/_helper.py": 'H = "fixtures/shared.txt"\n',
+                                "tests/test_d.py": "# pyproject.toml pytest.ini setup.cfg tox.ini conftest.py"
+                                                   " sample.py\n",
+                                "tests/_helper.py": 'H = FIXTURES / "shared.txt"\n',
+                                "tools/elsewhere.py": 'X = "help.txt"  # not a test file: never counted\n',
                                 "tests/fixtures/help.txt": "1\n", "tests/fixtures/other.txt": "1\n",
-                                "tests/fixtures/shared.txt": "1\n", "tests/fixtures/orphan.txt": "1\n"},
+                                "tests/fixtures/shared.txt": "1\n", "tests/fixtures/orphan.txt": "1\n",
+                                "tests/fixtures/sample.py": "x = 1\n"},
                         "traced")
-        check("help.txt: named by test_a.py alone", gate._suites_naming(root, "tests/fixtures/help.txt"),
-              {"tests/test_a.py"})
+        check("help.txt: named by test_a.py alone (a file outside tests/ is not a reader)",
+              gate._suites_naming(root, "tests/fixtures/help.txt"), {"tests/test_a.py"})
         check("shared.txt: named by a helper, so any test", gate._suites_naming(root, "tests/fixtures/shared.txt"),
               None)
         check("orphan.txt: named by no suite, so any test", gate._suites_naming(root, "tests/fixtures/orphan.txt"),
               None)
-        check("a Python helper, a conftest.py and the configuration: any test",
-              [gate._suites_naming(root, p) for p in ("tests/_helper.py", "tests/conftest.py", "pyproject.toml",
-                                                       "pytest.ini", "setup.cfg", "tox.ini")],
-              [None] * 6)
+        check("a Python file, a conftest.py and the configuration: any test, even when a suite names them",
+              [gate._suites_naming(root, p) for p in ("tests/fixtures/sample.py", "tests/_helper.py",
+                                                       "tests/conftest.py", "pyproject.toml", "pytest.ini",
+                                                       "setup.cfg", "tox.ini")],
+              [None] * 7)
+        check("a suite is test_*.py under tests/, at any depth",
+              [gate._is_suite(p) for p in ("tests/test_x.py", "tests/sub/test_x.py", "tests/x_test.py",
+                                           "lib/test_x.py", "tests/test_x.txt", "tests/sub/x.py")],
+              [True, True, False, False, False, False])
         stats = Path(td) / "stats.json"
         durations = dict.fromkeys(("tests/test_a.py::t1", "tests/test_b.py::t2", "tests/test_c.py::t3"), 1.0)
         reach = {"a.x_f": ["tests/test_a.py::t1", "tests/test_b.py::t2", "tests/test_c.py::t3"]}
@@ -356,6 +369,15 @@ def test_a_fixture_only_suites_name_moves_only_their_tests() -> None:
         check("  and it says so, naming the reader", said,
               "1 file(s) changed since the traced commit: 1 test(s) traced again,"
               " the shared files' readers among them (tests/test_a.py)")
+        kept()
+        _commit(root, {"tests/fixtures/help.txt": "3\n", "tests/fixtures/other.txt": "2\n"}, "two fixtures")
+        said = gate.forget_moved_reach(root, stats)
+        doc = json.loads(stats.read_text(encoding="utf-8"))
+        check("two fixtures changed, each named by its own suite: both suites' tests go",
+              sorted(doc["duration_by_test"]), ["tests/test_c.py::t3"])
+        check("  and it names both readers", said,
+              "2 file(s) changed since the traced commit: 2 test(s) traced again,"
+              " the shared files' readers among them (tests/test_a.py, tests/test_b.py)")
         kept()
         _commit(root, {"tests/fixtures/shared.txt": "2\n"}, "the helper's fixture")
         check("shared.txt changed: all reach traced, naming it", gate.forget_moved_reach(root, stats),
