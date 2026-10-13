@@ -371,6 +371,16 @@ def git_test_a_baseline_may_only_fall() -> None:
           baseline.raised_counts(old, each),
           [("a.py", "ruff", "errors", 3, 4), ("a.py", "ruff", "warnings", 1, 2),
            ("a.py", "ruff", "fixable", 2, 3), ("a.py", "ruff", "fixable_unsafe", 0, 1)])
+    gap = {"files": {"a.py": {"ruff": {"warnings": 1}}}}
+    check("an old entry lacking one count still compares the counts after it",
+          baseline.raised_counts(gap, {"files": {"a.py": {"ruff": _entry(9, 2)}}}),
+          [("a.py", "ruff", "warnings", 1, 2)])
+    check("a new entry lacking a count reads it as zero, so raises nothing there",
+          baseline.raised_counts({"files": {"a.py": {"ruff": _entry()}}},
+                                 {"files": {"a.py": {"ruff": {"errors": 0}}}}), [])
+    check("a baseline with no files at all: the old holds nothing, the new raises nothing",
+          (baseline.raised_counts({}, {"files": {"a.py": {"ruff": _entry(1)}}}), baseline.raised_counts(old, {})),
+          ([("a.py", "ruff", "errors", 0, 1)], []))
     added = {"files": {"a.py": {"ruff": _entry(3, 1, 2), "mypy": _entry(1)}, "new.py": {"ruff": _entry(0, 2)}}}
     check("a tool or a file the old one lacks counts from zero",
           baseline.raised_counts(old, added),
@@ -379,17 +389,26 @@ def git_test_a_baseline_may_only_fall() -> None:
         o, n = Path(tmp) / "old.json", Path(tmp) / "new.json"
         o.write_text(json.dumps(old), encoding="utf-8")
         n.write_text(json.dumps(lower), encoding="utf-8")
+        new = str(n.resolve())
         p = check_py(str(n), "--raised-over", str(o), cwd=Path(tmp))
-        check("--raised-over, nothing raised: exit 0 and said", (p.returncode, "raises no count" in p.stdout),
-              (0, True))
+        check("--raised-over, nothing raised: exit 0, said on stdout",
+              (p.returncode, p.stdout, p.stderr), (0, f"baseline: {new} raises no count over {o}\n", ""))
         n.write_text(json.dumps(each), encoding="utf-8")
         p = check_py(str(n), "--raised-over", str(o), cwd=Path(tmp))
-        check_true("raised: exit 1, naming each count", p.returncode == 1 and "RAISES 4 count(s)" in p.stderr
-                   and "a.py  ruff  errors  3 -> 4" in p.stderr)
+        check("raised: exit 1, each count named on stderr",
+              (p.returncode, p.stdout, p.stderr),
+              (1, "", (f"baseline: {new} RAISES 4 count(s) over {o}:\n"
+                       "  a.py  ruff  errors  3 -> 4\n  a.py  ruff  warnings  1 -> 2\n"
+                       "  a.py  ruff  fixable  2 -> 3\n  a.py  ruff  fixable_unsafe  0 -> 1\n")))
         o.write_text("{ not json", encoding="utf-8")
         p = check_py(str(n), "--raised-over", str(o), cwd=Path(tmp))
         check_true("an unreadable old baseline: NOT_RUN, saying which",
-                   p.returncode == 2 and "cannot read" in p.stderr and str(o) in p.stderr)
+                   p.returncode == 2 and p.stderr.startswith(f"baseline: cannot read {o}: ") and p.stdout == "")
+        o.write_text(json.dumps(old), encoding="utf-8")
+        n.write_text("{ not json", encoding="utf-8")
+        p = check_py(str(n), "--raised-over", str(o), cwd=Path(tmp))
+        check_true("an unreadable new one: the same, naming it",
+                   p.returncode == 2 and p.stderr.startswith(f"baseline: cannot read {new}: "))
 
 
 def git_test_audits_are_reported_and_never_baselined() -> None:
