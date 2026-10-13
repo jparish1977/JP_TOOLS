@@ -33,6 +33,9 @@ _SMELL_FUNC_LINES = 100         # a smell at or over
 _SMELL_FUNC_COMPLEXITY = 11     # over 10
 _SMELL_FILE_COMPLEXITY = 101    # over 100
 _SMELLS = {"base": "HEAD"}      # set from --smells-base in main()
+# rev-parse's -q only keeps git's complaint about a bad ref off stderr, which
+# _git captures and drops; whatever its case, only the exit code is read.
+_QUIET = "-q"
 
 
 def _smell_measure(src: str) -> Measure:
@@ -56,7 +59,7 @@ def _smells_context(path: Path) -> tuple[Path, str] | None:
     if top.returncode != 0:
         return None
     root = Path(top.stdout.strip())
-    if _git(["rev-parse", "-q", "--verify", base + "^{commit}"], root).returncode != 0:
+    if _git(["rev-parse", _QUIET, "--verify", base + "^{commit}"], root).returncode != 0:
         if base == "HEAD":
             return None
         raise _NoSmellsBaseError(base)
@@ -137,7 +140,7 @@ def _base_measure(f: Path, ctx: tuple[Path, str] | None) -> tuple[int, dict[str,
 
 
 def _smell(f: Path, line: int, rule: str, what: str,
-           counts: tuple[int, int, int], history: bool = True) -> dict[str, Any] | None:
+           counts: tuple[int, int, int], history: bool) -> dict[str, Any] | None:
     """counts = (now, before, limit). None when under the limit now.
 
     A smell that was not there before fails, and so does one that was there
@@ -218,7 +221,7 @@ def _function_smells(f: Path, funcs: dict[str, tuple[int, int, int]],
         smelly = size >= _SMELL_FUNC_LINES or cx >= _SMELL_FUNC_COMPLEXITY
         if before is None and ctx is not None and smelly and name != TOP_LEVEL:
             before = _function_elsewhere(ctx[0], ctx[1], name, _detect_lang(str(f)))
-        b_size, b_cx, _ = before or (0, 0, 0)
+        b_size, b_cx = before[:2] if before else (0, 0)
         out.append(_smell(f, line, "SMELL-FUNC-LINES", f"function {name} length",
                           (size, b_size, _SMELL_FUNC_LINES), ctx is not None))
         out.append(_smell(f, line, "SMELL-FUNC-COMPLEXITY", f"function {name} complexity",
