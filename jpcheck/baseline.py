@@ -72,6 +72,9 @@ _COUNTS = ("errors", "warnings", "fixable", "fixable_unsafe")
 
 _AUDITS = frozenset(t for tools in AUDIT_TOOLS.values() for t in tools)
 
+# Codec names fold case, so "utf-8" and "UTF-8" name the same codec.
+_UTF8 = "utf-8"
+
 # A version is read from the copy of the tool its runner runs, found the way
 # the runner finds it: PATH's eslint read while the gate loads node_modules'
 # would match or differ by accident. Every tool the registry can run is in
@@ -145,7 +148,7 @@ def _node_package_version(name: str) -> str:
         manifest = modules / name / "package.json"
         if manifest.is_file():
             try:
-                version = json.loads(manifest.read_text(encoding="utf-8")).get("version")
+                version = json.loads(manifest.read_text(encoding=_UTF8)).get("version")
             except (OSError, ValueError, AttributeError):
                 # reason: "" is "cannot tell", which never refuses a comparison
                 return ""
@@ -253,7 +256,7 @@ def _dropped_entries(dest: str, files: dict[str, Any]) -> tuple[list[str], int, 
     if not Path(dest).exists():
         return [], 0, False
     try:
-        prior = json.loads(Path(dest).read_text(encoding="utf-8"))
+        prior = json.loads(Path(dest).read_text(encoding=_UTF8))
     except (OSError, json.JSONDecodeError):
         # reason: the third value says the baseline could not be read, and the caller reports that
         return [], 0, True
@@ -346,7 +349,7 @@ def record_baseline(target: str, dest: str, force: bool = False) -> int:
     if not force and _refuse_write(dest, files, dropped, existing, unreadable):
         return jpexit.NOT_RUN
     Path(dest).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n",
-                          encoding="utf-8")
+                          encoding=_UTF8)
     _report_recorded(dest, files, tools, status, existed, existing, dropped)
     return jpexit.OK
 
@@ -354,7 +357,7 @@ def record_baseline(target: str, dest: str, force: bool = False) -> int:
 def _read_baseline(source: str, mode: str) -> dict[str, Any] | None:
     """The baseline document, or None after saying why it cannot be compared."""
     try:
-        doc: dict[str, Any] = json.loads(Path(source).read_text(encoding="utf-8"))
+        doc: dict[str, Any] = json.loads(Path(source).read_text(encoding=_UTF8))
     except (OSError, json.JSONDecodeError) as exc:
         print(f"baseline: cannot read {source}: {exc}", file=sys.stderr)
         return None
@@ -511,7 +514,7 @@ def _lock_in(source: str, doc: dict[str, Any], path: str, now: dict[str, Any],
             lowered.append(f"  {path}  {tool}  {before} -> {after}")
     if lowered:
         Path(source).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n",
-                                encoding="utf-8")
+                                encoding=_UTF8)
     return lowered
 
 
@@ -573,7 +576,7 @@ def check_raised(old_source: str, new_source: str) -> int:
     docs = []
     for source in (old_source, new_source):
         try:
-            docs.append(json.loads(Path(source).read_text(encoding="utf-8")))
+            docs.append(json.loads(Path(source).read_text(encoding=_UTF8)))
         except (OSError, json.JSONDecodeError) as exc:
             print(f"baseline: cannot read {source}: {exc}", file=sys.stderr)
             return jpexit.NOT_RUN

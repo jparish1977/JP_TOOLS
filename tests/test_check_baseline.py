@@ -173,6 +173,95 @@ def git_test_a_directory_against_a_baseline_is_measured_per_file() -> None:
                    p.returncode == 1 and "dirty.py  ruff  3 -> 4" in p.stderr)
         p = check_py(".", "--lang", "js", "--baseline", str(base), cwd=r)
         check("--lang keeps only that language's files: none here, so nothing worse", p.returncode, 0)
+        p = check_py(".", "--tools", "ruff,smells", "--baseline", str(base), cwd=r)
+        # The report, then the baseline's own lines after it.
+        out, _ = json.JSONDecoder().raw_decode(p.stdout)
+        check("--tools runs exactly those", sorted({c["tool"] for c in out["checks"]}), ["ruff", "smells"])
+        check("  once per file, not once over the directory",
+              sum(c["tool"] == "ruff" for c in out["checks"]), 2)
+        check("  the output names the directory and the language asked for",
+              (out["target"], out["language"]), (str(r.resolve()), "auto"))
+        check("  and sums the issues it found", out["summary"]["errors"],
+              sum(1 for c in out["checks"] for i in c["issues"] if i.get("severity") == "error"))
+
+
+def git_test_counts_with_their_keys_missing() -> None:
+    """What each piece of the baseline makes of an entry, a check or a
+    document with something missing, which it reads as zero, "?", the root,
+    or empty."""
+    from jpcheck import baseline, common
+    totals: dict[str, int] = {}
+    baseline._move_totals(totals, {"errors": 2, "warnings": 1, "fixable": 3, "fixable_unsafe": 4}, {})
+    check("an entry falling to one with no counts: every total falls by the old count, total by "
+          "errors and warnings only", totals,
+          {"errors": -2, "warnings": -1, "fixable": -3, "fixable_unsafe": -4, "total": -3})
+    totals = {}
+    baseline._move_totals(totals, {}, {"errors": 1, "fixable": 1})
+    check("  an old entry with no counts reads as zero", totals,
+          {"errors": 1, "warnings": 0, "fixable": 1, "fixable_unsafe": 0, "total": 1})
+    root = Path(tempfile.gettempdir())
+    got = baseline._counts_by_file([
+        {"issues": [{"file": str(root / "a.py"), "severity": "warning", "fixable_unsafe": True}]},
+        {"tool": "ruff"},
+        {"tool": "ruff", "issues": [{"severity": "error", "fixable": True}]},
+    ], root)
+    check("a check with no tool is '?', one with no issues adds none, an issue with no file "
+          "counts at the root; a warning and each fixable kind counted where they are", got,
+          {"a.py": {"?": {"errors": 0, "warnings": 1, "fixable": 0, "fixable_unsafe": 1}},
+           common._rel("", root): {"ruff": {"errors": 1, "warnings": 0, "fixable": 1, "fixable_unsafe": 0}}})
+    with repo() as r:
+        base = r / "base.json"
+        base.write_text(json.dumps({"baseline_version": 2}), encoding="utf-8")
+        p = check_py("dirty.py", "--baseline", str(base), cwd=r)
+        check_true("a baseline naming no mode is refused, saying 'unknown'",
+                   p.returncode == 2 and "mode='unknown'" in p.stderr)
+        base.write_text(json.dumps({"baseline_version": 2, "mode": "per-file"}), encoding="utf-8")
+        p = check_py("dirty.py", "--baseline", str(base), cwd=r)
+        check_true("one with no files and no tools: every finding is new, so worse",
+                   p.returncode == 1 and "dirty.py  ruff  0 -> 3" in p.stderr)
+        base.write_text("{ not json", encoding="utf-8")
+        p = check_py("dirty.py", "--baseline", str(base), cwd=r)
+        check_true("  and a baseline that is not JSON is named on stderr, not stdout",
+                   p.returncode == 2 and p.stderr.startswith(f"baseline: cannot read {base}: ")
+                   and "cannot read" not in p.stdout)
+        check_py(".", "--record-baseline", str(base), "--force-baseline", cwd=r)
+        p = check_py(".", "--lang", "python", "--baseline", str(base), "--touched", cwd=r)
+        check("--touched on a directory: refused on stderr, exactly",
+              (p.returncode, p.stderr.splitlines()[-1]),
+              (2, "baseline: --touched takes one file, the one being changed"))
+        check_true("  not on stdout", "--touched takes one file" not in p.stdout)
+        from jpcheck import baseline as bl
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            checks = bl.per_file_checks(str(r / "dirty.py"))
+            rc = bl.compare_baseline(checks, str(r / "dirty.py"), str(base), "per-file")
+        check("compare_baseline without touched= is not --touched: an unchanged count passes", rc, 0)
+
+
+def git_test_audits_in_a_per_file_run_follow_the_languages() -> None:
+    """--audit with a directory and a baseline: each present language's audit
+    runs once over the directory, the files' own tools per file. A stand-in
+    records the audit calls, so no advisory database is asked."""
+    with repo() as r:
+        base = r / "base.json"
+        check_py(".", "--record-baseline", str(base), cwd=r)
+        (r / "app.js").write_text("const x = 1;\n", encoding="utf-8")
+        calls: list[tuple[list[str], str]] = []
+
+        def audits(names: list[str], target: str) -> list[dict[str, object]]:
+            calls.append((names, target))
+            return []
+
+        with mock.patch.object(check_mod, "_run_tools", audits):
+            check_py(".", "--audit", "--baseline", str(base), cwd=r)
+            check("no --lang: one call, every present language's audit, over the directory",
+                  calls, [(["npm-audit", "pip-audit"], str(r.resolve()))])
+            calls.clear()
+            check_py(".", "--lang", "python", "--audit", "--baseline", str(base), cwd=r)
+            check("--lang python: python's audit only", calls, [(["pip-audit"], str(r.resolve()))])
+            calls.clear()
+            check_py(".", "--baseline", str(base), cwd=r)
+            check("no --audit: no audit", calls, [])
 
 
 def git_test_modes_and_versions_are_never_compared_across() -> None:
