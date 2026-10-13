@@ -399,7 +399,7 @@ def _uncomparable(status: dict[str, str], old_versions: dict[str, str]) -> list[
 
 
 def _compared_paths(target: str, root: Path, now: dict[str, Any],
-                    was: dict[str, Any]) -> tuple[set[str], int]:
+                    was: dict[str, Any], lang: str = "auto") -> tuple[set[str], int]:
     """(the paths this run can compare, how many baselined paths it did not measure).
 
     A run measures only what it was pointed at. A baselined file outside that
@@ -407,6 +407,9 @@ def _compared_paths(target: str, root: Path, now: dict[str, Any],
     as zero it would print as a gain that never happened, once per file, and
     the hook checks one staged file per run. A measured file that went clean
     has no findings in `now`, so the target itself is added.
+
+    LANG other than "auto" measured only that language's files, so a
+    baselined file of another language is outside the run in the same way.
     """
     rel_target = _rel(target, root)
     if Path(target).is_dir():
@@ -415,6 +418,8 @@ def _compared_paths(target: str, root: Path, now: dict[str, Any],
         in_scope = {p for p in was if p.startswith(prefix)}
     else:
         in_scope = {rel_target}
+    if lang != "auto":
+        in_scope = {p for p in in_scope if _detect_lang(str(root / p)) == lang}
     compared = set(now) | in_scope
     unmeasured = len(set(was) - compared)
     return compared, unmeasured
@@ -597,10 +602,12 @@ def check_raised(old_source: str, new_source: str) -> int:
 
 
 def compare_baseline(checks: list[dict[str, Any]], target: str,
-                     source: str, mode: str, touched: bool = False) -> int:
+                     source: str, mode: str, touched: bool = False,
+                     lang: str = "auto") -> int:
     """jpexit.OK no worse, FINDINGS worse, NOT_RUN cannot compare.
 
     With TOUCHED, TARGET is one file a commit changes: see _CROSS_FILE.
+    LANG is the run's --lang: only that language's files were measured.
     NOT_LOWERED when it is no worse but fixed none of its recorded findings.
     """
     doc = _read_baseline(source, mode)
@@ -616,7 +623,7 @@ def compare_baseline(checks: list[dict[str, Any]], target: str,
     was = doc.get("files", {})
     skipped = _uncomparable(_statuses(checks), doc.get("tools", {}))
     skip = {t for t, _ in skipped}
-    compared, unmeasured = _compared_paths(target, root, now, was)
+    compared, unmeasured = _compared_paths(target, root, now, was, lang)
     worse, deltas = _deltas(compared, now, was, skip)
     _report_comparison(source, skipped, deltas, unmeasured, worse)
     if worse:
