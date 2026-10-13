@@ -8,22 +8,23 @@ WHAT IS CHECKED
     compared whole: tool, status, and each issue's every field, the message
     word for word. A file with only reasoned directives passes with no
     issues. A file that cannot be read is an error naming the exception. The
-    file is read as UTF-8 whatever the locale (a NEL, U+0085, is a line break
-    only when decoded as UTF-8, so the issue's line number shows the codec),
-    and a byte that is not UTF-8 is replaced rather than raised.
+    file is read as UTF-8 whatever the default codec (a NEL, U+0085, is a
+    line break only when decoded as UTF-8, so the issue's line number shows
+    the codec), and a byte that is not UTF-8 is replaced rather than raised.
 
-    The locale case sets LC_CTYPE to C for the read and restores it. Under
-    Python's UTF-8 mode (PYTHONUTF8=1, -X utf8) the locale names no codec, so
-    there the case holds trivially.
+    The default codec is made cp1252 by patching io.text_encoding, which
+    pathlib asks when no encoding is given; a control read shows the patch
+    took. That holds with Python's UTF-8 mode on or off.
 
     python3 tests/test_directives_run.py
 """
 
-import locale
+import io
 import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from unittest import mock
 
 from _harness import check, run
 from jpcheck.directives import run_directive_reason
@@ -75,17 +76,20 @@ def test_an_unreadable_file() -> None:
                "note": f"could not read {gone}: FileNotFoundError"})
 
 
-def test_read_as_utf8_in_any_locale() -> None:
+def cp1252_default(encoding: str | None, stacklevel: int = 2) -> str:
+    """io.text_encoding with cp1252 as the codec a read with none gets."""
+    return encoding or "cp1252"
+
+
+def test_read_as_utf8_whatever_the_default_codec() -> None:
     with tempfile.TemporaryDirectory() as td:
         nel = Path(td) / "nel.sh"
         nel.write_bytes(b"#!/bin/sh\n# x\xc2\x85\n# shellcheck disable=SC2086\n")
-        saved = locale.setlocale(locale.LC_CTYPE)
-        try:
-            locale.setlocale(locale.LC_CTYPE, "C")
+        with mock.patch.object(io, "text_encoding", cp1252_default):
+            check("encoding: CONTROL under the patch a read with no codec decodes as cp1252",
+                  outcome(lambda: nel.read_text().splitlines()[1]), "# xÂ…")
             got = outcome(lambda: run_directive_reason(str(nel)))
-        finally:
-            locale.setlocale(locale.LC_CTYPE, saved)
-        check("encoding: read as UTF-8 under the C locale, so a NEL breaks the line",
+        check("encoding: read as UTF-8 whatever the default codec, so a NEL breaks the line",
               got, {"tool": "directive-reason", "status": "fail", "issues": [issue(str(nel), 4)]})
 
 
