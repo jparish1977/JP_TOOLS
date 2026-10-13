@@ -22,6 +22,7 @@ countable finding).
 """
 
 import contextlib
+import io
 import json
 import os
 import shutil
@@ -30,19 +31,34 @@ import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
+from unittest import mock
 
-from _harness import ROOT, check, check_true, run
-
-CHECK = ROOT / "check.py"
+from _harness import ROOT, check, check_true, load_script, run
 
 DIRTY = "import os\nimport sys\nx = 1\n"  # unused imports: ruff findings to count
 WORSE = "import os\nimport sys\nimport json\nx = 1\n"
 CLEAN = "x = 1\n"
 
 
+check_mod = load_script("check.py")
+
+
 def check_py(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(CHECK), *args],
-                          capture_output=True, text=True, check=False, cwd=str(cwd), env=env)
+    """check.py ARGS run in this process, from CWD with ENV added, as a
+    finished process: in-process so mutation testing sees what it reaches."""
+    out, err = io.StringIO(), io.StringIO()
+    here = os.getcwd()
+    code: int = 0
+    with mock.patch.object(sys, "argv", ["check.py", *args]), mock.patch.dict(os.environ, env or {}), \
+            contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        os.chdir(cwd)
+        try:
+            check_mod.main()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else int(e.code is not None)
+        finally:
+            os.chdir(here)
+    return subprocess.CompletedProcess(list(args), code, out.getvalue(), err.getvalue())
 
 
 @contextlib.contextmanager
@@ -294,8 +310,7 @@ def git_test_touched_never_counts_cross_file_tools() -> None:
     worse, _ = baseline._deltas({"a.py"}, rose, was, set())
     check("but a mypy count that RISES is worse, as any tool's is",
           worse, [("a.py", "mypy", 4, 5)])
-    helptext = " ".join(subprocess.run([sys.executable, str(CHECK), "--help"], capture_output=True,
-                                       text=True, check=True).stdout.split())
+    helptext = " ".join(check_py("--help", cwd=ROOT).stdout.split())
     check_true("--help says both halves: every tool counts against worse",
                "Every tool counts against getting worse" in helptext)
     check_true("  and mypy and phpstan need not fall",
@@ -394,8 +409,8 @@ def git_test_audits_are_reported_and_never_baselined() -> None:
         tools, status = doc["tools"], doc["status"]
         assert isinstance(tools, dict) and isinstance(status, dict)
         check("no audit tool is recorded", sorted(baseline._AUDITS & (set(tools) | set(status))), [])
-        err = __import__("io").StringIO()
-        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(__import__("io").StringIO()):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
             rc = baseline.compare_baseline([audit, ruff], str(r / "clean.py"), str(base), "per-file")
         check("an audit's findings do not fail the verdict", rc, 0)
         check_true("  and are said to be reported and not compared",
