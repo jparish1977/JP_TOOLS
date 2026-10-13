@@ -47,10 +47,14 @@ never wrong.
 
 mutmut also keeps each mutant's verdict until its function's code changes,
 whatever happens to the tests: a function a test newly reaches would stay
-"no tests", and one no test reaches any more would keep its kills, both until
-the nightly. So after mutmut runs, every function whose set of reaching tests
-changed, and whose code did not (that was tested again already), has its
-verdicts cleared, and mutmut runs once more for just those.
+"no tests", one no test reaches any more would keep its kills, and one whose
+tests were edited would keep the old tests' verdicts (a weakened test, its
+kills), all until the nightly. So after mutmut runs, every function whose code
+did not change (that was tested again already) has its verdicts cleared when
+its set of reaching tests changed or any test reaching it is in an edited test
+file (a changed suite, or a suite that names a changed fixture; a change any
+test can read counts every test as edited), and mutmut runs once more for
+just those.
 
 mutants/ is a git worktree of HEAD with an index and NO checked-out files:
 mutmut writes every file in it, and some suites ask git about the checkout, so
@@ -173,8 +177,8 @@ def _suites_naming(root: Path, path: str) -> set[str] | None:
     (a helper is imported, not named), or a data file that no suite names or
     that a helper names (then whoever imports the helper reads it)."""
     name = path.rpartition("/")[2]
-    if name == "conftest.py" or path in ("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini") \
-            or name.endswith(".py"):
+    # A conftest.py is a Python file, so the .py test covers it.
+    if path in ("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini") or name.endswith(".py"):
         return None
     tests = [p for p in _git("-C", str(root), "ls-files", "tests").splitlines() if p.endswith(".py")]
     # Matched as bytes: a file name is ASCII here, and a test file that is not
@@ -228,6 +232,28 @@ def forget_moved_reach(root: Path, stats: Path) -> str:
     return f"{len(changed)} file(s) changed since the traced commit: {len(moved)} test(s) traced again{named}"
 
 
+def edited_tests(root: Path, stats: Path) -> frozenset[str] | None:
+    """The test files whose tests may now judge a mutant differently than when
+    STATS was traced: each changed test file, and each suite that names a
+    changed fixture. None when that is every test: no kept trace, a commit
+    this clone cannot diff against, or a change to a file any test can read
+    (a conftest.py, the configuration, a helper). Read BEFORE
+    forget_moved_reach, which may remove STATS."""
+    try:
+        since = json.loads(stats.read_bytes()).get("git_commit")
+        changed = set(_git("-C", str(root), "diff", "--name-only", str(since)).splitlines())
+    except (FileNotFoundError, ValueError, GateError):  # reason: nothing to diff against, so every test counts as edited
+        return None
+    edited = {p for p in changed if _is_suite(p)}
+    for p in changed:
+        if _shared_by_tests(p):
+            naming = _suites_naming(root, p)
+            if naming is None:
+                return None
+            edited |= naming
+    return frozenset(edited)
+
+
 def _reach(stats: Path) -> dict[str, frozenset[str]] | None:
     """Which tests reach each function, as STATS records it; None when there
     is no readable record."""
@@ -255,22 +281,28 @@ def _hashes(mutants: Path) -> dict[str, str]:
 
 
 def reset_moved_verdicts(mutants: Path, before: dict[str, frozenset[str]] | None,
-                         hashes_before: dict[str, str]) -> tuple[int, int]:
-    """Clear the verdicts of every function whose test reach changed in the
-    run just made, so the next run tests them again; return (verdicts,
+                         hashes_before: dict[str, str],
+                         edited: frozenset[str] | None) -> tuple[int, int]:
+    """Clear the verdicts of every function whose tests may now judge it
+    differently, so the next run tests them again; return (verdicts,
     functions) cleared. mutmut keeps a verdict until the function's code
-    changes, so a function a test newly reaches would stay "no tests", and one
-    a test no longer reaches would keep its kills. A function whose code
+    changes, whatever happens to its tests: a function a test newly reaches
+    would stay "no tests", one a test no longer reaches would keep its kills,
+    and one whose tests were EDITED would keep the verdicts the old tests gave
+    (a weakened test, its kills). So a function counts as moved when its set
+    of reaching tests changed, or when any test now reaching it is in an
+    EDITED file (edited_tests; None: every test). A function whose code
     changed (or that is new) was tested by that run already. With no reach
     recorded before it, every other function counts as moved."""
     after = _reach(mutants / STATS) or {}
     hashes = _hashes(mutants)
     fresh = {fn for fn, h in hashes.items() if hashes_before.get(fn) != h}
-    if before is None:
+    if before is None or edited is None:
         moved = (hashes.keys() | after.keys()) - fresh
     else:
         moved = {fn for fn in before.keys() | after.keys()
-                 if before.get(fn, frozenset()) != after.get(fn, frozenset())} - fresh
+                 if before.get(fn, frozenset()) != after.get(fn, frozenset())
+                 or any(t.partition("::")[0] in edited for t in after.get(fn, frozenset()))} - fresh
     verdicts = 0
     functions: set[str] = set()
     for meta, _ in _metas(mutants):
@@ -310,11 +342,12 @@ def run(root: Path, full: bool, children: int) -> None:
     mutants = prepare(root)
     before = _reach(mutants / STATS)
     hashes_before = _hashes(mutants)
+    edited = edited_tests(root, mutants / STATS)
     print(f"mutmut-gate: {forget_moved_reach(root, mutants / STATS)}")
     _mutmut_run(root, children)
-    verdicts, functions = reset_moved_verdicts(mutants, before, hashes_before)
+    verdicts, functions = reset_moved_verdicts(mutants, before, hashes_before, edited)
     if verdicts:
-        print(f"mutmut-gate: test reach moved for {functions} function(s): "
+        print(f"mutmut-gate: test reach moved or tests edited for {functions} function(s): "
               f"their {verdicts} verdict(s) tested again")
         _mutmut_run(root, children)
 
