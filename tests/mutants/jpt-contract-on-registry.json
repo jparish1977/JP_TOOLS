@@ -13,7 +13,7 @@
     },
     {
       "name": "a check with no runner loses its own name",
-      "edits": [["            checks.append({\"tool\": name, \"status\": \"unknown\",", "            checks.append({\"tool\": \"?\", \"status\": \"unknown\","]],
+      "edits": [["    return {\"tool\": name, \"status\": \"unknown\",", "    return {\"tool\": \"?\", \"status\": \"unknown\","]],
       "target": "a check that did not run still names its tool, with a note"
     },
     {
