@@ -58,6 +58,9 @@ _C_OPEN = r"(?://|/\*+|^\s*\*)\s*"
 # all honour; a closing `*/` is not part of it.
 _DASHES = r"--\s*(?P<why>.*?)\s*(?:\*/)?\s*$"
 
+# Codec names fold case, so "utf-8" and "UTF-8" name the same codec.
+_UTF8 = "utf-8"
+
 
 class Directive:
     """One kind of suppression directive: how to find it, and its tool's reason form."""
@@ -165,7 +168,7 @@ def run_directive_reason(target: str) -> dict[str, Any]:
     """
     lang = _detect_lang(target)
     try:
-        text = Path(target).read_text(encoding="utf-8", errors="replace")
+        text = Path(target).read_text(encoding=_UTF8, errors="replace")
     except OSError as exc:
         return {"tool": "directive-reason", "status": "error", "issues": [],
                 "note": f"could not read {target}: {exc.__class__.__name__}"}
