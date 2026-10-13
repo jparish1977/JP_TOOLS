@@ -489,7 +489,7 @@ def test_verdicts_of_moved_reach_are_cleared() -> None:
                   "pkg.m.x_edited": frozenset({"t1"})}
         _stats(mutants, {"pkg.m.x_new": ["t1"], "pkg.m.x_same": ["t1"], "pkg.m.x_edited": ["t2"]})
         said = gate.reset_moved_verdicts(mutants, before, {**{f"pkg.m.{k}": v for k, v in hashes.items()},
-                                                           "pkg.m.x_edited": "old"})
+                                                           "pkg.m.x_edited": "old"}, frozenset())
         check("newly reached (no tests) and no longer reached (killed): cleared, 3 verdicts of 2 functions",
               said, (3, 2))
         check("  each one", _codes(meta), {
@@ -505,7 +505,60 @@ def test_verdicts_of_moved_reach_are_cleared() -> None:
               gate.reset_moved_verdicts(mutants, {"pkg.m.x_new": frozenset({"t1"}),
                                                   "pkg.m.x_same": frozenset({"t1"}),
                                                   "pkg.m.x_edited": frozenset({"t2"})},
-                                        {f"pkg.m.{k}": v for k, v in hashes.items()}), (0, 0))
+                                        {f"pkg.m.{k}": v for k, v in hashes.items()}, frozenset()), (0, 0))
+
+
+def test_verdicts_reached_by_an_edited_test_are_cleared() -> None:
+    """The same tests reach a function before and after, but one of them was
+    edited: its verdicts are tested again, since the edited test may now kill
+    a survivor or have stopped killing. Every test edited (None): all of them."""
+    with tempfile.TemporaryDirectory() as td:
+        mutants = Path(td)
+        hashes = {"x_by_edited": "1", "x_by_other": "2", "x_by_both": "3"}
+        same = {"pkg.m.x_by_edited": frozenset({"tests/test_e.py::t"}),
+                "pkg.m.x_by_other": frozenset({"tests/test_o.py::t"}),
+                "pkg.m.x_by_both": frozenset({"tests/test_o.py::t", "tests/test_e.py::K::t"})}
+        verdicts: dict[str, int | None] = {"pkg.m.x_by_edited__mutmut_1": 0, "pkg.m.x_by_other__mutmut_1": 0,
+                                           "pkg.m.x_by_both__mutmut_1": 1}
+        meta = _plant(mutants, "pkg/m.py", hashes, verdicts)
+        _stats(mutants, {k: sorted(v) for k, v in same.items()})
+        full = {f"pkg.m.{k}": v for k, v in hashes.items()}
+        check("tests/test_e.py edited: the two functions it reaches are cleared, the other kept",
+              (gate.reset_moved_verdicts(mutants, same, full, frozenset({"tests/test_e.py"})), _codes(meta)),
+              ((2, 2), {"pkg.m.x_by_edited__mutmut_1": None, "pkg.m.x_by_other__mutmut_1": 0,
+                        "pkg.m.x_by_both__mutmut_1": None}))
+        meta = _plant(mutants, "pkg/m.py", hashes, verdicts)
+        check("nothing edited: nothing cleared",
+              gate.reset_moved_verdicts(mutants, same, full, frozenset()), (0, 0))
+        check("every test edited (None): all cleared",
+              gate.reset_moved_verdicts(mutants, same, full, None), (3, 3))
+
+
+def test_edited_tests_names_the_changed_suites_and_fixture_readers() -> None:
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        traced = _commit(root, {"tests/test_a.py": "a = 1\n", "tests/test_b.py": 'F = FIX / "help.txt"\n',
+                                "tests/test_c.py": "c = 1\n", "tests/fixtures/help.txt": "1\n",
+                                "tests/conftest.py": "x = 1\n", "lib.py": "y = 1\n"}, "traced")
+        stats = Path(td) / "stats.json"
+        stats.write_text(json.dumps({"git_commit": traced}), encoding="utf-8")
+        _commit(root, {"tests/test_a.py": "a = 2\n", "tests/fixtures/help.txt": "2\n", "lib.py": "y = 2\n"},
+                "a suite, a fixture and a source file")
+        check("the changed suite and the fixture's reader, not the source file",
+              gate.edited_tests(root, stats), frozenset({"tests/test_a.py", "tests/test_b.py"}))
+        _commit(root, {"tests/conftest.py": "x = 2\n"}, "conftest")
+        check("a conftest.py changed: every test (None)", gate.edited_tests(root, stats), None)
+        stats.write_text(json.dumps({"git_commit": "0" * 40}), encoding="utf-8")
+        check("a commit this clone does not have: every test", gate.edited_tests(root, stats), None)
+        stats.write_text("{ not json", encoding="utf-8")
+        check("an unreadable trace: every test", gate.edited_tests(root, stats), None)
+        stats.unlink()
+        check("no trace kept: every test", gate.edited_tests(root, stats), None)
+        stats.write_text(json.dumps({"git_commit": _head(root)}), encoding="utf-8")
+        check("nothing changed since: no test", gate.edited_tests(root, stats), frozenset())
 
 
 def test_reach_compared_as_sets_an_empty_one_included() -> None:
@@ -520,7 +573,7 @@ def test_reach_compared_as_sets_an_empty_one_included() -> None:
                        "a.x__mutmut_odd__mutmut_1": 1})
         _stats(mutants, {"a.x_e": [], "a.x": ["t2"]})
         said = gate.reset_moved_verdicts(mutants, {"a.x_d": frozenset(), "a.x": frozenset({"t1"})},
-                                         {"a.x_e": "1", "a.x_d": "2", "a.x__mutmut_odd": "3"})
+                                         {"a.x_e": "1", "a.x_d": "2", "a.x__mutmut_odd": "3"}, frozenset())
         check("empty reach on either side is no reach: not moved; the odd key follows mutmut's split",
               (said, _codes(meta)),
               ((2, 1), {"a.x_e__mutmut_1": 33, "a.x_d__mutmut_1": 33, "a.x__mutmut_1": None,
@@ -534,7 +587,7 @@ def test_verdicts_cleared_in_every_meta_are_counted() -> None:
         _plant(mutants, "b.py", {"x_g": "1"}, {"b.x_g__mutmut_1": 0})
         _stats(mutants, {"a.x_f": ["t"], "b.x_g": ["t"]})
         check("two files: their cleared verdicts and functions summed",
-              gate.reset_moved_verdicts(mutants, {}, {"a.x_f": "1", "b.x_g": "1"}), (3, 2))
+              gate.reset_moved_verdicts(mutants, {}, {"a.x_f": "1", "b.x_g": "1"}, frozenset()), (3, 2))
 
 
 def test_no_reach_before_clears_all_but_what_was_just_tested() -> None:
@@ -545,15 +598,16 @@ def test_no_reach_before_clears_all_but_what_was_just_tested() -> None:
         _stats(mutants, {"a.x_f": ["t"]})
         check("no reach recorded before: every verdict whose code did not change is cleared, "
               "a function no test reaches included",
-              gate.reset_moved_verdicts(mutants, None, {"a.x_f": "1", "a.x_g": "old", "a.x_h": "3"}), (2, 2))
+              gate.reset_moved_verdicts(mutants, None, {"a.x_f": "1", "a.x_g": "old", "a.x_h": "3"}, frozenset()),
+              (2, 2))
         check("  the edited function's fresh verdict stays", _codes(meta),
               {"a.x_f__mutmut_1": None, "a.x_g__mutmut_1": 0, "a.x_h__mutmut_1": None})
         meta = _plant(mutants, "a.py", {"x_f": "1"}, {"a.x_f__mutmut_1": 1})
         check("a run from nothing (--full): every verdict is fresh, none cleared",
-              gate.reset_moved_verdicts(mutants, None, {}), (0, 0))
+              gate.reset_moved_verdicts(mutants, None, {}, frozenset()), (0, 0))
         (mutants / gate.STATS).unlink()
         check("no reach after either: read as none",
-              gate.reset_moved_verdicts(mutants, {"a.x_f": frozenset({"t"})}, {"a.x_f": "1"}), (1, 1))
+              gate.reset_moved_verdicts(mutants, {"a.x_f": frozenset({"t"})}, {"a.x_f": "1"}, frozenset()), (1, 1))
         (mutants / "hook.sh.meta").write_text("not json", encoding="utf-8")
         check_true("  a non-Python .meta is not read", gate._metas(mutants) == [(meta, "a")])
 
@@ -589,7 +643,8 @@ def test_run_tests_moved_reach_again() -> None:
         check("a test newly reached a function: mutmut ran again, with its verdict cleared",
               calls, [{"a.x_f__mutmut_1": 33}, {"a.x_f__mutmut_1": None}])
         check("  the second run asked exactly as the first", asked[1], asked[0])
-        check_true("  and says so", "test reach moved for 1 function(s): their 1 verdict(s) tested again"
+        check_true("  and says so",
+                   "test reach moved or tests edited for 1 function(s): their 1 verdict(s) tested again"
                    in out.getvalue())
         calls.clear()
         with mock.patch.object(gate.subprocess, "call", side_effect=fake):
