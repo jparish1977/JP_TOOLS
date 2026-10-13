@@ -193,6 +193,8 @@ def _collect_files(directory: str) -> tuple[dict[str, list[str]], dict[str, int]
 # A line splits at its FIRST `#`, so a path containing `#` cannot be written as
 # a glob: everything after that `#` is read as the reason.
 _IGNORE_FILE = ".jp-tools-ignore"
+# Codec names fold case, so "utf-8" and "UTF-8" name the same codec.
+_UTF8 = "utf-8"
 Ignore = tuple[str, str]                  # glob, reason
 
 
@@ -204,7 +206,7 @@ def load_ignores(root: Path) -> list[Ignore]:
     """(glob, reason) for each entry in ROOT/.jp-tools-ignore; [] when there is none."""
     path = root / _IGNORE_FILE
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding=_UTF8)
     except FileNotFoundError:
         # reason: no .jp-tools-ignore is no entries, as the docstring says
         return []
