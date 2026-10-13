@@ -25,6 +25,9 @@ _ESLINT_DISABLE = re.compile(r"eslint-disable(?:-next-line|-line)?\s+([^\s*]+)")
 # What a missing JS tool tells the reader to run: package.json declares them.
 NPM_INSTALL = "run: npm install in JP_TOOLS"
 
+# Codec names fold case, so "utf-8" and "UTF-8" name the same codec.
+_UTF8 = "utf-8"
+
 
 def _eslint_source_files(target: str) -> list[Path]:
     """The file itself, or every .js/.mjs/.html under a directory outside vendored code."""
@@ -43,7 +46,7 @@ def _eslint_source_files(target: str) -> list[Path]:
 def _suppressions_in(fp: Path) -> list[dict[str, Any]]:
     """Each eslint-disable comment in one file, as a warning naming its rule and reason."""
     try:
-        text = fp.read_text(encoding="utf-8", errors="replace")
+        text = fp.read_text(encoding=_UTF8, errors="replace")
     except OSError:
         # reason: a source file that cannot be read carries no acknowledged
         # suppressions to list; the linter that reads it reports the read
