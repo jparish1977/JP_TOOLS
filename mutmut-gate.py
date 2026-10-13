@@ -320,16 +320,39 @@ def reset_moved_verdicts(mutants: Path, before: dict[str, frozenset[str]] | None
     return verdicts, len(functions)
 
 
-def _mutmut_run(root: Path, children: int) -> None:
+def _mutmut_run(root: Path, children: int, names: list[str]) -> None:
     """mutmut run, its Python first on PATH: the git hooks start `python3`,
-    and in mutants/ every script imports mutmut."""
+    and in mutants/ every script imports mutmut. NAMES, when given, are the
+    only mutants it runs, and its clean run then covers only the tests that
+    reach them instead of the whole suite in one process."""
     env = dict(os.environ, PATH=os.pathsep.join(
         [str(Path(sys.executable).parent), os.environ.get("PATH", "")]))
     # call, not run: only the exit code is read, and a nonzero one is ours to name.
-    rc = subprocess.call([sys.executable, "-m", "mutmut", "run", "--max-children", str(children)],
+    rc = subprocess.call([sys.executable, "-m", "mutmut", "run", "--max-children", str(children), *names],
                          cwd=root, env=env)
     if rc != 0:
         raise GateError(f"mutmut run exited {rc}")
+
+
+# The most a named run's mutant names may take on its command line. Linux
+# allows about 2 MiB for arguments and environment together; past this the
+# run goes unnamed (every pending mutant, the whole suite as its clean run),
+# which tests the same mutants, more slowly.
+NAMES_MAX_BYTES = 256 * 1024
+
+
+def _cleared(mutants: Path) -> list[str]:
+    """Every mutant with no verdict, as mutmut keys it: after a run, exactly
+    the ones reset_moved_verdicts just cleared."""
+    return sorted(k for meta, _ in _metas(mutants)
+                  for k, code in json.loads(meta.read_bytes()).get("exit_code_by_key", {}).items()
+                  if code is None)
+
+
+def _named(names: list[str]) -> list[str]:
+    """NAMES for a named run, or none (an unnamed run) when they would not
+    fit on one command line."""
+    return names if sum(len(n) + 1 for n in names) <= NAMES_MAX_BYTES else []
 
 
 def run(root: Path, full: bool, children: int) -> None:
@@ -344,12 +367,14 @@ def run(root: Path, full: bool, children: int) -> None:
     hashes_before = _hashes(mutants)
     edited = edited_tests(root, mutants / STATS)
     print(f"mutmut-gate: {forget_moved_reach(root, mutants / STATS)}")
-    _mutmut_run(root, children)
+    _mutmut_run(root, children, [])
     verdicts, functions = reset_moved_verdicts(mutants, before, hashes_before, edited)
     if verdicts:
+        names = _named(_cleared(mutants))
+        how = f"by name, {len(names)} mutant(s)" if names else "unnamed: too many names for one command line"
         print(f"mutmut-gate: test reach moved or tests edited for {functions} function(s): "
-              f"their {verdicts} verdict(s) tested again")
-        _mutmut_run(root, children)
+              f"their {verdicts} verdict(s) tested again ({how})")
+        _mutmut_run(root, children, names)
 
 
 def results_text(root: Path, source: str | None) -> str:
