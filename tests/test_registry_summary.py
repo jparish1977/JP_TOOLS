@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 JP_TOOLS/tests/test_registry_summary.py
-jpcheck.registry's _run_tools and _summarize, whole documents compared.
+jpcheck.registry's _no_runner, _run_tools and _summarize, whole documents
+compared.
 
 WHAT IS CHECKED
     - A tool name with no runner is a check of its own: tool, status
-      unknown, no issues, and a note naming it.
+      unknown, no issues, and a note naming it; _no_runner builds it, and
+      _run_tools hands it back for such a name.
     - The summary counts: every issue in total; errors and warnings from
       the issues not exempt; exempt as the difference; fixable and
       fixable_unsafe from every issue, exempt ones included. A check with no
@@ -18,7 +20,13 @@ import sys
 from typing import Any
 
 from _harness import check, run
-from jpcheck.registry import _run_tools, _summarize
+from jpcheck.registry import _no_runner, _run_tools, _summarize
+
+
+def test_the_no_runner_check() -> None:
+    check("_no_runner: the whole check", _no_runner("no-such"),
+          {"tool": "no-such", "status": "unknown", "issues": [],
+           "note": "No runner for 'no-such'"})
 
 
 def test_a_name_with_no_runner() -> None:
