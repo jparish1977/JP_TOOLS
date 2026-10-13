@@ -51,11 +51,14 @@ old_commits() {  # ARCHIVE's commits that no branch or tag of REPO reaches
            <(git -C "$repo" rev-list --branches --tags | sort -u)
 }
 reaching() {  # each ref of REPO, not a branch or tag, that reaches one: "SHA REF"
+  # Counted whole, never `| head -n 1 | grep -q`: under pipefail the early
+  # exit kills the writers, and a ref that does reach the old history reads
+  # as one that does not, at random (two listings of one repo differed).
+  local sha ref n
   git -C "$repo" for-each-ref --format='%(objectname) %(refname)' | while read -r sha ref; do
     case "$ref" in refs/heads/*|refs/tags/*) continue ;; esac
-    if git -C "$repo" rev-list "$ref" | sort -u | comm -12 - "$t/old" | head -n 1 | grep -q .; then
-      printf '%s %s\n' "$sha" "$ref"
-    fi
+    n=$(comm -12 <(git -C "$repo" rev-list "$ref" | sort -u) "$t/old" | wc -l)
+    if [ "$n" -gt 0 ]; then printf '%s %s\n' "$sha" "$ref"; fi
   done
 }
 
