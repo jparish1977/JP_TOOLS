@@ -249,9 +249,11 @@ jobs:
 
       # THE BASELINE ONLY FALLS. A change that raises a count in
       # quality-baseline.json would pass the step above by construction, so it
-      # is compared with the base's copy here, and refused unless one of its
-      # commits says why on a line 'LINT-DEBT-OK: <reason>', as the pre-commit
-      # hook asks of a commit that raises one.
+      # is compared with the base's copy here, and refused unless a commit
+      # that changes quality-baseline.json says why on a line
+      # 'LINT-DEBT-OK: <reason>', as the pre-commit hook asks of the commit
+      # that raises one. A reason in a commit that does not touch it is
+      # about something else.
       - name: The baseline raises no count over the base's
         if: steps.present.outputs.found == 'yes'
         shell: bash
@@ -270,7 +272,7 @@ jobs:
           git show "$BASE:quality-baseline.json" > "$RUNNER_TEMP/base-baseline.json"
           rc=0
           python ../JP_TOOLS/check.py quality-baseline.json --raised-over "$RUNNER_TEMP/base-baseline.json" || rc=$?
-          reasons=$(git log --format=%B "$BASE..HEAD" | grep -E '^LINT-DEBT-OK:[[:space:]]*[^[:space:]]' || true)
+          reasons=$(git log --format=%B "$BASE..HEAD" -- quality-baseline.json | grep -E '^LINT-DEBT-OK:[[:space:]]*[^[:space:]]' || true)
           if [ "$rc" -eq 1 ] && [ -n "$reasons" ]; then
             echo "A commit in this change gives the reason, so the raise is let through:"
             echo "$reasons"

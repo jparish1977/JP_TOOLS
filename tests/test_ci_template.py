@@ -360,16 +360,20 @@ def _baseline(errors: int) -> str:
 
 
 def raised_step(base_errors: int | None, head_errors: int | None, message: str = "change",
-                base: str | None = None) -> tuple[int, str]:
+                base: str | None = None, after: str | None = None) -> tuple[int, str]:
     """The raised step's exit code and output, in a repo whose base commit has
-    a baseline recording BASE_ERRORS (none when None) and whose head commit,
-    with MESSAGE, records HEAD_ERRORS (none when None). BASE overrides the
-    base commit given to the step."""
+    a baseline recording BASE_ERRORS (none when None) and whose next commit,
+    with MESSAGE, records HEAD_ERRORS (none when None). AFTER, when given, is
+    the message of one more commit that leaves the baseline alone. BASE
+    overrides the base commit given to the step."""
     with fake_tools(keep_path=True, named=PASS_THROUGH) as (work, _):
         (work.parent / "JP_TOOLS").symlink_to(ROOT)
         git = ["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
         subprocess.run([*git, "init", "-q", "."], cwd=work, check=True)
-        for errors, msg in ((base_errors, "base"), (head_errors, message)):
+        commits = [(base_errors, "base"), (head_errors, message)]
+        if after is not None:
+            commits.append((None, after))
+        for errors, msg in commits:
             if errors is not None:
                 (work / "quality-baseline.json").write_text(_baseline(errors), encoding="utf-8")
             (work / "f.txt").write_text(msg, encoding="utf-8")
@@ -395,6 +399,12 @@ def test_a_raised_baseline_is_refused_without_a_reason() -> None:
                rc == 0 and "LINT-DEBT-OK: ruff upgraded" in out)
     rc, out = raised_step(3, 4, "re-record\n\nLINT-DEBT-OK:")
     check("  but not with an empty reason", rc, 1)
+    rc, out = raised_step(3, 4, after="unrelated\n\nLINT-DEBT-OK: about another file")
+    check_true("  nor with a reason in a commit that leaves the baseline alone",
+               rc == 1 and "about another file" not in out)
+    rc, out = raised_step(3, 4, "re-record\n\nLINT-DEBT-OK: ruff upgraded", after="later")
+    check_true("  while the raising commit's reason still counts with a later commit on top",
+               rc == 0 and "LINT-DEBT-OK: ruff upgraded" in out)
     rc, out = raised_step(None, 4)
     check_true("a base with no baseline: this change adds it, nothing to compare",
                rc == 0 and "this change adds it" in out)

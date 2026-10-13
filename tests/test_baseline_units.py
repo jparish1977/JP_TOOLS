@@ -251,6 +251,21 @@ def test_compared_paths() -> None:
         check("paths: a file covers itself and what was measured",
               paths(top / "f.py", top, {"h.py": {}}, {"f.py": {}, "g.py": {}}),
               ({"f.py", "h.py"}, 1))
+        (top / "s.sh").write_text("", encoding="utf-8")
+        (top / "sub" / "t.sh").write_text("", encoding="utf-8")
+        def lang_paths(target: Path, now: dict[str, Any], was: dict[str, Any], lang: str) -> Any:
+            got, out, err = _captured(baseline._compared_paths, str(target), top, now, was, lang)
+            return got if (out, err) == ("", "") else (got, out, err)
+
+        was: dict[str, Any] = {"f.py": {}, "s.sh": {}, "sub/t.sh": {}, "gone.sh": {}}
+        check("paths: --lang keeps only that language's baselined files, the rest unmeasured",
+              lang_paths(top, {}, was, "shell"), ({"s.sh", "sub/t.sh"}, 2))
+        check("paths: --lang auto keeps them all",
+              lang_paths(top, {}, was, "auto"), (set(was), 0))
+        check("paths: a file of another language than --lang is not compared",
+              lang_paths(top / "f.py", {}, {"f.py": {}}, "shell"), (set(), 1))
+        check("paths: a file of that language is",
+              lang_paths(top / "s.sh", {}, {"s.sh": {}}, "shell"), ({"s.sh"}, 0))
 
 
 def test_per_file_checks() -> None:

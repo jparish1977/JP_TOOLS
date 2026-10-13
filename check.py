@@ -195,7 +195,7 @@ def main() -> None:
     # IS the per-file measurement, and a directory was measured file by file.
     if args.baseline:
         sys.exit(compare_baseline(output["checks"], target, args.baseline, "per-file",
-                                  touched=args.touched))
+                                  touched=args.touched, lang=args.lang))
     sys.exit(_exit_code(output["summary"], output["checks"]))
 
 

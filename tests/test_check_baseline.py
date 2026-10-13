@@ -503,6 +503,24 @@ def git_test_a_baseline_may_only_fall() -> None:
                    p.returncode == 2 and p.stderr.startswith(f"baseline: cannot read {new}: "))
 
 
+def git_test_a_lang_run_compares_only_that_language() -> None:
+    """--lang measures one language's files, so another language's baselined
+    file was not looked at: counted as not measured, never a gain to zero."""
+    with repo() as r:
+        base = r / "base.json"
+        check_py(".", "--record-baseline", str(base), cwd=r)
+        (r / "b.sh").write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+        p = check_py(".", "--lang", "shell", "--baseline", str(base), cwd=r)
+        check("a --lang shell run against a python file's baseline passes", p.returncode, 0)
+        check_true("  printing no line for the python file it never measured",
+                   "dirty.py" not in p.stdout)
+        check_true("  and counting it as not measured",
+                   "baseline: 1 other baselined file(s) not measured in this run" in p.stdout)
+        p = check_py(".", "--lang", "python", "--baseline", str(base), cwd=r)
+        check_true("--lang python still compares it", p.returncode == 0
+                   and "baseline: no change against base.json" in p.stdout and "not measured" not in p.stdout)
+
+
 def git_test_audits_are_reported_and_never_baselined() -> None:
     """An audit's count moves when an advisory is published, with no change to
     any file, so it is neither recorded nor part of a baseline's verdict."""
