@@ -7,8 +7,8 @@ WHAT IS CHECKED
     load_ignores: the (glob, reason) list exact, comments and blank lines
     skipped wherever they fall, a line split at its FIRST '#', and a line
     with no reason refused with the whole message, its line number counted
-    from 1. The file is read as UTF-8 under the C locale too (a
-    non-ASCII reason would not decode as ASCII). With no file, [].
+    from 1. The file is read as UTF-8 whatever the default codec (a
+    non-ASCII reason decodes differently as cp1252). With no file, [].
 
     ignored_by: the first entry whose glob matches the path relative to the
     root; None for a path no entry matches.
@@ -17,18 +17,19 @@ WHAT IS CHECKED
     matches, and each dropped file is returned with its relative path, glob
     and reason.
 
-    The locale case sets LC_CTYPE to C for the read and restores it. Under
-    Python's UTF-8 mode (PYTHONUTF8=1, -X utf8) the locale names no codec, so
-    there the case holds trivially.
+    The default codec is made cp1252 by patching io.text_encoding, which
+    pathlib asks when no encoding is given; a control read shows the patch
+    took. That holds with Python's UTF-8 mode on or off.
 
     python3 tests/test_files_ignores.py
 """
 
-import locale
+import io
 import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from unittest import mock
 
 from _harness import check, run
 from jpcheck.files import _drop_ignored, ignored_by, load_ignores
@@ -80,16 +81,20 @@ def test_a_bad_line_is_refused() -> None:
           refusal("ok/* # fine\n  # \n#only\n   #  \n x# \n", 5, "x#"), "as expected")
 
 
-def test_read_as_utf8_in_any_locale() -> None:
+def cp1252_default(encoding: str | None, stacklevel: int = 2) -> str:
+    """io.text_encoding with cp1252 as the codec a read with none gets."""
+    return encoding or "cp1252"
+
+
+def test_read_as_utf8_whatever_the_default_codec() -> None:
     with tempfile.TemporaryDirectory() as td:
-        (Path(td) / ".jp-tools-ignore").write_bytes("oob/* # café menus\n".encode())
-        saved = locale.setlocale(locale.LC_CTYPE)
-        try:
-            locale.setlocale(locale.LC_CTYPE, "C")
+        path = Path(td) / ".jp-tools-ignore"
+        path.write_bytes("oob/* # café menus\n".encode())
+        with mock.patch.object(io, "text_encoding", cp1252_default):
+            check("load: CONTROL under the patch a read with no codec decodes as cp1252",
+                  outcome(path.read_text), "oob/* # cafÃ© menus\n")
             got = outcome(lambda: load_ignores(Path(td)))
-        finally:
-            locale.setlocale(locale.LC_CTYPE, saved)
-        check("load: read as UTF-8 under the C locale", got, [("oob/*", "café menus")])
+        check("load: read as UTF-8 whatever the default codec", got, [("oob/*", "café menus")])
 
 
 IGNORES = [("src/*.py", "generated"), ("oob/*", "vendor pages"), ("oob/a.py", "never reached")]
