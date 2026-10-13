@@ -1,0 +1,98 @@
+# JP_TOOLS mutation nightly -- installed by init-ci.py beside check.yml, as
+# .github/workflows/mutmut-nightly.yml. See "--- Mutation testing ---" at the
+# top of check.yml for what a repo provides; with the repository variable
+# MUTMUT_STATE_VOLUME unset this workflow does nothing.
+#
+# The full mutmut run over the default branch, and its state into this repo's
+# runner volume, which check.yml's mutation job reads (read-only) to re-test
+# only what a pull request changed. Run it by hand (workflow_dispatch) once
+# when adopting: until a state exists, the mutation job cannot judge.
+#
+# What it leaves, /mutmut-state/current/:
+#   mutants/       mutmut's state, without mutmut-gate's git link (a PR job's
+#                  prepare rebuilds it) and without anything a mutant wrote
+#                  that git does not track
+#   baseline.json  survivors and untested mutants per function
+# A new state is written beside the old one and renamed in: a PR job reads the
+# old state or the new one, never half of each.
+#
+# THE SCHEDULE IS THE BOX'S, NOT ONLY THIS REPO'S. Every nightly on one
+# runner shares its host, so pick an hour that does not overlap the others
+# there and agree it with whoever runs the host. --cpus and --memory hold the
+# run to its share; MUTMUT_WORKERS (default 8) should match --cpus.
+#
+# timeout-minutes guards against a hung run, not a slow one: a full run takes
+# as long as the repo's suites times its mutants, and a limit cut below that
+# loses the whole night's work. Raise it past the measured run, never under.
+
+name: Mutation (nightly)
+
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  full-run:
+    name: mutmut, every mutant, into the state volume
+    if: vars.MUTMUT_STATE_VOLUME != ''
+    runs-on: fleet-ci
+    timeout-minutes: 720
+    container:
+      image: fleet-ci:current
+      options: --cpus ${{ vars.MUTMUT_WORKERS || '8' }} --memory 8g -v ${{ vars.MUTMUT_STATE_VOLUME }}:/mutmut-state
+    env:
+      MUTMUT_WORKERS: ${{ vars.MUTMUT_WORKERS || '8' }}
+    # As in check.yml: this repo at project/, JP_TOOLS beside it.
+    defaults:
+      run:
+        working-directory: project
+    steps:
+      - name: CI does not run as root
+        run: |
+          echo "user: $(id -un) uid $(id -u)"
+          if [ "$(id -u)" = 0 ]; then echo "CI is running as root: use the fleet-ci label" >&2; exit 1; fi
+      - name: The volume is mounted and writable
+        run: |
+          probe=/mutmut-state/.write-probe-$$
+          if ! touch "$probe"; then
+            echo "The state volume is not mounted read-write at /mutmut-state" >&2
+            exit 2
+          fi
+          rm -f "$probe"
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          path: project
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: JP_TOOLS_REPOSITORY is set, off GitHub
+        if: ${{ !vars.JP_TOOLS_REPOSITORY && github.server_url != 'https://github.com' }}
+        run: |
+          echo "Set the repository variable JP_TOOLS_REPOSITORY to JP_TOOLS' owner/name on this forge" >&2
+          echo "(and the secret JP_TOOLS_TOKEN if it is not public): mutmut-gate.py is JP_TOOLS'." >&2
+          exit 1
+      - name: Check out JP_TOOLS
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}
+          token: ${{ secrets.JP_TOOLS_TOKEN || github.token }}
+          path: JP_TOOLS
+      - name: The project's tools for mutmut
+        shell: bash
+        run: |
+          if [ ! -x tests/mutation-setup ]; then
+            echo "No executable tests/mutation-setup: add one that installs what a mutmut run needs" >&2
+            echo "(mutmut and pytest at this repo's pins, and whatever its tests import)." >&2
+            exit 1
+          fi
+          ./tests/mutation-setup
+      - name: Every mutant
+        run: python ../JP_TOOLS/mutmut-gate.py run --full --max-children "$MUTMUT_WORKERS"
+      - name: Survivors per function
+        run: |
+          python -m mutmut results --all true > mutmut-results.txt
+          python ../JP_TOOLS/mutmut-gate.py record baseline.json --results mutmut-results.txt
+      - name: Into the volume
+        run: bash ../JP_TOOLS/ci-image/publish-mutmut-state.sh /mutmut-state

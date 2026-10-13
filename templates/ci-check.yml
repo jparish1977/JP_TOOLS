@@ -18,6 +18,25 @@
 # Code under a lab/ directory anywhere is exempt (METHODOLOGY 2.9), as in
 # check.py's own lab rule: tools/lab/, a top-level lab/, pb/lab/.
 #
+# --- Mutation testing (Python, mutmut) ---
+# A repo that configures mutmut ([tool.mutmut] in pyproject.toml) is mutation
+# tested by JP_TOOLS' mutmut-gate.py: a pull request re-tests only the
+# functions it changed, against the state a nightly full run keeps
+# (mutmut-nightly.yml, which init-ci.py installs beside this file). A function
+# with more survivors, or more mutants no test reaches, than the state's
+# baseline fails; a new function fails on any. It needs:
+#   - a runner volume holding THIS repo's state, one per repo, made and
+#     admitted to the runner by whoever administers it; its name in the
+#     repository variable MUTMUT_STATE_VOLUME. With [tool.mutmut] and the
+#     variable unset, the tests job fails: a test that did not run is not a
+#     pass.
+#   - an executable tests/mutation-setup that installs everything the run
+#     needs (mutmut and pytest at the repo's pins, and whatever its tests
+#     import), as tests/run owns the test run's dependencies.
+#   - one nightly run, by hand (workflow_dispatch) the first time: until a
+#     state exists, the mutation job fails as could-not-look rather than pass.
+# MUTMUT_WORKERS (default 8) is how many mutants run at once.
+#
 # --- Where JP_TOOLS comes from ---
 # On GitHub, the public copy, unless the repository variable
 # JP_TOOLS_REPOSITORY names another. Anywhere else the variable is REQUIRED:
@@ -370,6 +389,21 @@ jobs:
             echo "No code in this repo outside lab/ directories: no tests to run."
           fi
 
+      # A repo that configures mutmut is mutation tested only when it names
+      # its state volume, so configuring it without the volume would go green
+      # with no mutant run. See "--- Mutation testing ---" at the top.
+      - name: Mutation testing, if configured, runs
+        shell: bash
+        env:
+          VOLUME: ${{ vars.MUTMUT_STATE_VOLUME }}
+        run: |
+          if [ -f pyproject.toml ] && grep -q '^\[tool\.mutmut\]' pyproject.toml && [ -z "$VOLUME" ]; then
+            echo "pyproject.toml configures mutmut, but the repository variable MUTMUT_STATE_VOLUME is" >&2
+            echo "not set, so no mutation job runs. Set it to this repo's state volume on the runner." >&2
+            echo "A test that did not run is not a pass." >&2
+            exit 1
+          fi
+
       # PHPUnit, with pcov as the coverage driver, writing Clover for the gate.
       # From apt, as the check job sets PHP up, for the same Forgejo reason.
       - name: Set up PHP with pcov
@@ -419,3 +453,124 @@ jobs:
       - name: tests/run
         if: steps.entry.outputs.run == 'yes'
         run: ./tests/run
+
+  # MUTATION TESTING on a pull request: only the functions it changed are
+  # re-tested, against the state the nightly keeps in this repo's volume,
+  # mounted read-only and copied out first, so parallel runs never share it.
+  # With no state there is no baseline, and the job fails as could-not-look.
+  # See "--- Mutation testing ---" at the top.
+  mutation:
+    name: Mutation (mutmut, changed functions)
+    if: github.event_name == 'pull_request' && vars.MUTMUT_STATE_VOLUME != ''
+    runs-on: fleet-ci
+    container:
+      image: fleet-ci:current
+      options: -v ${{ vars.MUTMUT_STATE_VOLUME }}:/mutmut-state:ro
+    env:
+      MUTMUT_WORKERS: ${{ vars.MUTMUT_WORKERS || '8' }}
+    # The check job's layout: this repo at project/, JP_TOOLS beside it.
+    defaults:
+      run:
+        working-directory: project
+    steps:
+      - name: CI does not run as root
+        run: |
+          echo "user: $(id -un) uid $(id -u)"
+          if [ "$(id -u)" = 0 ]; then echo "CI is running as root: use the fleet-ci label" >&2; exit 1; fi
+      # Full history: mutmut-gate.py diffs against the commit the state was
+      # traced at, to know which tests' reach a change can have moved.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          path: project
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: JP_TOOLS_REPOSITORY is set, off GitHub
+        if: ${{ !vars.JP_TOOLS_REPOSITORY && github.server_url != 'https://github.com' }}
+        run: |
+          echo "Set the repository variable JP_TOOLS_REPOSITORY to JP_TOOLS' owner/name on this forge" >&2
+          echo "(and the secret JP_TOOLS_TOKEN if it is not public): mutmut-gate.py is JP_TOOLS'." >&2
+          exit 1
+      - name: Check out JP_TOOLS
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}
+          token: ${{ secrets.JP_TOOLS_TOKEN || github.token }}
+          path: JP_TOOLS
+      - name: The project's tools for mutmut
+        shell: bash
+        run: |
+          if [ ! -x tests/mutation-setup ]; then
+            echo "No executable tests/mutation-setup: add one that installs what a mutmut run needs" >&2
+            echo "(mutmut and pytest at this repo's pins, and whatever its tests import)." >&2
+            exit 1
+          fi
+          ./tests/mutation-setup
+      - name: Mutants of the changed functions
+        shell: bash
+        run: |
+          bash ../JP_TOOLS/ci-image/fetch-mutmut-state.sh /mutmut-state
+          python ../JP_TOOLS/mutmut-gate.py run --max-children "$MUTMUT_WORKERS"
+          python -m mutmut results --all true > mutmut-results.txt
+          python ../JP_TOOLS/mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt
+
+  # After each push to the default branch the state moves to it: only the
+  # functions the push changed are re-tested, gated against the old baseline
+  # first (a push that broke the rule publishes nothing and fails here), then
+  # recorded as the new baseline and swapped in, whole or not at all. The
+  # nightly still re-runs everything.
+  mutation-state:
+    name: Mutation state onto the default branch
+    if: github.event_name == 'push' && vars.MUTMUT_STATE_VOLUME != ''
+    runs-on: fleet-ci
+    container:
+      image: fleet-ci:current
+      options: -v ${{ vars.MUTMUT_STATE_VOLUME }}:/mutmut-state
+    env:
+      MUTMUT_WORKERS: ${{ vars.MUTMUT_WORKERS || '8' }}
+    defaults:
+      run:
+        working-directory: project
+    steps:
+      - name: CI does not run as root
+        run: |
+          echo "user: $(id -un) uid $(id -u)"
+          if [ "$(id -u)" = 0 ]; then echo "CI is running as root: use the fleet-ci label" >&2; exit 1; fi
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          path: project
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: JP_TOOLS_REPOSITORY is set, off GitHub
+        if: ${{ !vars.JP_TOOLS_REPOSITORY && github.server_url != 'https://github.com' }}
+        run: |
+          echo "Set the repository variable JP_TOOLS_REPOSITORY to JP_TOOLS' owner/name on this forge" >&2
+          echo "(and the secret JP_TOOLS_TOKEN if it is not public): mutmut-gate.py is JP_TOOLS'." >&2
+          exit 1
+      - name: Check out JP_TOOLS
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}
+          token: ${{ secrets.JP_TOOLS_TOKEN || github.token }}
+          path: JP_TOOLS
+      - name: The project's tools for mutmut
+        shell: bash
+        run: |
+          if [ ! -x tests/mutation-setup ]; then
+            echo "No executable tests/mutation-setup: add one that installs what a mutmut run needs" >&2
+            echo "(mutmut and pytest at this repo's pins, and whatever its tests import)." >&2
+            exit 1
+          fi
+          ./tests/mutation-setup
+      - name: The push's changed functions, then the state
+        shell: bash
+        run: |
+          bash ../JP_TOOLS/ci-image/fetch-mutmut-state.sh /mutmut-state
+          python ../JP_TOOLS/mutmut-gate.py run --max-children "$MUTMUT_WORKERS"
+          python -m mutmut results --all true > mutmut-results.txt
+          python ../JP_TOOLS/mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt
+          python ../JP_TOOLS/mutmut-gate.py record baseline.json --results mutmut-results.txt
+          bash ../JP_TOOLS/ci-image/publish-mutmut-state.sh /mutmut-state

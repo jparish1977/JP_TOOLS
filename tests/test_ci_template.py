@@ -53,7 +53,8 @@ from _harness import ROOT, check, check_true, run
 from fake_tools import fake_tools
 
 TEMPLATE = ROOT / "templates" / "ci-check.yml"
-WORKFLOWS = (ROOT / ".github" / "workflows" / "check.yml", TEMPLATE)
+NIGHTLY = ROOT / "templates" / "mutmut-nightly.yml"
+WORKFLOWS = (ROOT / ".github" / "workflows" / "check.yml", TEMPLATE, NIGHTLY)
 REPOSITORY = "${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}"
 TOKEN = "${{ secrets.JP_TOOLS_TOKEN || github.token }}"
 INTERNAL = ("iteration8", "ts.net", "joe/", ":3000", ":2222")
@@ -152,6 +153,7 @@ def test_actionlint_passes_on_both_workflows() -> None:
 
 def test_the_template_is_forge_neutral() -> None:
     check("the template has nothing wrong", findings(TEMPLATE.read_text(encoding="utf-8")), [])
+    check("the nightly template has nothing wrong", findings(NIGHTLY.read_text(encoding="utf-8")), [])
 
 
 def test_control_master_before_the_change_fails() -> None:
@@ -524,6 +526,162 @@ def test_the_template_runs_tests() -> None:
           by_run.get("./tests/run"), "steps.entry.outputs.run == 'yes'")
     check("the tests job downloads no Python of its own (the runner's python3 runs the gate)",
           [s.get("uses") for s in job.get("steps", []) if "setup-python" in str(s.get("uses", ""))], [])
+
+
+VOLUME = "${{ vars.MUTMUT_STATE_VOLUME }}"
+WORKERS = "${{ vars.MUTMUT_WORKERS || '8' }}"
+TOOLS_STEP = "The project's tools for mutmut"
+CONFIGURED_STEP = "Mutation testing, if configured, runs"
+PR_RUN = ["bash ../JP_TOOLS/ci-image/fetch-mutmut-state.sh /mutmut-state",
+          'python ../JP_TOOLS/mutmut-gate.py run --max-children "$MUTMUT_WORKERS"',
+          "python -m mutmut results --all true > mutmut-results.txt",
+          "python ../JP_TOOLS/mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt"]
+STATE_RUN = [*PR_RUN, "python ../JP_TOOLS/mutmut-gate.py record baseline.json --results mutmut-results.txt",
+             "bash ../JP_TOOLS/ci-image/publish-mutmut-state.sh /mutmut-state"]
+
+
+def job(path: Path, name: str) -> dict[str, Any]:
+    return dict(yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs", {}).get(name, {}))
+
+
+def job_step(path: Path, job_name: str, step: str) -> dict[str, Any]:
+    return dict(next((s for s in job(path, job_name).get("steps", []) if s.get("name") == step), {}))
+
+
+def test_the_mutation_jobs_use_the_repos_own_volume() -> None:
+    """Each mutation job runs only when the repo names its state volume, and
+    mounts it: read-only on a pull request, read-write where state is written."""
+    pr, push, night = job(TEMPLATE, "mutation"), job(TEMPLATE, "mutation-state"), job(NIGHTLY, "full-run")
+    check("the PR job: pull requests, with a volume named", pr.get("if"),
+          "github.event_name == 'pull_request' && vars.MUTMUT_STATE_VOLUME != ''")
+    check("the state job: pushes, with a volume named", push.get("if"),
+          "github.event_name == 'push' && vars.MUTMUT_STATE_VOLUME != ''")
+    check("the nightly: with a volume named", night.get("if"), "vars.MUTMUT_STATE_VOLUME != ''")
+    check("the PR job mounts it read-only", pr.get("container"),
+          {"image": "fleet-ci:current", "options": f"-v {VOLUME}:/mutmut-state:ro"})
+    check("the state job mounts it read-write", push.get("container"),
+          {"image": "fleet-ci:current", "options": f"-v {VOLUME}:/mutmut-state"})
+    check("the nightly read-write, held to its share of the host", night.get("container"),
+          {"image": "fleet-ci:current", "options": f"--cpus {WORKERS} --memory 8g -v {VOLUME}:/mutmut-state"})
+    for name, j in (("PR", pr), ("state", push), ("nightly", night)):
+        check(f"the {name} job's workers come from MUTMUT_WORKERS", j.get("env"), {"MUTMUT_WORKERS": WORKERS})
+    doc = yaml.safe_load(NIGHTLY.read_text(encoding="utf-8"))
+    triggers = doc.get(True, doc.get("on", {}))  # YAML 1.1 reads the bare key on as True
+    check("the nightly runs on a schedule and by hand",
+          sorted(triggers), ["schedule", "workflow_dispatch"])
+    check("the nightly's limit guards a hang, far past a slow run", night.get("timeout-minutes"), 720)
+
+
+def test_the_mutation_jobs_run_the_gate() -> None:
+    """A PR is gated; a push is gated before its state is recorded and
+    published; the nightly runs every mutant and publishes. The tools step
+    is the same text in all three, so they cannot drift."""
+    check("the PR job: fetch, run, results, gate",
+          str(job_step(TEMPLATE, "mutation", "Mutants of the changed functions").get("run", "")).splitlines(),
+          PR_RUN)
+    check("the state job: the same, then record and publish",
+          str(job_step(TEMPLATE, "mutation-state", "The push's changed functions, then the state")
+              .get("run", "")).splitlines(), STATE_RUN)
+    night = [str(s.get("run", "")) for s in job(NIGHTLY, "full-run").get("steps", [])]
+    check_true("the nightly runs every mutant",
+               'python ../JP_TOOLS/mutmut-gate.py run --full --max-children "$MUTMUT_WORKERS"' in night)
+    check_true("then records and publishes",
+               any("mutmut-gate.py record baseline.json --results mutmut-results.txt" in r for r in night)
+               and "bash ../JP_TOOLS/ci-image/publish-mutmut-state.sh /mutmut-state" in night)
+    tools = {str(job_step(p, j, TOOLS_STEP).get("run")) for p, j in
+             ((TEMPLATE, "mutation"), (TEMPLATE, "mutation-state"), (NIGHTLY, "full-run"))}
+    check("the tools step is one text in all three jobs", len(tools), 1)
+
+
+def run_step(script: str, files: dict[str, str], executable: tuple[str, ...] = (),
+             env_add: dict[str, str] | None = None,
+             fakes: dict[str, str] | None = None) -> tuple[int, list[list[str]], str]:
+    """SCRIPT run as `shell: bash` runs it, in a directory holding FILES
+    (EXECUTABLE ones mode 755), with only the FAKES on PATH: (exit code, the
+    fakes' calls, stderr)."""
+    with fake_tools(named=fakes) as (work, log):
+        for name, body in files.items():
+            (work / name).parent.mkdir(parents=True, exist_ok=True)
+            (work / name).write_text(body, encoding="utf-8")
+            (work / name).chmod(0o755 if name in executable else 0o644)
+        r = subprocess.run(["/bin/bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
+                           cwd=work, env={**os.environ, **(env_add or {})},
+                           capture_output=True, text=True, check=False)
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+    return r.returncode, calls, r.stderr
+
+
+def test_the_tools_step_runs_the_projects_setup() -> None:
+    script = str(job_step(TEMPLATE, "mutation", TOOLS_STEP)["run"])
+    setup = "#!/bin/sh\necho ran > setup-ran\n"
+    rc, _, err = run_step(script, {})
+    check_true("no tests/mutation-setup: exit 1, saying what to add",
+               rc == 1 and "No executable tests/mutation-setup" in err and "mutmut and pytest" in err)
+    rc, _, err = run_step(script, {"tests/mutation-setup": setup})
+    check_true("one that is not executable: the same", rc == 1 and "No executable tests/mutation-setup" in err)
+    with fake_tools() as (work, _):
+        (work / "tests").mkdir()
+        (work / "tests" / "mutation-setup").write_text(setup, encoding="utf-8")
+        (work / "tests" / "mutation-setup").chmod(0o755)
+        r = subprocess.run(["/bin/bash", "-eo", "pipefail", "-c", script], cwd=work,
+                           env={**os.environ, "PATH": "/usr/bin:/bin"}, capture_output=True, text=True, check=False)
+        check("an executable one: it runs, and the step passes",
+              (r.returncode, (work / "setup-ran").is_file()), (0, True))
+    rc, _, _ = run_step(script, {"tests/mutation-setup": "#!/bin/sh\nexit 3\n"}, executable=("tests/mutation-setup",))
+    check("a setup that fails fails the step", rc, 3)
+
+
+def configured(files: dict[str, str], volume: str) -> tuple[int, str]:
+    script = str(job_step(TEMPLATE, "tests", CONFIGURED_STEP)["run"])
+    rc, _, err = run_step(script, files, env_add={"VOLUME": volume, "PATH": "/usr/bin:/bin"})
+    return rc, err
+
+
+def test_mutmut_configured_without_a_volume_fails() -> None:
+    """[tool.mutmut] with no state volume named would go green with no
+    mutant run, so the tests job fails, saying what to set."""
+    step = job_step(TEMPLATE, "tests", CONFIGURED_STEP)
+    check("the step reads the volume variable", step.get("env"), {"VOLUME": VOLUME})
+    mutmut = {"pyproject.toml": "[project]\nname = 'x'\n\n[tool.mutmut]\nsource_paths = ['a/']\n"}
+    rc, err = configured(mutmut, "")
+    check_true("[tool.mutmut] and no volume: exit 1, naming the variable",
+               rc == 1 and "MUTMUT_STATE_VOLUME" in err and "not a pass" in err)
+    check("[tool.mutmut] and a volume: passes", configured(mutmut, "x-mutmut-state"), (0, ""))
+    check("a pyproject.toml without it: passes", configured({"pyproject.toml": "[project]\n"}, ""), (0, ""))
+    check("only a mention of it, not the table: passes",
+          configured({"pyproject.toml": "# see [tool.mutmut] later\n"}, ""), (0, ""))
+    check("no pyproject.toml: passes", configured({}, ""), (0, ""))
+
+
+GATE_FAKES = {
+    "bash": "sys.exit(int(os.environ.get('FETCH_RC', '0')) if 'fetch-mutmut-state.sh' in sys.argv[1] else 0)\n",
+    "python": "sys.exit(int(os.environ.get('GATE_RC', '0')) if 'gate' in sys.argv[2:3] else 0)\n",
+}
+
+
+def gate_calls(job_name: str, step: str, **rcs: str) -> tuple[int, list[list[str]]]:
+    script = str(job_step(TEMPLATE, job_name, step)["run"])
+    rc, calls, _ = run_step(script, {}, env_add={"MUTMUT_WORKERS": "3", **rcs}, fakes=GATE_FAKES)
+    return rc, calls
+
+
+def test_the_gate_steps_stop_at_the_first_failure() -> None:
+    fetch = ["bash", "../JP_TOOLS/ci-image/fetch-mutmut-state.sh", "/mutmut-state"]
+    run_ = ["python", "../JP_TOOLS/mutmut-gate.py", "run", "--max-children", "3"]
+    results = ["python", "-m", "mutmut", "results", "--all", "true"]
+    gate = ["python", "../JP_TOOLS/mutmut-gate.py", "gate", "mutmut-baseline.json", "--results", "mutmut-results.txt"]
+    record = ["python", "../JP_TOOLS/mutmut-gate.py", "record", "baseline.json", "--results", "mutmut-results.txt"]
+    publish = ["bash", "../JP_TOOLS/ci-image/publish-mutmut-state.sh", "/mutmut-state"]
+    pr = ("mutation", "Mutants of the changed functions")
+    state = ("mutation-state", "The push's changed functions, then the state")
+    check("a PR: fetch, run with MUTMUT_WORKERS, results, gate", gate_calls(*pr),
+          (0, [fetch, run_, results, gate]))
+    check("no state to fetch: could-not-look, nothing run", gate_calls(*pr, FETCH_RC="2"), (2, [fetch]))
+    check("a gate that fails fails the PR job", gate_calls(*pr, GATE_RC="1"), (1, [fetch, run_, results, gate]))
+    check("a push: gated, then recorded and published", gate_calls(*state),
+          (0, [fetch, run_, results, gate, record, publish]))
+    check("a push that breaks the rule publishes nothing", gate_calls(*state, GATE_RC="1"),
+          (1, [fetch, run_, results, gate]))
 
 
 def test_control_master_before_the_change_has_no_tests_job() -> None:

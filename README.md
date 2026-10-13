@@ -59,7 +59,7 @@ Without access to them, `composer install` stops on the two packages.
 | `list-exemptions.py` | Inventory every `# pragma: no cover` and its reason, the ones the gate lets pass included |
 | `list-suppressions.py` | Inventory every suppression in every language (`noqa`, `type: ignore`, shellcheck, cppcheck, phpstan, phpcs, eslint, stylelint) and its reason, the ones the gate lets pass included |
 | `install-hooks.py` | Install the pre-commit and commit-msg hooks into any git repo |
-| `init-ci.py` | Copy GitHub Actions CI template into a repo |
+| `init-ci.py` | Copy the CI workflows (checks and tests, and the mutation nightly) into a repo |
 
 ### File Analysis (PHP -- hex architecture)
 
@@ -364,11 +364,19 @@ Use `git commit --no-verify` to bypass when needed.
 ## CI Integration
 
 ```bash
-# Copy GitHub Actions workflow into a repo
+# Copy the CI workflows into a repo
 python init-ci.py /path/to/repo
 ```
 
-Creates `.github/workflows/check.yml` -- runs on push to main and on PRs.
+Creates `.github/workflows/check.yml`, which runs on push to main and on PRs,
+and `.github/workflows/mutmut-nightly.yml`. A workflow already there is left
+alone unless `--force`, so re-running it on an adopted repo adds what is new.
+
+A repo with `[tool.mutmut]` in its `pyproject.toml` is mutation tested through
+`mutmut-gate.py`: a PR re-tests only the functions it changed, against the
+state the nightly keeps. It opts in with the repository variable
+`MUTMUT_STATE_VOLUME` (its own state volume on the runner) and an executable
+`tests/mutation-setup`; `check.yml`'s header says what each does.
 
 ## FileScanner Library
 
