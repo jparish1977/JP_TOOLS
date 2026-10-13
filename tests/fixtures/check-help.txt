@@ -1,0 +1,44 @@
+usage: check.py [-h] [--lang {python,js,css,html,php,cpp,shell,powershell,auto}] [--tools TOOLS]
+                [--pretty] [--audit] [--skip-unsupported] [--baseline FILE] [--touched]
+                [--record-baseline FILE] [--raised-over OLD] [--force-baseline]
+                [--smells-base REF]
+                target
+
+Run code quality tools and output structured JSON.
+
+positional arguments:
+  target                File or directory to check
+
+options:
+  -h, --help            show this help message and exit
+  --lang {python,js,css,html,php,cpp,shell,powershell,auto}
+                        Language override (default: auto-detect)
+  --tools TOOLS         Comma-separated tools to run, e.g. ruff,mypy
+  --pretty              Pretty-print JSON output
+  --audit               Also run security audit tools (pip-audit, npm audit, composer audit)
+  --skip-unsupported    Exit 0 on a file whose language cannot be detected, instead of 2. For
+                        callers handed an arbitrary file list (the pre-commit hook), where a
+                        README is not a failure.
+  --baseline FILE       Compare against a recorded baseline and fail only where a file got WORSE,
+                        instead of failing on any finding at all. Refuses if the baseline was
+                        recorded in a different mode.
+  --touched             With --baseline, on one file a commit changes: it must have fewer findings
+                        than recorded, until it has none, and a lowered count is written back to
+                        the baseline. Every tool counts against getting worse; mypy and phpstan
+                        need not fall, since other files move them, and are not written back. Exit
+                        3 when no worse but none fixed. The pre-commit hook passes it.
+  --record-baseline FILE
+                        Measure per-file and write a baseline to FILE. Per-file because that is
+                        what the gate does; see METHODOLOGY, 'Adopting this in a codebase you
+                        inherited', step 2.
+  --raised-over OLD     TARGET is a baseline file: exit 1 when it raises any count over the
+                        baseline OLD (a file it adds with findings included), naming each; 0 when
+                        it raises none. The pre-commit hook passes HEAD's copy, and CI the pull
+                        request base's.
+  --force-baseline      Allow --record-baseline to write a baseline that drops files the existing
+                        one recorded. Needed only when that loss is intended, such as after
+                        deleting files.
+  --smells-base REF     What a smell is NEW against: over its threshold now and not at REF fails,
+                        and so does one over at REF that grew; one already over that did not grow
+                        warns. Default HEAD, the last commit, which is what the pre-commit hook
+                        wants. CI on a pull request passes the PR's base.
