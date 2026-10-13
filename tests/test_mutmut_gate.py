@@ -311,6 +311,58 @@ def test_a_file_tests_share_has_all_reach_traced() -> None:
         check_true("  and the kept reach is gone", not stats.exists())
 
 
+def test_a_fixture_only_suites_name_moves_only_their_tests() -> None:
+    """A data file that suites name by its file name moves only their tests;
+    named by a helper, or by nobody, it moves them all; a Python helper, a
+    conftest.py and the configuration always do."""
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        traced = _commit(root, {"tests/test_a.py": 'F = "fixtures/help.txt"\n',
+                                "tests/test_b.py": 'G = "fixtures/other.txt"\n',
+                                "tests/test_c.py": "# names nothing\n",
+                                "tests/_helper.py": 'H = "fixtures/shared.txt"\n',
+                                "tests/fixtures/help.txt": "1\n", "tests/fixtures/other.txt": "1\n",
+                                "tests/fixtures/shared.txt": "1\n", "tests/fixtures/orphan.txt": "1\n"},
+                        "traced")
+        check("help.txt: named by test_a.py alone", gate._suites_naming(root, "tests/fixtures/help.txt"),
+              {"tests/test_a.py"})
+        check("shared.txt: named by a helper, so any test", gate._suites_naming(root, "tests/fixtures/shared.txt"),
+              None)
+        check("orphan.txt: named by no suite, so any test", gate._suites_naming(root, "tests/fixtures/orphan.txt"),
+              None)
+        check("a Python helper, a conftest.py and the configuration: any test",
+              [gate._suites_naming(root, p) for p in ("tests/_helper.py", "tests/conftest.py", "pyproject.toml",
+                                                       "pytest.ini", "setup.cfg", "tox.ini")],
+              [None] * 6)
+        stats = Path(td) / "stats.json"
+        durations = dict.fromkeys(("tests/test_a.py::t1", "tests/test_b.py::t2", "tests/test_c.py::t3"), 1.0)
+        reach = {"a.x_f": ["tests/test_a.py::t1", "tests/test_b.py::t2", "tests/test_c.py::t3"]}
+
+        def kept() -> None:
+            stats.write_text(json.dumps({"git_commit": traced, "tests_by_mangled_function_name": dict(reach),
+                                         "duration_by_test": dict(durations)}), encoding="utf-8")
+
+        kept()
+        _commit(root, {"tests/fixtures/help.txt": "2\n"}, "the help fixture")
+        said = gate.forget_moved_reach(root, stats)
+        doc = json.loads(stats.read_text(encoding="utf-8"))
+        check("help.txt changed: only test_a's tests are traced again", sorted(doc["duration_by_test"]),
+              ["tests/test_b.py::t2", "tests/test_c.py::t3"])
+        check("  and its reach goes, the others' stays", doc["tests_by_mangled_function_name"],
+              {"a.x_f": ["tests/test_b.py::t2", "tests/test_c.py::t3"]})
+        check("  and it says so, naming the reader", said,
+              "1 file(s) changed since the traced commit: 1 test(s) traced again,"
+              " the shared files' readers among them (tests/test_a.py)")
+        kept()
+        _commit(root, {"tests/fixtures/shared.txt": "2\n"}, "the helper's fixture")
+        check("shared.txt changed: all reach traced, naming it", gate.forget_moved_reach(root, stats),
+              "tests/fixtures/shared.txt changed, which tests share: all test reach traced")
+        check_true("  and the kept reach is gone", not stats.exists())
+
+
 def test_kept_reach_missing_its_tables_is_read_as_empty() -> None:
     if not shutil.which("git"):
         print("SKIP: git not found")
