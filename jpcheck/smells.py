@@ -36,6 +36,8 @@ _SMELLS = {"base": "HEAD"}      # set from --smells-base in main()
 # rev-parse's -q only keeps git's complaint about a bad ref off stderr, which
 # _git captures and drops; whatever its case, only the exit code is read.
 _QUIET = "-q"
+# Codec names fold case, so "utf-8" and "UTF-8" name the same codec.
+_UTF8 = "utf-8"
 
 
 def _smell_measure(src: str) -> Measure:
@@ -91,7 +93,7 @@ def _defines(lang: str, src: str | None, name: str) -> tuple[int, int, int] | No
         return None   # reason: a file that will not parse defines nothing this can match
 
 
-def _function_elsewhere(root: Path, base: str, name: str, lang: str) -> tuple[int, int, int]:
+def _function_elsewhere(root: Path, base: str, name: str, lang: str) -> tuple[int, int]:
     """A function's size and complexity at the base, for one that MOVED here
     from another file: splitting a smelly file moves its smells, it does not
     add them.
@@ -101,25 +103,28 @@ def _function_elsewhere(root: Path, base: str, name: str, lang: str) -> tuple[in
     tree defines that qualified name in exactly one file, and that file no
     longer defines it. Anything else, two definitions at the base or one
     still in place, is a different function with the same name, and this one
-    is measured as new."""
+    is measured as new.
+
+    (size, complexity): the line a definition starts on is the one in this
+    file, never the base's, so none is returned."""
     if lang not in DEFINITION:
-        return (0, 0, 0)
+        return (0, 0)
     pattern, globs = DEFINITION[lang]
-    leaf = name.rsplit(".", 1)[-1]
+    leaf = name.rpartition(".")[2]
     hits = _git(["grep", "-l", "-E", pattern.format(leaf), base, "--", *globs], root).stdout
     sites = []
     for hit in hits.splitlines():
-        rel = hit.split(":", 1)[-1]
+        rel = hit.partition(":")[2]     # git grep names a hit in a tree TREE:PATH
         found = _defines(lang, _base_text(root, base, rel), name)
         if found:
             sites.append((rel, found))
     if len(sites) != 1:
-        return (0, 0, 0)
+        return (0, 0)
     rel, (size, cx, _) = sites[0]
     now = root / rel
-    if _defines(lang, now.read_text(encoding="utf-8", errors="replace") if now.is_file() else None, name):
-        return (0, 0, 0)
-    return (size, cx, 0)
+    if _defines(lang, now.read_text(encoding=_UTF8, errors="replace") if now.is_file() else None, name):
+        return (0, 0)
+    return (size, cx)
 
 
 def _base_measure(f: Path, ctx: tuple[Path, str] | None) -> tuple[int, dict[str, tuple[int, int, int]]]:
@@ -186,7 +191,7 @@ def _file_smells(f: Path) -> list[dict[str, Any]]:
     if lang not in _MEASURES:
         return [_unmeasured(f, f"no measure for {lang} files")]
     try:
-        src = f.read_text(encoding="utf-8", errors="replace")
+        src = f.read_text(encoding=_UTF8, errors="replace")
     except OSError as e:
         return [_unmeasured(f, f"it could not be read: {e}")]
     # Only the FILE's fault is caught here. A measuring tool that cannot be run
@@ -217,7 +222,7 @@ def _function_smells(f: Path, funcs: dict[str, tuple[int, int, int]],
     """Length and complexity for each function, each against its own before."""
     out: list[dict[str, Any] | None] = []
     for name, (size, cx, line) in funcs.items():
-        before = b_funcs.get(name)
+        before: tuple[int, ...] | None = b_funcs.get(name)
         smelly = size >= _SMELL_FUNC_LINES or cx >= _SMELL_FUNC_COMPLEXITY
         if before is None and ctx is not None and smelly and name != TOP_LEVEL:
             before = _function_elsewhere(ctx[0], ctx[1], name, _detect_lang(str(f)))

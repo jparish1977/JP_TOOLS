@@ -17,6 +17,16 @@ WHAT THIS PINS DOWN
     parse there.
     _function_smells: the full list for each function, its before taken from
     the base, from the one other file it moved out of, or none.
+    _renamed_from: the base path of a file git sees as renamed, even with
+    rename detection turned off in the repo's config and a space in the new
+    name; None for a file that was not renamed, while another one was.
+    _function_elsewhere: (size, complexity) at the base for a function, a
+    nested method included, that left the one file defining it, whether that
+    file still exists, was deleted, or has a colon in its name; (0, 0) for a
+    language with no definition pattern, for a name defined in two files at
+    the base, and for one still defined where it was. "Still defined" is read
+    as UTF-8 whatever the default codec, and a stray byte that is not UTF-8
+    does not stop it being read.
 
 Each git repo is a throwaway one; the code under test is imported, never run
 as a subprocess, so a mutation run sees every line.
@@ -24,6 +34,7 @@ as a subprocess, so a mutation run sees every line.
     python3 tests/test_smells_history.py
 """
 
+import io
 import shutil
 import subprocess
 import sys
@@ -31,6 +42,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from _harness import check, run
 from jpcheck import smells
@@ -252,6 +264,77 @@ def test_function_smells_history() -> None:
                      f"function {TOP_LEVEL} complexity is 12 (a smell at 11); NEW: was 0 before this change")])
     finally:
         drop(repo)
+
+
+# ── _renamed_from and _function_elsewhere ───────────────────────────────────
+
+def test_renamed_from() -> None:
+    repo = repo_with({"r1.py": complex_func("one", 5), "r2.py": complex_func("two", 7)})
+    try:
+        git(repo, "config", "diff.renames", "false")
+        git(repo, "mv", "r1.py", "new name.py")
+        check("renamed_from: a rename, detection off in config, a space in the name",
+              attempt(lambda: smells._renamed_from(repo, "HEAD", "new name.py")), "r1.py")
+        check("renamed_from: a file that was not renamed",
+              attempt(lambda: smells._renamed_from(repo, "HEAD", "r2.py")), None)
+    finally:
+        drop(repo)
+
+
+NESTED = "class A:\n    class B:\n" + "".join(
+    "        " + line + "\n" for line in complex_func("deep", 6).splitlines())
+# A function named outside ASCII, so a read in any codec but UTF-8 misses it.
+STILL = complex_func("café", 8)
+
+
+def base_of(src: str, name: str) -> tuple[int, int]:
+    size, cx, _ = measure_python(src)[1][name]
+    return (size, cx)
+
+
+def test_function_elsewhere_moved() -> None:
+    repo = repo_with({"old.py": NESTED, "gone.py": complex_func("removed", 9),
+                      "a:b.py": complex_func("colon", 4)})
+    try:
+        (repo / "old.py").write_text("x = 1\n", encoding="utf-8")
+        (repo / "a:b.py").write_text("x = 1\n", encoding="utf-8")
+        git(repo, "rm", "-q", "gone.py")
+        check("elsewhere: a nested method moved out",
+              attempt(lambda: smells._function_elsewhere(repo, "HEAD", "A.B.deep", "python")),
+              base_of(NESTED, "A.B.deep"))
+        check("elsewhere: its file deleted",
+              attempt(lambda: smells._function_elsewhere(repo, "HEAD", "removed", "python")),
+              base_of(complex_func("removed", 9), "removed"))
+        check("elsewhere: a colon in its file's name",
+              attempt(lambda: smells._function_elsewhere(repo, "HEAD", "colon", "python")),
+              base_of(complex_func("colon", 4), "colon"))
+    finally:
+        drop(repo)
+
+
+def test_function_elsewhere_not_moved() -> None:
+    repo = repo_with({"t1.py": complex_func("dup", 5), "t2.py": complex_func("dup", 5),
+                      "still.py": STILL})
+    try:
+        (repo / "still.py").write_bytes(STILL.encode("utf-8") + b"# \xff\n")
+        check("elsewhere: a language with no definition pattern",
+              attempt(lambda: smells._function_elsewhere(repo, "HEAD", "dup", "no-such-language")), (0, 0))
+        check("elsewhere: defined in two files at the base",
+              attempt(lambda: smells._function_elsewhere(repo, "HEAD", "dup", "python")), (0, 0))
+        check("elsewhere: still defined where it was",
+              attempt(lambda: smells._function_elsewhere(repo, "HEAD", "café", "python")), (0, 0))
+        with mock.patch.object(io, "text_encoding", cp1252_default):
+            check("elsewhere: CONTROL under the patch a read with no codec decodes as cp1252",
+                  attempt(lambda: (repo / "still.py").read_text().splitlines()[0]), "def cafÃ©(a):")
+            got = attempt(lambda: smells._function_elsewhere(repo, "HEAD", "café", "python"))
+        check("elsewhere: still defined, read as UTF-8 whatever the default codec", got, (0, 0))
+    finally:
+        drop(repo)
+
+
+def cp1252_default(encoding: str | None, stacklevel: int = 2) -> str:
+    """io.text_encoding with cp1252 as the codec a read with none gets."""
+    return encoding or "cp1252"
 
 
 if __name__ == "__main__":
