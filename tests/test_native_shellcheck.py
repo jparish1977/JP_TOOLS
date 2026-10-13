@@ -7,7 +7,8 @@ whose output and exit code each case sets.
 WHAT IS CHECKED
     - No shellcheck on PATH: the check did not run, saying how to install it.
     - It is run as `shellcheck --format=json1 TARGET`, in an environment with
-      colour forcing removed (FORCE_COLOR gone, NO_COLOR=1, TERM=dumb).
+      colour forcing removed (FORCE_COLOR gone, NO_COLOR=1, TERM=dumb), and
+      with exactly subprocess.run's keyword arguments, check=False included.
     - Each comment becomes an issue: error and warning levels block, info and
       style warn; SC and the code as the rule; a field shellcheck leaves out
       reads as the target, 0, or "", never a crash.
@@ -22,12 +23,16 @@ WHAT IS CHECKED
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 from typing import Any
+from unittest import mock
 
 from _harness import check, run
 from fake_tools import calls, env, fake_tools
 from jpcheck import native_tools
+from jpcheck.common import _plain_env
 
 # The fake: record argv and the colour variables it was given, then answer as
 # the case says.
@@ -69,6 +74,25 @@ def test_how_it_is_run() -> None:
     _, logged = shellcheck("{}")
     check("argv, then the colour variables it was given", logged,
           [["shellcheck", "--format=json1", "s.sh"], {"FORCE_COLOR": None, "NO_COLOR": "1", "TERM": "dumb"}])
+
+
+def test_the_exact_call() -> None:
+    """subprocess.run's exact keyword arguments, check=False included: the
+    fake shellcheck cannot tell check=False from check=None or no check at
+    all, so the call is recorded rather than run."""
+    ran: list[tuple[list[str], dict[str, Any]]] = []
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> "subprocess.CompletedProcess[str]":
+        ran.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0, "{}", "")
+
+    with mock.patch.object(shutil, "which", lambda name: f"/fake/{name}"), \
+            mock.patch.object(subprocess, "run", fake_run), env(FORCE_COLOR="1"):
+        native_tools.run_shellcheck("s.sh")
+        plain = _plain_env()
+    check("one call: the command, then exactly these keyword arguments", ran,
+          [(["shellcheck", "--format=json1", "s.sh"],
+            {"capture_output": True, "text": True, "check": False, "env": plain})])
 
 
 def test_each_comment_is_an_issue() -> None:
