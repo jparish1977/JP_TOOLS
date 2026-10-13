@@ -64,8 +64,9 @@ def run_ruff(target: str) -> dict[str, Any]:
          "--output-format", "json", target],
         capture_output=True, text=True, check=False, env=ruff_env(),
     )
+    # Empty output (no findings) is not JSON either, so it takes the same path.
     try:
-        raw = json.loads(result.stdout) if result.stdout.strip() else []
+        raw = json.loads(result.stdout)
     except json.JSONDecodeError:
         raw = []
     issues = [
@@ -148,17 +149,19 @@ def run_mypy(target: str) -> dict[str, Any]:
         if severity == "note":
             continue  # context lines, not actionable on their own
         msg = m.group("msg").strip()
-        rule = ""
+        # A trailing "[code]" is the error code; the rule is "mypy" without one.
+        rule = "mypy"
         if msg.endswith("]") and "[" in msg:
             b = msg.rfind("[")
-            rule = msg[b + 1:-1]
+            code = msg[b + 1:-1]
+            rule = f"mypy:{code}" if code else "mypy"
             msg  = msg[:b].strip()
         issues.append({
             "file":     m.group("file"),
             "line":     int(m.group("line")),
             "col":      int(m.group("col") or 0),
             "severity": severity,
-            "rule":     f"mypy:{rule}" if rule else "mypy",
+            "rule":     rule,
             "message":  msg,
             "fixable":  False,
             "fixable_unsafe": False,
