@@ -60,8 +60,7 @@ def _parser() -> argparse.ArgumentParser:
                                             "shell", "powershell", "auto"],
                         default="auto",
                         help="Language override (default: auto-detect)")
-    parser.add_argument("--tools", metavar="TOOLS",
-                        help="Comma-separated tools to run, e.g. ruff,mypy")
+    parser.add_argument("--tools", help="Comma-separated tools to run, e.g. ruff,mypy")
     parser.add_argument("--pretty", action="store_true",
                         help="Pretty-print JSON output")
     parser.add_argument("--audit", action="store_true",
@@ -117,8 +116,8 @@ def _stop(doc: dict[str, Any], code: int) -> NoReturn:
 
 
 def _single(args: argparse.Namespace, target: str, root: Path,
-            ignores: list[Ignore]) -> tuple[dict[str, Any], str]:
-    """A single file, or a directory named with --lang or --tools: (output, baseline mode)."""
+            ignores: list[Ignore]) -> dict[str, Any]:
+    """A single file, or a directory named with --lang or --tools."""
     is_dir = Path(target).is_dir()
     # A file the repo does not own is skipped, and says which entry did it,
     # so the hook prints the exclusion in every commit it applies to.
@@ -133,9 +132,7 @@ def _single(args: argparse.Namespace, target: str, root: Path,
         if args.skip_unsupported:
             _stop({"target": target, "skipped": "no language detected"}, jpexit.OK)
         _stop({"error": f"Cannot detect language for: {target}"}, jpexit.NOT_RUN)
-    # A single file IS the per-file measurement, so a per-file baseline is
-    # comparable here.
-    return check_target(target, lang, names, root, ignores), "per-file"
+    return check_target(target, lang, names, root, ignores)
 
 
 def _per_file_output(args: argparse.Namespace, target: str) -> dict[str, Any]:
@@ -180,23 +177,24 @@ def main() -> None:
         # A baseline holds per-file counts, so a directory compared against
         # one is measured the same way: each file on its own. Handed whole to
         # mypy or phpstan, a directory gives the whole-repo count instead.
-        output, mode = _per_file_output(args, target), "per-file"
+        output = _per_file_output(args, target)
     elif not Path(target).is_dir() or args.lang != "auto" or args.tools:
-        output, mode = _single(args, target, root, ignores)
+        output = _single(args, target, root, ignores)
     else:
+        # A directory run lets the dir-capable tools resolve across files, so
+        # this is the WHOLE-REPO measurement. It never meets a baseline: a
+        # directory with --baseline took the per-file branch above.
         try:
             output = check_directory(target, args.audit, root, ignores)
         except NoSourceError:
             _stop({"error": f"No recognized source files in: {target}"}, jpexit.NOT_RUN)
-        # A directory run lets the dir-capable tools resolve across files, so
-        # this is the WHOLE-REPO measurement. Declaring it as such is what
-        # makes compare_baseline refuse rather than report scope as regression.
-        mode = "whole-repo"
 
     print(json.dumps(output, indent=2 if args.pretty else None))
     # With a baseline, the verdict replaces the compare-against-zero one.
+    # Every run that gets here with one was measured per file: a single file
+    # IS the per-file measurement, and a directory was measured file by file.
     if args.baseline:
-        sys.exit(compare_baseline(output["checks"], target, args.baseline, mode,
+        sys.exit(compare_baseline(output["checks"], target, args.baseline, "per-file",
                                   touched=args.touched))
     sys.exit(_exit_code(output["summary"], output["checks"]))
 
