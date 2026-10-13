@@ -561,6 +561,21 @@ def test_edited_tests_names_the_changed_suites_and_fixture_readers() -> None:
         check("nothing changed since: no test", gate.edited_tests(root, stats), frozenset())
 
 
+def test_the_second_pass_names_the_cleared_mutants() -> None:
+    """The mutants with no verdict, sorted, across every .meta; too many names
+    for one command line: none, so the run goes unnamed."""
+    with tempfile.TemporaryDirectory() as td:
+        mutants = Path(td)
+        _plant(mutants, "b.py", {"x_g": "1"}, {"b.x_g__mutmut_2": None, "b.x_g__mutmut_1": 1})
+        _plant(mutants, "a.py", {"x_f": "1"}, {"a.x_f__mutmut_1": None, "a.x_f__mutmut_2": 0})
+        check("the cleared ones, in order", gate._cleared(mutants), ["a.x_f__mutmut_1", "b.x_g__mutmut_2"])
+        check("none cleared: none", gate._cleared(Path(td) / "nowhere"), [])
+    fits = ["m" * 1023] * 256                    # 256 x (1023 + 1) bytes: exactly the limit
+    check("names that fit are kept", gate._named(fits), fits)
+    check("one byte over: an unnamed run", gate._named([*fits[:-1], "m" * 1024]), [])
+    check("no names: none", gate._named([]), [])
+
+
 def test_reach_compared_as_sets_an_empty_one_included() -> None:
     """A function with no reach recorded and one recorded as reached by no
     test are the same; neither has moved. A meta key holding __mutmut_ twice
@@ -642,10 +657,12 @@ def test_run_tests_moved_reach_again() -> None:
             gate.run(root, False, 2)
         check("a test newly reached a function: mutmut ran again, with its verdict cleared",
               calls, [{"a.x_f__mutmut_1": 33}, {"a.x_f__mutmut_1": None}])
-        check("  the second run asked exactly as the first", asked[1], asked[0])
+        first = [sys.executable, "-m", "mutmut", "run", "--max-children", "2"]
+        check("  the first run names nothing, the second exactly the cleared mutant, from the same place",
+              asked, [(first, root), ([*first, "a.x_f__mutmut_1"], root)])
         check_true("  and says so",
                    "test reach moved or tests edited for 1 function(s): their 1 verdict(s) tested again"
-                   in out.getvalue())
+                   " (by name, 1 mutant(s))" in out.getvalue())
         calls.clear()
         with mock.patch.object(gate.subprocess, "call", side_effect=fake):
             gate.run(root, False, 2)
