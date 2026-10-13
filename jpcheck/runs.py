@@ -19,6 +19,7 @@ from jpcheck.registry import (
     AUDIT_TOOLS,
     DEFAULT_TOOLS,
     TOOL_RUNNERS,
+    _no_runner,
     _run_tools,
     _summarize,
 )
@@ -139,7 +140,7 @@ def _language_checks(target: str, files: list[str], names: list[str], root: Path
     for name in names:
         runner = TOOL_RUNNERS.get(name)
         if not runner:
-            checks.extend(_run_tools([name], target))
+            checks.append(_no_runner(name))
         elif name in _DIR_CAPABLE:
             checks.append(_dir_capable_result(runner, target, files, root, ignores))
         else:

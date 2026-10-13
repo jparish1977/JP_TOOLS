@@ -93,6 +93,11 @@ _DIR_CAPABLE = {"ruff", "mypy", "no-cover", "suppress-reason", "noqa", "phpstan"
 # per file, and passing a directory would apply sketch rules to every .cpp.
 
 
+def _no_runner(name: str) -> dict[str, Any]:
+    """The check for a tool name TOOL_RUNNERS does not have: it did not run."""
+    return {"tool": name, "status": "unknown", "issues": [], "note": f"No runner for '{name}'"}
+
+
 def _run_tools(tool_names: list[str], target: str) -> list[dict[str, Any]]:
     checks = []
     for name in tool_names:
@@ -100,8 +105,7 @@ def _run_tools(tool_names: list[str], target: str) -> list[dict[str, Any]]:
         if runner:
             checks.append(runner(target))
         else:
-            checks.append({"tool": name, "status": "unknown",
-                           "issues": [], "note": f"No runner for '{name}'"})
+            checks.append(_no_runner(name))
     return checks
 
 
