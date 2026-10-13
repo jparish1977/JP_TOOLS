@@ -388,7 +388,8 @@ def _uncomparable(status: dict[str, str], old_versions: dict[str, str]) -> list[
         if st not in _VERDICTS:
             skipped.append((tool, f"did not run ({st})"))
             continue
-        was_v, now_v = old_versions.get(tool, ""), _tool_version(tool)
+        # A tool the baseline has no version for is "cannot tell", as "" is.
+        was_v, now_v = old_versions.get(tool), _tool_version(tool)
         if was_v and now_v and was_v != now_v:
             skipped.append((tool, f"version {was_v} -> {now_v}"))
     return skipped
@@ -406,7 +407,8 @@ def _compared_paths(target: str, root: Path, now: dict[str, Any],
     """
     rel_target = _rel(target, root)
     if Path(target).is_dir():
-        prefix = "" if rel_target in ("", ".") else rel_target.rstrip("/") + "/"
+        # _rel names the root itself ".", never "": it is a Path's as_posix().
+        prefix = "" if rel_target == "." else rel_target.rstrip("/") + "/"
         in_scope = {p for p in was if p.startswith(prefix)}
     else:
         in_scope = {rel_target}
