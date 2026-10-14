@@ -178,6 +178,23 @@ def test_prepare() -> None:
               sorted(p.name for p in root.iterdir() if p.name.startswith(".mutants-wt-")), [])
 
 
+def test_a_failed_git_is_named_with_its_error() -> None:
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    nowhere = "/nonexistent/" + "d" * 400  # git's error quotes the path: longer than 300
+    args = ("-C", nowhere, "status")
+    said = subprocess.run(["git", *args], capture_output=True, text=True, check=False).stderr.strip()
+    check_true("CONTROL: git's own error is longer than the 300 characters kept", len(said) > 300)
+    try:
+        gate._git(*args)
+        raised = ""
+    except gate.GateError as e:
+        raised = str(e)
+    check("a GateError naming the command and the first 300 characters of git's error",
+          raised, f"git -C {nowhere} status: {said[:300]}")
+
+
 def test_is_worktree_of() -> None:
     """Asked directly: prepare() rebuilds whenever this says no, so a wrong
     "no" never shows through prepare alone."""

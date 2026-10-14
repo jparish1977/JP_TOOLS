@@ -54,6 +54,24 @@ def test_extract_picks_cd_by_metadata_tag() -> None:
         check("not a cd", calls(log)[-1][1], "extractraw")
 
 
+def test_extract_says_what_it_does_and_refuses_what_it_cannot() -> None:
+    with fake_tools(chdman=FAKE_CHDMAN) as (w, _log):
+        gone, chd = w / "gone.chd", w / "a.chd"
+        code, out = cli("extract", str(gone), str(w / "x.iso"))
+        check("a missing CHD: exit 1, named, nothing else", (code, out), (1, f"Error: File not found: {gone}\n"))
+        chd.write_bytes(b"chd")
+        with env(FAKE_INFO="Metadata:     Tag='CHT2'  Index=0"):
+            code, out = cli("extract", str(chd), str(w / "a.cue"), "--force", "--dry-run")
+        check("--force and --dry-run: what it would extract, and chdman's arguments, not run",
+              (code, out),
+              (0, (f"Extracting: {chd}\nOutput: {w / 'a.cue'}\n"
+                   f"[DRY RUN] Would run: chdman extractcd --input {chd} --output {w / 'a.cue'} --force\n")))
+        with env(FAKE_RC="1"):
+            code, out = cli("extract", str(chd), str(w / "a.iso"))
+        check("a CHD chdman cannot read: exit 1, said, nothing extracted", (code, out),
+              (1, f"Error: chdman could not read {chd}\n"))
+
+
 def test_delta_and_merge_name_the_parent() -> None:
     with fake_tools(chdman=FAKE_CHDMAN) as (w, log):
         for name in ("a.chd", "b.img"):
