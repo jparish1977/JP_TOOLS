@@ -1,7 +1,10 @@
 """What a changed file's path tells mutmut-gate.py: the module mutmut keys its
 functions by, whether tests other than its own read it, and whether it is a
-suite. Paths are as git names them, from the checkout's root.
+suite, and which suites read it. Paths are as git names them, from the
+checkout's root.
 """
+
+import re
 
 # The files at the root pytest reads its configuration from: testpaths and
 # python_functions decide what it collects at all.
@@ -34,3 +37,26 @@ def is_suite(path: str) -> bool:
     """A test_*.py file under tests/, at any depth."""
     name = path.rpartition("/")[2]
     return path.startswith("tests/") and name.startswith("test_") and name.endswith(".py")
+
+
+def readers(path: str, tests: dict[str, bytes]) -> set[str] | None:
+    """The suites, among TESTS (each test file's text by its path), whose
+    reach a change to the shared file PATH can move: a Python helper is read
+    by the files that import it, a data file by those that name it (by its
+    file name). None when the change can move any test's reach: a conftest.py
+    or a configuration file, a file nothing names, or one a file that is not
+    a suite names (a helper, so whoever imports that reads it too). Matched as
+    bytes: a test file that is not valid UTF-8 is still searched."""
+    name = path.rpartition("/")[2]
+    if name == "conftest.py" or path in CONFIG_FILES:
+        return None
+    if name.endswith(".py"):
+        stem = re.escape(name.removesuffix(".py"))
+        reads = re.compile(rb"(?m)^\s*(?:from\s+" + stem.encode() + rb"\s+import\b|import\s+" + stem.encode()
+                           + rb"\b)")
+        naming = {p for p, text in tests.items() if reads.search(text)}
+    else:
+        naming = {p for p, text in tests.items() if name.encode() in text}
+    if not naming or not all(map(is_suite, naming)):
+        return None
+    return naming
