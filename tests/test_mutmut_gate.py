@@ -177,6 +177,16 @@ def test_prepare() -> None:
         check("  leaving no scratch worktree behind",
               sorted(p.name for p in root.iterdir() if p.name.startswith(".mutants-wt-")), [])
 
+        # What mutants wrote at the top of mutmut's copy, beside mutmut's own.
+        (mutants / "None").mkdir()
+        (mutants / "None" / "out.txt").write_text("x\n", encoding="utf-8")
+        for name in ("None.tmp", "--max-children", "a.py.meta", "b.py.spans", gate.STATS, gate.JUDGED):
+            (mutants / name).write_text("x\n", encoding="utf-8")
+        gate.prepare(root)
+        check("what mutants left at the top is gone; mutmut's own, the links and the tracked file stay",
+              sorted(p.name for p in mutants.iterdir() if p.name != ".git"),
+              sorted(["a.py", "a.py.meta", "b.py.spans", gate.STATS, gate.JUDGED, "node_modules", "vendor"]))
+
 
 def test_a_failed_git_is_named_with_its_error() -> None:
     if not shutil.which("git"):

@@ -143,8 +143,22 @@ def _is_worktree_of(mutants: Path, root: Path) -> bool:
     return Path(mine).resolve() == Path(theirs).resolve()
 
 
+def _litter(mutants: Path) -> list[str]:
+    """The top-level entries of MUTANTS that a mutant wrote: neither a file or
+    directory git tracks, nor mutmut's own (a .meta or .spans, its stats, the
+    judged commit), nor a linked install. A mutant that turned an output path
+    into None or a flag left None/, None.tmp or --max-children there, and a
+    kept mutants/ (a run resumed, a state restored) would keep them for good.
+    Only top-level entries: one inside a tracked directory is not this."""
+    out = _git("-C", str(mutants), "ls-files", "-z", "--others", "--directory")
+    kept = {*LINKED, STATS, JUDGED}
+    names = [p.rstrip("/") for p in out.split("\0") if p and "/" not in p.rstrip("/")]
+    return sorted(n for n in names if n not in kept and not n.endswith((".meta", ".spans")))
+
+
 def prepare(root: Path) -> Path:
-    """mutants/ as an index-only worktree at ROOT's HEAD, installs linked in."""
+    """mutants/ as an index-only worktree at ROOT's HEAD, installs linked in,
+    and nothing at its top that a mutant wrote (_litter)."""
     mutants = root / "mutants"
     mutants.mkdir(exist_ok=True)
     if not _is_worktree_of(mutants, root):
@@ -159,6 +173,12 @@ def prepare(root: Path) -> Path:
     head = _git("-C", str(root), "rev-parse", "HEAD")
     _git("-C", str(mutants), "update-ref", "--no-deref", "HEAD", head)
     _git("-C", str(mutants), "reset", "-q")
+    for name in _litter(mutants):
+        path = mutants / name
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
     for name in LINKED:
         link = mutants / name
         if (root / name).is_dir() and not link.exists() and not link.is_symlink():
