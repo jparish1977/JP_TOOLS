@@ -79,7 +79,7 @@ source_paths = [
     "diff-functions.py", "fix.py", "gh-comment.py", "image-disk.py",
     "init-ci.py", "install-issue-templates.py",
     "inventory-drive.py", "list-exemptions.py", "list-suppressions.py",
-    "mutmut-gate.py", "ntfs-extract.py", "ntfs-inventory.py",
+    "mutmut-clean.py", "mutmut-gate.py", "ntfs-extract.py", "ntfs-inventory.py",
     "ntfs-size.py", "recover.py", "scan-image.py", "snapshot-test.py",
     "spool-audit.py", "undelete.py", "vm-image-boot.py",
 ]
