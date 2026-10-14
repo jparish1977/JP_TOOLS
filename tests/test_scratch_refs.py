@@ -41,9 +41,13 @@ LET_BY = (
 
 
 def _git(repo: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    """git in REPO; the installed hook told which JP_TOOLS to run, this tree
+    unless ENV says otherwise. Named on every call, never left to the
+    environment: under pytest a suite's __main__ never runs, and a value
+    another suite set in the same worker would decide which tree ran."""
     return subprocess.run(["git", "-c", "user.email=test@example.invalid", "-c", "user.name=JP_TOOLS test",
                            "-c", "commit.gpgsign=false", *args], cwd=repo, capture_output=True, text=True,
-                          check=False, env=env)
+                          check=False, env=env or dict(os.environ, JP_TOOLS_DIR=str(ROOT)))
 
 
 def _check(repo: Path) -> subprocess.CompletedProcess[str]:
@@ -226,5 +230,4 @@ def test_hook_prints_the_refusal_around_the_list() -> None:
 
 
 if __name__ == "__main__":
-    os.environ["JP_TOOLS_DIR"] = str(ROOT)
     sys.exit(run(globals(), "scratch-refs"))
