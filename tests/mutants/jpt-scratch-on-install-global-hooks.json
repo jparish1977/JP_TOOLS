@@ -1,0 +1,40 @@
+{
+  "about": "install-global-hooks points git's global core.hooksPath at a directory of shims to the dispatcher, refuses to replace another, names each repository a local core.hooksPath keeps out, and --check tells installed from not. Run: mutate-on-target.py TREE install-global-hooks.py tests/test_global_hooks.py tests/mutants/jpt-scratch-on-install-global-hooks.json",
+  "mutants": [
+    {
+      "name": "core.hooksPath is not set",
+      "edits": [["    set_rc = git_global(\"core.hooksPath\", where.as_posix())", "    set_rc = git_global(\"--get\", \"user.name\")"]],
+      "target": "  and refuses one naming a scratch path, saying so"
+    },
+    {
+      "name": "commit-msg left out",
+      "edits": [["\"prepare-commit-msg\", \"commit-msg\", \"post-commit\"", "\"prepare-commit-msg\", \"post-commit\""]],
+      "target": "its own pre-commit and commit-msg run, commit-msg with git's argument"
+    },
+    {
+      "name": "another global hooks path is replaced",
+      "edits": [["    if have and Path(have).expanduser() != where:", "    if False:"]],
+      "target": "another global core.hooksPath: NOT_RUN, refused, naming it"
+    },
+    {
+      "name": "an uncovered repository exits OK",
+      "edits": [["    return jpexit.FINDINGS if uncovered else jpexit.OK", "    return jpexit.OK"]],
+      "target": "a local core.hooksPath whose pre-commit skips the check: FINDINGS, NOT COVERED, named"
+    },
+    {
+      "name": "a covered repository is called uncovered",
+      "edits": [["        covered = pre.is_file() and \"scratch-refs.py\" in", "        covered = False and \"scratch-refs.py\" in"]],
+      "target": "  one whose pre-commit runs it: covered"
+    },
+    {
+      "name": "--check calls nothing installed current",
+      "edits": [["        if not have or stale:", "        if False:"]],
+      "target": "--check before any install: FINDINGS, not installed"
+    },
+    {
+      "name": "--check calls a current install stale",
+      "edits": [["        if not p.is_file() or p.read_text(encoding=\"utf-8\") != shim(name):", "        if True:"]],
+      "target": "--check after the install: OK, installed and current"
+    }
+  ]
+}

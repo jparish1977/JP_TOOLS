@@ -22,6 +22,13 @@ each followed by "/" or the end of the word.
 usage:
     scratch-refs.py --check   list every scratch path in the files staged for
                               commit; exit 1 if there are any
+    scratch-refs.py --all     the same over every tracked file: CI runs this,
+                              so a commit made past the hook (--no-verify)
+                              still cannot land
+    scratch-refs.py --hook    --check, with the refusal a hook prints around
+                              the list: the one copy of it, for every hook
+                              that runs this (hooks/pre-commit.sh and
+                              hooks/global-dispatch.sh)
 
 Exit codes (jpexit): 0 OK, none; 1 FINDINGS, listed on stdout as
 "  PATH:LINE: TEXT"; 2 NOT_RUN, not in a git repository or a git step failed,
@@ -65,10 +72,13 @@ def git_out(*args: str) -> bytes:
     return result.stdout
 
 
-def staged_files() -> list[str]:
-    """Each staged added, copied, modified or renamed file. NUL-separated, so
-    git does not quote a non-ASCII name."""
-    out = git_out("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR")
+def staged_files(every: bool = False) -> list[str]:
+    """Each staged added, copied, modified or renamed file, or with EVERY each
+    file the index tracks. NUL-separated, so git does not quote a non-ASCII name."""
+    if every:
+        out = git_out("ls-files", "-z")
+    else:
+        out = git_out("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR")
     return [p for p in out.decode("utf-8", "surrogateescape").split("\0") if p]
 
 
@@ -78,11 +88,12 @@ def scratch_lines(text: str) -> list[tuple[int, str]]:
             if SCRATCH.search(line)]
 
 
-def find_refs() -> dict[str, list[tuple[int, str]]]:
-    """{path: [(line, text)]} over every staged file's staged copy. A file
-    holding a NUL byte is binary and not read."""
+def find_refs(every: bool = False) -> dict[str, list[tuple[int, str]]]:
+    """{path: [(line, text)]} over the index's copy of every staged file, or
+    with EVERY of every tracked one. A file holding a NUL byte is binary and
+    not read."""
     found: dict[str, list[tuple[int, str]]] = {}
-    for path in staged_files():
+    for path in staged_files(every):
         blob = git_out("show", f":{path}")
         if b"\0" in blob:
             continue
@@ -91,23 +102,37 @@ def find_refs() -> dict[str, list[tuple[int, str]]]:
     return found
 
 
+REFUSAL_HEAD = ("\n=====================================\n"
+                " Pre-commit check FAILED: you fucking idiot, this commit relies on scratch:")
+REFUSAL_TAIL = (" Nothing anyone relies on runs from scratch or reads anything from it\n"
+                " (METHODOLOGY 2.11, rule 6). Commit what these point at, in the\n"
+                " repository, point at that instead, and delete the scratch copy.\n"
+                "=====================================")
+
+
 def main() -> int:
     name_process("scratch-refs")
-    if {"-h", "--help"} & set(sys.argv[1:]) or "--check" not in sys.argv[1:]:
+    args = set(sys.argv[1:])
+    if {"-h", "--help"} & args or not {"--check", "--all", "--hook"} & args:
         print(__doc__)
-        return jpexit.OK if {"-h", "--help"} & set(sys.argv[1:]) else jpexit.NOT_RUN
+        return jpexit.OK if {"-h", "--help"} & args else jpexit.NOT_RUN
     top = git("rev-parse", "--show-toplevel")
     if top.returncode != 0:
         print("scratch-refs: not in a git repository", file=sys.stderr)
         return jpexit.NOT_RUN
     os.chdir(top.stdout.decode("utf-8", "surrogateescape").strip())
     try:
-        found = find_refs()
+        found = find_refs("--all" in args)
     except GitFailedError as e:
         print(f"scratch-refs: {e}; nothing was checked", file=sys.stderr)
         return jpexit.NOT_RUN
+    hook = "--hook" in args and bool(found)
+    if hook:
+        print(REFUSAL_HEAD)
     for path, lines in sorted(found.items()):
         print("\n".join(f"  {path}:{n}: {text}" for n, text in lines))
+    if hook:
+        print(REFUSAL_TAIL)
     return jpexit.FINDINGS if found else jpexit.OK
 
 

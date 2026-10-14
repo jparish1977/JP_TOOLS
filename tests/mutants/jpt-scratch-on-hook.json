@@ -1,5 +1,5 @@
 {
-  "about": "The hook runs scratch-refs --check on every commit, refuses one it lists, and reads any other exit as BROKEN. Run: mutate-on-target.py TREE hooks/pre-commit.sh tests/test_scratch_refs.py tests/mutants/jpt-scratch-on-hook.json",
+  "about": "The hook runs scratch-refs --hook on every commit, refuses one it lists, and reads any other exit as BROKEN. Run: mutate-on-target.py TREE hooks/pre-commit.sh tests/test_scratch_refs.py tests/mutants/jpt-scratch-on-hook.json",
   "mutants": [
     {
       "name": "the check never runs",
@@ -8,7 +8,7 @@
     },
     {
       "name": "a listed file is not refused as such",
-      "edits": [["    if [ \"$refs_rc\" -eq 1 ] && [ -n \"$REFS\" ]; then", "    if false; then"]],
+      "edits": [["    if [ \"$refs_rc\" -eq 1 ]; then\n        exit 1", "    if [ \"$refs_rc\" -eq 1 ]; then\n        :"]],
       "target": "a staged file whose OLD line names scratch is refused, named, and the idiot told"
     },
     {

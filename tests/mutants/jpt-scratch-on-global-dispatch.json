@@ -1,0 +1,30 @@
+{
+  "about": "The global dispatcher runs the scratch check before every commit, refuses on a finding and on a check that cannot run, then hands every hook to the repository's own. Run: mutate-on-target.py TREE hooks/global-dispatch.sh tests/test_global_hooks.py tests/mutants/jpt-scratch-on-global-dispatch.json",
+  "mutants": [
+    {
+      "name": "pre-commit never checks",
+      "edits": [["if [ \"$name\" = pre-commit ]; then", "if false; then"]],
+      "target": "  and refuses one naming a scratch path, saying so"
+    },
+    {
+      "name": "a finding does not refuse",
+      "edits": [["    if [ \"$rc\" -eq 1 ]; then\n        exit 1", "    if [ \"$rc\" -eq 1 ]; then\n        :"]],
+      "target": "  and refuses one naming a scratch path, saying so"
+    },
+    {
+      "name": "a check that cannot run lets the commit through",
+      "edits": [["        echo \"=====================================\"\n        exit 1\n    fi\nfi", "        echo \"=====================================\"\n        exit 0\n    fi\nfi"]],
+      "target": "a scratch check exiting 3: even a clean commit is refused, BROKEN, naming the exit"
+    },
+    {
+      "name": "the repository's own hook never runs",
+      "edits": [["    exec \"$own\" \"$@\"", "    exit 0"]],
+      "target": "its own pre-commit and commit-msg run, commit-msg with git's argument"
+    },
+    {
+      "name": "the repository's own hook loses git's arguments",
+      "edits": [["    exec \"$own\" \"$@\"", "    exec \"$own\""]],
+      "target": "its own pre-commit and commit-msg run, commit-msg with git's argument"
+    }
+  ]
+}

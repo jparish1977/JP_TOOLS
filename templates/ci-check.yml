@@ -233,6 +233,36 @@ jobs:
           fi
           python ../JP_TOOLS/check.py . --lang ${{ matrix.lang }} --pretty --smells-base "$base"
 
+  # NOTHING RELIED ON RUNS FROM SCRATCH (METHODOLOGY 2.11, rule 6). The
+  # pre-commit hook refuses a commit whose files name a scratch path; this
+  # refuses one made past the hook (git commit --no-verify), over every
+  # tracked file.
+  scratch:
+    runs-on: fleet-ci
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: JP_TOOLS_REPOSITORY is set, off GitHub
+        if: ${{ !vars.JP_TOOLS_REPOSITORY && github.server_url != 'https://github.com' }}
+        run: |
+          echo "Set the repository variable JP_TOOLS_REPOSITORY to JP_TOOLS' owner/name on this forge" >&2
+          echo "(and the secret JP_TOOLS_TOKEN if it is not public): the scratch check is JP_TOOLS'." >&2
+          exit 1
+
+      - name: Check out JP_TOOLS
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}
+          token: ${{ secrets.JP_TOOLS_TOKEN || github.token }}
+          path: _jp_tools
+
+      - name: Put JP_TOOLS beside the checkout
+        run: mv _jp_tools ../JP_TOOLS
+
+      # The runner's own python3: the check is stdlib only.
+      - name: No tracked file names a scratch path
+        run: python3 ../JP_TOOLS/scratch-refs.py --all
+
   # THE PROJECT'S OWN TESTS (METHODOLOGY 2.5, 7.5). check.py is the static
   # half; this is the other. See "--- Tests ---" at the top for what a
   # project provides.

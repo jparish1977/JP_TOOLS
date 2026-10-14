@@ -17,7 +17,9 @@ Importing it also takes git's repository variables out of the environment
 `git rev-parse --local-env-vars`). Under `git bisect run` or a git hook they
 name the REAL repository, and a suite's `git init` or `git commit` in a
 scratch directory would act on it instead. Every suite imports this module
-(tests/test_harness.py holds that), so no suite runs git with them.
+(tests/test_harness.py holds that), so no suite runs git with them. And it
+points GIT_CONFIG_GLOBAL at the null device, so the box's global git config
+(a global core.hooksPath above all) is never read, as in CI.
 """
 
 import importlib.util
@@ -45,6 +47,13 @@ def clear_git_repo_env() -> list[str]:
 
 
 CLEARED_GIT_ENV = clear_git_repo_env()
+
+# The box's own global git config is not read: a suite runs as it does in CI,
+# which has none. Above all, a global core.hooksPath (install-global-hooks.py)
+# would put the box's installed hooks in front of every commit a suite makes,
+# so a suite testing this checkout's hooks would be answered by the installed
+# ones. A suite that tests the global config gives its git its own HOME.
+os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
 
 # What a copy of the whole checkout leaves out: git data, installed packages,
 # and what tools write into the checkout while other suites run beside the

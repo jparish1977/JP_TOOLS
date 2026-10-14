@@ -29,6 +29,20 @@ env:
   CI_WORKERS: 8
 
 jobs:
+  # Nothing relied on runs from scratch (METHODOLOGY 2.11, rule 6): the
+  # pre-commit hook refuses a commit whose files name a scratch path, and this
+  # refuses one made past the hook (git commit --no-verify).
+  scratch:
+    name: No tracked file names a scratch path
+    runs-on: fleet-ci
+    steps:
+      - name: CI does not run as root
+        run: |
+          echo "user: $(id -un) uid $(id -u)"
+          if [ "$(id -u)" = 0 ]; then echo "CI is running as root: use the fleet-ci label" >&2; exit 1; fi
+      - uses: actions/checkout@v6
+      - run: python3 scratch-refs.py --all
+
   python:
     name: Python and shell (ruff, mypy, shellcheck, suites, coverage)
     runs-on: fleet-ci

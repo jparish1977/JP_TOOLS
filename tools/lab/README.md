@@ -45,5 +45,6 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `scrub-history.py` | what a branch's history looks like with a list of names gone from messages, identities and every file version, in a fresh clone, and whether anything named survives; `--squash` makes it one commit of the tip instead; never pushes |
 | `lab-use-sweep.py` | which tracked files across ~/projects and which Claude memories name one of this repo's lab tools, per tool: the candidates for METHODOLOGY 2.9's promotion rule |
 | `mutmut-by-module.py` | after a mutmut run, which modules hold the "no tests" mutants and how many, with killed, survived and pending beside |
+| `scratch-guard-live.sh` | is the scratch commit guard live on this box: a real commit through the installed hook, with a clean one as the control |
 
 Every header carries all three fields.

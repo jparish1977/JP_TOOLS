@@ -177,7 +177,51 @@ def test_a_checker_that_crashes_is_broken() -> None:
         r = _git(repo, "commit", "-m", "x", env=dict(os.environ, JP_TOOLS_DIR=str(tools)))
         out = r.stdout + r.stderr
         check_true("a scratch check that exits 3 refuses the commit as BROKEN, not as clean",
-                   r.returncode != 0 and "BROKEN" in out and "scratch-refs.py --check) exited 3" in out)
+                   r.returncode != 0 and "BROKEN" in out and "scratch-refs.py --hook) exited 3" in out)
+
+
+def _run(repo: Path, flag: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, str(ROOT / "scratch-refs.py"), flag], cwd=repo,
+                          capture_output=True, text=True, check=False)
+
+
+def test_all_reads_every_tracked_file() -> None:
+    """--all is CI's: a commit made past the hook still cannot land."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = _repo(Path(td), hook=False)
+        p = _check(repo)
+        check("--check with nothing staged: OK, though a tracked file names scratch",
+              (p.returncode, p.stdout), (OK, ""))
+        p = _run(repo, "--all")
+        check("--all: the committed file listed, FINDINGS", (p.returncode, p.stdout),
+              (FINDINGS, f"  old.md:2: ran ~/{WORD}/x.sh\n"))
+        (repo / "loose.md").write_text(f"~/{WORD}/y\n", encoding="utf-8")
+        check("  a file git does not track is not read",
+              _run(repo, "--all").stdout, f"  old.md:2: ran ~/{WORD}/x.sh\n")
+        _git(repo, "rm", "-q", "old.md")
+        p = _run(repo, "--all")
+        check("CONTROL: with no tracked file naming scratch, --all is OK and silent",
+              (p.returncode, p.stdout), (OK, ""))
+    p = _run(ROOT, "--all")
+    check("this repository's own tracked files name no scratch path", (p.returncode, p.stdout), (OK, ""))
+
+
+def test_hook_prints_the_refusal_around_the_list() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        repo = _repo(Path(td), hook=False)
+        _stage(repo, "a.md", "clean\n")
+        p = _run(repo, "--hook")
+        check("--hook with nothing found: OK and silent", (p.returncode, p.stdout), (OK, ""))
+        _stage(repo, "b.md", f"~/{WORD}/x\n")
+        p = _run(repo, "--hook")
+        lines = p.stdout.splitlines()
+        check("--hook: FINDINGS, the refusal head, the list, the rule, the fix",
+              (p.returncode, lines[1:3], lines[3], lines[-1]),
+              (FINDINGS, ["=====================================",
+                          " Pre-commit check FAILED: you fucking idiot, this commit relies on scratch:"],
+               f"  b.md:1: ~/{WORD}/x", "====================================="))
+        check_true("  naming the rule and what to do",
+                   "(METHODOLOGY 2.11, rule 6)" in p.stdout and "delete the scratch copy" in p.stdout)
 
 
 if __name__ == "__main__":

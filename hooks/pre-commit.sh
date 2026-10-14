@@ -114,21 +114,15 @@ check_emdashes() {
 # commit. There is no variable that lets it through: commit the thing the
 # file points at, and point at that.
 # FAILS CLOSED, as the em-dash check: 0 none, 1 listed, anything else BROKEN.
+# The refusal is scratch-refs.py's own (--hook), so this hook and the global
+# one (hooks/global-dispatch.sh) print the same words.
 check_scratch_refs() {
-    REFS=$("$PY" "$TOOLS_DIR/scratch-refs.py" --check)
+    "$PY" "$TOOLS_DIR/scratch-refs.py" --hook
     refs_rc=$?
-    if [ "$refs_rc" -eq 1 ] && [ -n "$REFS" ]; then
-        echo ""
-        echo "====================================="
-        echo " Pre-commit check FAILED: you fucking idiot, this commit relies on scratch:"
-        echo "$REFS"
-        echo " Nothing anyone relies on runs from scratch or reads anything from it"
-        echo " (METHODOLOGY 2.11, rule 6). Commit what these point at, in the"
-        echo " repository, point at that instead, and delete the scratch copy."
-        echo "====================================="
+    if [ "$refs_rc" -eq 1 ]; then
         exit 1
     elif [ "$refs_rc" -ne 0 ]; then
-        broken "the scratch check (scratch-refs.py --check) exited $refs_rc, so it did not run." \
+        broken "the scratch check (scratch-refs.py --hook) exited $refs_rc, so it did not run." \
             "run it by hand to see why: $PY \"$TOOLS_DIR/scratch-refs.py\" --check"
     fi
 }

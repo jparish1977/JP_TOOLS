@@ -58,8 +58,33 @@
     },
     {
       "name": "no --check exits OK",
-      "edits": [["        return jpexit.OK if {\"-h\", \"--help\"} & set(sys.argv[1:]) else jpexit.NOT_RUN", "        return jpexit.OK"]],
+      "edits": [["        return jpexit.OK if {\"-h\", \"--help\"} & args else jpexit.NOT_RUN", "        return jpexit.OK"]],
       "target": "no --check: NOT_RUN and the usage, never a silent OK"
+    },
+    {
+      "name": "--all reads only what is staged",
+      "edits": [["    if every:\n        out = git_out(\"ls-files\", \"-z\")", "    if False:\n        out = git_out(\"ls-files\", \"-z\")"]],
+      "target": "--all: the committed file listed, FINDINGS"
+    },
+    {
+      "name": "--all is not passed on",
+      "edits": [["        found = find_refs(\"--all\" in args)", "        found = find_refs()"]],
+      "target": "--all: the committed file listed, FINDINGS"
+    },
+    {
+      "name": "--all alone prints the usage",
+      "edits": [["not {\"--check\", \"--all\", \"--hook\"} & args", "not {\"--check\", \"--hook\"} & args"]],
+      "target": "--all: the committed file listed, FINDINGS"
+    },
+    {
+      "name": "--hook prints no refusal",
+      "edits": [["    hook = \"--hook\" in args and bool(found)", "    hook = False"]],
+      "target": "--hook: FINDINGS, the refusal head, the list, the rule, the fix"
+    },
+    {
+      "name": "--hook prints the refusal when clean",
+      "edits": [["    hook = \"--hook\" in args and bool(found)", "    hook = \"--hook\" in args"]],
+      "target": "--hook with nothing found: OK and silent"
     }
   ]
 }
