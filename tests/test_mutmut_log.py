@@ -31,6 +31,7 @@ import queue
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -287,7 +288,7 @@ def test_the_plan_names_what_each_phase_works_on() -> None:
         ["generating mutants: SOURCES",
          "listing tests: every test pytest collects, to find the ones not traced yet",
          "tracing reach: TRACED",
-         "clean run: the whole suite in one process, which must pass so a mutant's failure is its own",
+         "clean run: the whole suite, which must pass so a mutant's failure is its own",
          "forced-fail check: a test made to fail must fail, or no verdict can be trusted",
          "mutmut: Filtering mutations with type checker"])
     check("  no phase but testing reads the mutants", plan.tested, {})
@@ -311,6 +312,37 @@ def test_the_plan_names_what_each_phase_works_on() -> None:
     check("a name holding __mutmut_ twice is its function up to the first, as mutmut reads it",
           odd.subject(ml.TESTING), "testing 2 mutants in 1 functions (no verdict kept: 1): "
                                    "2 in a.x (no verdict kept)")
+
+
+def test_a_half_written_meta_is_read_again() -> None:
+    reads: list[int] = []
+    pauses: list[float] = []
+
+    def flaky(fails: int) -> Callable[[], dict[str, int | None]]:
+        def codes() -> dict[str, int | None]:
+            reads.append(1)
+            if len(reads) <= fails:
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+            return {"a.x_f__mutmut_1": None}
+        return codes
+
+    check("read again, READS times, REREAD seconds apart", (ml.READS, ml.REREAD), (3, 0.2))
+    with mock.patch.object(time, "sleep", pauses.append):
+        plan = ml.Plan(flaky(2), [], "T", "S", dict)
+        line = plan.subject(ml.TESTING)
+    check("two half-written reads, then a whole one: the line, after two pauses", (line, len(reads), pauses),
+          ("testing 1 mutants in 1 functions (no verdict kept: 1): 1 in a.x_f (no verdict kept)", 3, [0.2, 0.2]))
+    reads.clear()
+    pauses.clear()
+    with mock.patch.object(time, "sleep", pauses.append):
+        plan = ml.Plan(flaky(9), [], "T", "S", dict)
+        try:
+            plan.open_functions()
+            raised = ""
+        except ValueError as e:
+            raised = str(e)
+    check("never whole: the last failure raised, after READS reads", (raised, len(reads), pauses),
+          ("Expecting value: line 1 column 1 (char 0)", 3, [0.2, 0.2]))
 
 
 def test_the_plan_lists_ten_functions_at_most() -> None:
