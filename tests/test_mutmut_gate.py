@@ -570,6 +570,9 @@ def test_the_second_pass_names_the_cleared_mutants() -> None:
         _plant(mutants, "a.py", {"x_f": "1"}, {"a.x_f__mutmut_1": None, "a.x_f__mutmut_2": 0})
         check("the cleared ones, in order", gate._cleared(mutants), ["a.x_f__mutmut_1", "b.x_g__mutmut_2"])
         check("none cleared: none", gate._cleared(Path(td) / "nowhere"), [])
+        (mutants / "c.py.meta").write_text(json.dumps({"hash_by_function_name": {}}), encoding="utf-8")
+        check("a .meta with no verdicts at all adds none", gate._cleared(mutants),
+              ["a.x_f__mutmut_1", "b.x_g__mutmut_2"])
     fits = ["m" * 1023] * 256                    # 256 x (1023 + 1) bytes: exactly the limit
     check("names that fit are kept", gate._named(fits), fits)
     check("one byte over: an unnamed run", gate._named([*fits[:-1], "m" * 1024]), [])
@@ -667,6 +670,42 @@ def test_run_tests_moved_reach_again() -> None:
         with mock.patch.object(gate.subprocess, "call", side_effect=fake):
             gate.run(root, False, 2)
         check("reach unchanged since: mutmut runs once, the new verdict kept", calls, [{"a.x_f__mutmut_1": 1}])
+
+
+def test_run_goes_unnamed_when_the_names_do_not_fit() -> None:
+    """The cleared mutants' names past NAMES_MAX_BYTES: the second run names
+    none, and says why."""
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        mutants = gate.prepare(root)
+        kept = {"git_commit": _head(root), "tests_by_mangled_function_name": {},
+                "duration_by_test": {"tests/t.py::t": 1.0}}
+        (mutants / gate.STATS).write_text(json.dumps(kept), encoding="utf-8")
+        _plant(mutants, "a.py", {"x_f": "1"}, {"a.x_f__mutmut_1": 33})
+        asked: list[list[str]] = []
+
+        def fake(cmd: list[str], **kw: object) -> int:
+            asked.append(cmd)
+            if len(asked) == 1:  # mutmut's trace: tests/t.py::t now reaches a.x_f
+                (mutants / gate.STATS).write_text(json.dumps(
+                    {**kept, "tests_by_mangled_function_name": {"a.x_f": ["tests/t.py::t"]}}),
+                    encoding="utf-8")
+            return 0
+
+        out = io.StringIO()
+        with mock.patch.object(gate.subprocess, "call", side_effect=fake), \
+                mock.patch.object(gate, "NAMES_MAX_BYTES", len("a.x_f__mutmut_1")), \
+                contextlib.redirect_stdout(out):
+            gate.run(root, False, 2)
+        first = [sys.executable, "-m", "mutmut", "run", "--max-children", "2"]
+        check("one byte too many for the name: both runs name nothing", asked, [first, first])
+        check("  and the second says why, the whole line",
+              out.getvalue().splitlines()[-1],
+              "mutmut-gate: test reach moved or tests edited for 1 function(s): their 1 verdict(s) tested again"
+              " (unnamed: too many names for one command line)")
 
 
 def test_run_puts_its_python_first_on_path() -> None:
