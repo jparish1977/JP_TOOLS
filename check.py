@@ -72,8 +72,8 @@ def _parser() -> argparse.ArgumentParser:
                              "a failure.")
     parser.add_argument("--baseline", metavar="FILE",
                         help="Compare against a recorded baseline and fail only "
-                             "where a file got WORSE: a tool's errors or its "
-                             "warnings rose, each counted on its own. Instead of "
+                             "where a file got WORSE (a tool's errors or its "
+                             "warnings rose, each counted on its own), instead of "
                              "failing on any finding at all. Refuses if the "
                              "baseline was recorded in a different mode.")
     parser.add_argument("--touched", action="store_true",
