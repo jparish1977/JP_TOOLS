@@ -196,7 +196,8 @@ def _changed(root: Path, since: object) -> set[str]:
             old: str | None = _git("-C", str(root), "show", f"{since}:pyproject.toml")
         except GateError:  # reason: no pyproject.toml at that commit; a new one counts as moved
             old = None
-        if not pyproject_moves.moves_tests(old, (root / "pyproject.toml").read_text(encoding="utf-8")):
+        # TOML is UTF-8 by its own rule, which is what decode() reads.
+        if not pyproject_moves.moves_tests(old, (root / "pyproject.toml").read_bytes().decode()):
             changed.discard("pyproject.toml")
     return changed
 
