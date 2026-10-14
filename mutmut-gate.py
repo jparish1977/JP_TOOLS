@@ -102,7 +102,11 @@ from typing import NoReturn
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import jpexit
-from jpcheck import mutmut_log
+from jpcheck import mutmut_log, pyproject_moves
+from jpcheck.mutmut_paths import CONFIG_FILES
+from jpcheck.mutmut_paths import is_suite as _is_suite
+from jpcheck.mutmut_paths import module as _module
+from jpcheck.mutmut_paths import shared_by_tests as _shared_by_tests
 from platformtools.procname import name_process
 
 LINKED = ("node_modules", "vendor")
@@ -162,34 +166,6 @@ def prepare(root: Path) -> Path:
     return mutants
 
 
-def _module(path: str) -> str | None:
-    """The module mutmut keys a source file's functions by: jpcheck/lab_use.py
-    is jpcheck.lab_use, a package's __init__.py the package, mutmut-gate.py
-    mutmut-gate. None for a file that is not Python."""
-    if not path.endswith(".py"):
-        return None
-    return path.removesuffix(".py").removesuffix("/__init__").replace("/", ".")
-
-
-def _shared_by_tests(path: str) -> bool:
-    """A file whose change can move the reach of tests that are not in it:
-    a conftest.py anywhere; at the root, each file pytest reads its
-    configuration from (testpaths and python_functions decide what it
-    collects at all); and under tests/ anything but a test_*.py suite and the
-    mutant specs (helpers, case tables, fixtures)."""
-    name = path.rpartition("/")[2]
-    if name == "conftest.py" or path in ("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini"):
-        return True
-    if not path.startswith("tests/") or path.startswith("tests/mutants/"):
-        return False
-    return not (name.startswith("test_") and name.endswith(".py"))
-
-
-def _is_suite(path: str) -> bool:
-    name = path.rpartition("/")[2]
-    return path.startswith("tests/") and name.startswith("test_") and name.endswith(".py")
-
-
 def _suites_naming(root: Path, path: str) -> set[str] | None:
     """The suites whose own text names the changed shared file PATH by its file
     name, so only their tests can have moved; None when the change can move
@@ -198,7 +174,7 @@ def _suites_naming(root: Path, path: str) -> set[str] | None:
     that a helper names (then whoever imports the helper reads it)."""
     name = path.rpartition("/")[2]
     # A conftest.py is a Python file, so the .py test covers it.
-    if path in ("pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini") or name.endswith(".py"):
+    if path in CONFIG_FILES or name.endswith(".py"):
         return None
     tests = [p for p in _git("-C", str(root), "ls-files", "tests").splitlines() if p.endswith(".py")]
     # Matched as bytes: a file name is ASCII here, and a test file that is not
@@ -222,6 +198,21 @@ def _since(root: Path, mutants: Path, doc: dict[str, object]) -> object:
     return judged
 
 
+def _changed(root: Path, since: object) -> set[str]:
+    """The files changed since the commit SINCE, against the working tree
+    (mutmut mutates the files as they are), less a pyproject.toml whose test
+    configuration did not move (jpcheck/pyproject_moves.py)."""
+    changed = set(_git("-C", str(root), "diff", "--name-only", str(since)).splitlines())
+    if "pyproject.toml" in changed:
+        try:
+            old: str | None = _git("-C", str(root), "show", f"{since}:pyproject.toml")
+        except GateError:  # reason: no pyproject.toml at that commit; a new one counts as moved
+            old = None
+        if not pyproject_moves.moves_tests(old, (root / "pyproject.toml").read_text(encoding="utf-8")):
+            changed.discard("pyproject.toml")
+    return changed
+
+
 def forget_moved_reach(root: Path, stats: Path) -> str:
     """Take out of STATS the tests whose reach a change since it was traced
     can have moved (see THE STATE), so mutmut traces just those; say what
@@ -235,8 +226,7 @@ def forget_moved_reach(root: Path, stats: Path) -> str:
         return "kept test reach unreadable: all of it traced"
     since = _since(root, stats.parent, doc)
     try:
-        # Against the working tree, not HEAD: mutmut mutates the files as they are.
-        changed = set(_git("-C", str(root), "diff", "--name-only", str(since)).splitlines())
+        changed = _changed(root, since)
     except GateError:
         stats.unlink()
         return f"cannot diff against the traced commit {since}: all test reach traced"
@@ -272,8 +262,7 @@ def edited_tests(root: Path, stats: Path) -> frozenset[str] | None:
     (a conftest.py, the configuration, a helper). Read BEFORE
     forget_moved_reach, which may remove STATS."""
     try:
-        since = _since(root, stats.parent, json.loads(stats.read_bytes()))
-        changed = set(_git("-C", str(root), "diff", "--name-only", str(since)).splitlines())
+        changed = _changed(root, _since(root, stats.parent, json.loads(stats.read_bytes())))
     except (FileNotFoundError, ValueError, GateError):  # reason: nothing to diff against, so every test counts as edited
         return None
     edited = {p for p in changed if _is_suite(p)}

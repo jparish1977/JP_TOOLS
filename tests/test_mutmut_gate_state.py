@@ -73,6 +73,28 @@ def test_the_judged_commit_is_the_one_to_diff_against() -> None:
                "0 source files kept, 0 changed since the state"))
 
 
+def test_a_pyproject_change_that_moves_no_test_counts_as_none() -> None:
+    """A pyproject.toml change outside what the tests run under is left out of
+    what changed; one inside it, or a pyproject.toml new since, is kept."""
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        before_any = _head(root)  # no pyproject.toml yet
+        old = _commit(root, {"pyproject.toml": '[project]\nversion = "1"\n\n[tool.mutmut]\nsource_paths = ["a.py"]\n',
+                             "b.py": ""}, "a pyproject")
+        _commit(root, {"pyproject.toml": '[project]\nversion = "2"\n\n[tool.mutmut]\nsource_paths = ["a.py", "b.py"]\n',
+                       "b.py": "x = 1\n"}, "a version and a source path")
+        check("a version and a source path: not a change the tests see", gate._changed(root, old), {"b.py"})
+        check("no pyproject.toml at the commit: a new one counts", gate._changed(root, before_any),
+              {"b.py", "pyproject.toml"})
+        (root / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["a.py"]\ntimeout_multiplier = 9.0\n',
+                                             encoding="utf-8")
+        check("mutmut's timeout, in the working tree: one they see", gate._changed(root, old),
+              {"b.py", "pyproject.toml"})
+
+
 def test_edited_tests_reach_is_cleared_before_the_run() -> None:
     with tempfile.TemporaryDirectory() as td:
         mutants = Path(td)

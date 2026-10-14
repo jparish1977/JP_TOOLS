@@ -1,0 +1,10 @@
+{
+  "about": "jpcheck/pyproject_moves.py's UNMOVING, module level, so mutmut does not mutate it: the one [tool.mutmut] key that moves no test. Run: mutate-on-target.py TREE jpcheck/pyproject_moves.py tests/test_pyproject_moves.py tests/mutants/jpt-unmoving-on-pyproject-moves.json",
+  "mutants": [
+    {
+      "name": "also_copy taken for the key that moves nothing",
+      "edits": [["UNMOVING = \"source_paths\"", "UNMOVING = \"also_copy\""]],
+      "target": "the key mutmut's table keeps that moves nothing"
+    }
+  ]
+}
