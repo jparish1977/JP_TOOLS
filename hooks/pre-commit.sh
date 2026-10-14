@@ -56,20 +56,29 @@ tools_git() {
     (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR; git -C "$TOOLS_DIR" "$@")
 }
 
+# Directory $1 as a physical path, symlinks resolved; nothing when it is not one.
+physical() {
+    (cd "$1" 2>/dev/null && pwd -P)
+}
+
 # The check.py the staged files are linted with: TOOLS_DIR's, except for a
 # commit in JP_TOOLS itself, from a worktree of the repository TOOLS_DIR is
 # (the same git common directory), which is linted by that worktree's own
 # check.py and so its own configs: a branch changing configs/ruff.toml is
 # held to the rules it brings, not master's. The em-dash and scratch checks
-# stay TOOLS_DIR's, so a branch cannot weaken them. git prints the common
-# directory relative to where it ran, so each is resolved from there.
+# stay TOOLS_DIR's, so a branch cannot weaken them; the lint does not: a
+# branch's own check.py and configs decide whether its commits pass here, so
+# this hook cannot hold a branch to master's lint rules. CI is the gate that
+# does. Paths are compared physically, so a symlinked one still matches.
+# TOOLS_DIR's own checkout already runs its check.py, so it is passed over.
 choose_check_py() {
     CHECK_PY="$TOOLS_DIR/check.py"
     top=$(git rev-parse --show-toplevel) || return 0
     [ -f "$top/check.py" ] || return 0
-    ours=$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P) || return 0
-    theirs=$(cd "$TOOLS_DIR" && cd "$(tools_git rev-parse --git-common-dir)" 2>/dev/null && pwd -P) || return 0
-    [ "$ours" = "$theirs" ] || return 0
+    [ "$(physical "$top")" = "$(physical "$TOOLS_DIR")" ] && return 0
+    ours=$(physical "$(git rev-parse --path-format=absolute --git-common-dir)")
+    theirs=$(physical "$(tools_git rev-parse --path-format=absolute --git-common-dir)")
+    [ -n "$ours" ] && [ "$ours" = "$theirs" ] || return 0
     CHECK_PY="$top/check.py"
     echo "JP_TOOLS: a commit in JP_TOOLS itself: linting with this worktree's check.py ($top), its own configs." >&2
 }

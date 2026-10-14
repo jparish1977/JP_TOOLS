@@ -8,8 +8,13 @@
     },
     {
       "name": "any repository holding a check.py is linted by its own",
-      "edits": [["    [ \"$ours\" = \"$theirs\" ] || return 0\n", ""]],
+      "edits": [["    [ -n \"$ours\" ] && [ \"$ours\" = \"$theirs\" ] || return 0\n", ""]],
       "target": "another repository is linted by TOOLS_DIR's check.py, saying nothing of a worktree"
+    },
+    {
+      "name": "TOOLS_DIR's own checkout announced as a worktree",
+      "edits": [["    [ \"$(physical \"$top\")\" = \"$(physical \"$TOOLS_DIR\")\" ] && return 0\n", ""]],
+      "target": "  and, being TOOLS_DIR itself, says nothing of a worktree"
     },
     {
       "name": "the choice is never made, so no check.py is named",

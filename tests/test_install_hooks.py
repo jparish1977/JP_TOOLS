@@ -592,6 +592,8 @@ def own_worktree_cases(tmp: Path) -> None:
     out = r.stdout + r.stderr
     check("CONTROL: the main checkout keeps TOOLS_DIR's check.py, and passes",
           _ran(r) and "the branch check.py ran" not in out, out)
+    check("  and, being TOOLS_DIR itself, says nothing of a worktree",
+          "linting with this worktree" not in out, out)
     repo, _ = build_repo(tmp)
     (repo / "check.py").write_text(BRANCH_CHECK_PY, encoding="utf-8")  # a check.py, but not JP_TOOLS'
     git(repo, "add", "check.py")
