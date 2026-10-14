@@ -255,13 +255,16 @@ jobs:
     # the log when it is printed, not when the step ends.
     env:
       PYTHONUNBUFFERED: '1'
+      PR_BRANCH: ${{ github.head_ref }}
     # --cpus caps the job, mutmut's workers and every child their tests start
     # (check.py, mypy), at MUTMUT_WORKERS cores: uncapped, 24 workers and their
     # children held the whole box (load 65 on 32, 2026-10-13). Container
     # options cannot read env, so keep it equal to MUTMUT_WORKERS by hand.
+    # jp-tools-mutmut-pr keeps each PR's own state between its pushes
+    # (ci-image/pr-mutmut-state.sh), read-write; the nightly's stays read-only.
     container:
       image: fleet-ci:current
-      options: --cpus 24 -v mutmut-state:/mutmut-state:ro
+      options: --cpus 24 -v mutmut-state:/mutmut-state:ro -v jp-tools-mutmut-pr:/mutmut-pr
     steps:
       - name: CI does not run as root
         run: |
@@ -287,7 +290,9 @@ jobs:
         shell: bash
         run: |
           bash ci-image/fetch-mutmut-state.sh /mutmut-state
+          bash ci-image/pr-mutmut-state.sh restore /mutmut-pr "$PR_BRANCH"
           python mutmut-gate.py run --max-children "$MUTMUT_WORKERS"
+          bash ci-image/pr-mutmut-state.sh save /mutmut-pr "$PR_BRANCH"
           python -m mutmut results --all true > mutmut-results.txt
           python mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt
 
