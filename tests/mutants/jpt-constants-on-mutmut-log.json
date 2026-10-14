@@ -47,6 +47,11 @@
       "target": "progress each tenth and each minute, mutmut's output waited for a second at a time"
     },
     {
+      "name": "mutmut given ten seconds, not thirty, to stop its workers",
+      "edits": [["STOP_WAIT = 30.0", "STOP_WAIT = 10.0"]],
+      "target": "progress each tenth and each minute, mutmut's output waited for a second at a time"
+    },
+    {
       "name": "mutmut's output waited for two seconds at a time",
       "edits": [["TICK = 1.0", "TICK = 2.0"]],
       "target": "progress each tenth and each minute, mutmut's output waited for a second at a time"

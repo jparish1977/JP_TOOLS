@@ -25,6 +25,7 @@ import codecs
 import io
 import queue
 import re
+import signal
 import subprocess
 import threading
 import time
@@ -48,6 +49,8 @@ STEPS = 10
 EVERY = 60.0
 # Seconds to wait for mutmut's output before checking whether a line is due.
 TICK = 1.0
+# Seconds mutmut has to stop its workers after an interrupt before it is killed.
+STOP_WAIT = 30.0
 
 
 def say(message: str) -> None:
@@ -211,9 +214,16 @@ class Relay:
             self.step = done * STEPS // todo
             self._progress()
 
+    # The plan reads mutmut's .meta files while mutmut rewrites them, so a read
+    # can meet one half written. What the log could not read it says, and the
+    # run goes on: the log never stops the run it describes.
+
     def _phase(self, title: str) -> None:
         self.phase = title
-        self.doing = self.plan.subject(title)
+        try:
+            self.doing = self.plan.subject(title)
+        except (OSError, ValueError) as e:  # reason: said in the line; the next read is whole
+            self.doing = f"mutmut: {title} (what it works on could not be read: {e})"
         self.began = self.clock()
         self._say(self.doing)
 
@@ -221,8 +231,11 @@ class Relay:
         start, now = self.start, self.now
         done = {t: now[i] - start[i] for i, t in enumerate(TALLIES, 2)}
         tallies = ", ".join(f"{done[t]:,} {t}" for t in TALLIES if t in ALWAYS or done[t])
-        self._say(f"{now[0] - start[0]:,} / {start[1] - start[0]:,} judged: {tallies}; "
-                  f"{self.plan.open_functions()}")
+        try:
+            functions = self.plan.open_functions()
+        except (OSError, ValueError) as e:  # reason: said in the line; the next read is whole
+            functions = f"functions open could not be read: {e}"
+        self._say(f"{now[0] - start[0]:,} / {start[1] - start[0]:,} judged: {tallies}; {functions}")
 
 
 class _Fed(Protocol):
@@ -247,6 +260,15 @@ def run_relayed(cmd: list[str], cwd: Path, env: dict[str, str], relay: _Fed) -> 
     proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     chunks: queue.Queue[bytes] = queue.Queue()
     threading.Thread(target=_drain, args=(cast(io.BufferedReader, proc.stdout), chunks)).start()
+    try:
+        _relay_until_done(chunks, relay)
+    except BaseException:
+        _stop(proc)
+        raise
+    return proc.wait()
+
+
+def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed) -> None:
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
     while True:
         try:
@@ -260,4 +282,16 @@ def run_relayed(cmd: list[str], cwd: Path, env: dict[str, str], relay: _Fed) -> 
         relay.tick()
     relay.feed(decoder.decode(b"", final=True))
     relay.close()
-    return proc.wait()
+
+
+def _stop(proc: "subprocess.Popen[bytes]") -> None:
+    """Stop PROC when its output can no longer be read: SIGINT first, which
+    mutmut takes as an interrupt and stops its workers on, then SIGKILL after
+    STOP_WAIT seconds. Left running, it would go on unwatched with its reader
+    holding the gate open until it ended."""
+    proc.send_signal(signal.SIGINT)
+    try:
+        proc.wait(timeout=STOP_WAIT)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
