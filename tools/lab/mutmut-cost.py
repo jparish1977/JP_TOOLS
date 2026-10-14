@@ -91,6 +91,10 @@ def main() -> int:
     print(f"  {'est h':>7} {'share':>6} {'mutants':>7} {'surv':>5} {'tests':>5} {'s/mutant':>8}  function")
     for cost, fn, n, s, k, per in rows[:args.top]:
         print(f"  {cost / 3600:7.2f} {cost / total:6.1%} {n:7,} {s:5,} {k:5} {per:8.2f}  {fn}")
+    print(f"\nfunctions by survivors x reaching seconds, the floor (top {args.top}):")
+    print(f"  {'floor h':>7} {'share':>6} {'surv':>5} {'tests':>5} {'s/mutant':>8}  function")
+    for cost, fn, n, s, k, per in sorted(rows, key=lambda r: -r[5] * r[3])[:args.top]:
+        print(f"  {per * s / 3600:7.2f} {per * s / floor if floor else 0:6.1%} {s:5,} {k:5} {per:8.2f}  {fn}")
     print(f"\ntests by mutant-runs charged to them (top {args.top}):")
     print(f"  {'est h':>7} {'share':>6} {'secs':>7} {'fns':>5}  test")
     for t, cost in charged.most_common(args.top):
