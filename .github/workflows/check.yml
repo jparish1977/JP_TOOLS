@@ -8,7 +8,7 @@ on:
   # Proving a change before it reaches its pull request: this whole workflow,
   # dispatched on a work branch, runs every job a pull request runs, on the
   # same runner, so nothing about it is a copy that can drift from CI.
-  #   forgejo.py dispatch check.yml --ref WORK_BRANCH -i pr_branch=PR_BRANCH --repo OWNER/NAME
+  #   forgejo.py dispatch check.yml --ref WORK_BRANCH --input pr_branch=PR_BRANCH --repo OWNER/NAME
   # The mutation job keeps its state as PR_BRANCH's, so the pull request's own
   # run after the push judges only what changed since. Smells are judged
   # against BASE, as a pull request's are against its base.
