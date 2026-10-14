@@ -436,8 +436,13 @@ def run(root: Path, full: bool, children: int) -> None:
                        f"their {verdicts} verdict(s) tested again ({how})")
         _mutmut_run(root, children, mutmut_log.Plan(codes, names, "the first run traced it",
                                                     "none changed since the first run", lambda: why))
-    # Every verdict and every test's reach now stand for HEAD: the next run
-    # here, or from a copy of this state, judges only what changed since.
+    # Every verdict and every test's reach now stand for what was tested. When
+    # that is HEAD, say so: the next run here, or from a copy of this state,
+    # judges only what changed since. A tree with changes not committed was
+    # not HEAD, so nothing is recorded and the next run diffs from mutmut's.
+    if _git("-C", str(root), "status", "--porcelain", "--untracked-files=no"):
+        mutmut_log.say("the tree holds changes not committed: no judged commit recorded")
+        return
     (mutants / JUDGED).write_bytes(json.dumps({"commit": _git("-C", str(root), "rev-parse", "HEAD")}).encode())
 
 

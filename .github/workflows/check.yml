@@ -262,6 +262,10 @@ jobs:
     # options cannot read env, so keep it equal to MUTMUT_WORKERS by hand.
     # jp-tools-mutmut-pr keeps each PR's own state between its pushes
     # (ci-image/pr-mutmut-state.sh), read-write; the nightly's stays read-only.
+    # Every PR job mounts it read-write, so one PR's code can write another
+    # branch's entry, which that branch's next push restores: sound only while
+    # everyone who can open a pull request here is trusted, as on this forge.
+    # A repository taking PRs from strangers keeps no such volume.
     container:
       image: fleet-ci:current
       options: --cpus 24 -v mutmut-state:/mutmut-state:ro -v jp-tools-mutmut-pr:/mutmut-pr

@@ -16,19 +16,23 @@
 # restore: when this branch has an entry for this state version, its mutants/
 # replaces the state's copy; mutmut-gate then judges only what changed since
 # the commit that run judged (mutmut-gate.json). The baseline stays the
-# state's. With no entry, or no PR_DIR (not mounted), the state's copy is kept.
+# state's. The entry is copied beside the checkout first and swapped in only
+# when that worked; with no entry, one that cannot be read, or no PR_DIR (not
+# mounted), the state's copy is kept.
 #
 # save: this run's mutants/ becomes the branch's entry for the state version,
 # whole or not at all; entries for another state version untouched for three
 # hours (no job runs that long) are removed, so PR_DIR holds about one day's
 # open PRs. A save that cannot write PR_DIR says so and changes nothing.
 #
-# BRANCH is the pull request's head branch, its characters outside
-# [A-Za-z0-9._-] as "_". Exit: 0, whatever was or was not kept; 2 a usage
-# error or no state copied here.
+# BRANCH is the pull request's head branch, which names its entry. One with a
+# character outside [A-Za-z0-9._-] has those as "_" and then "-" and the
+# first 12 hex digits of the name's SHA-256, so two branches the flattening
+# makes alike (a/b, a_b) never share an entry. Exit: 0, whatever was or was
+# not kept; 2 a usage error or no state copied here.
 printf '%s' jpt-mut-pr > /proc/$$/comm 2>/dev/null
 set -euo pipefail
-here=$(dirname "$0")
+here=$(cd "$(dirname "$0")" && pwd)
 verb=${1:-}; pr=${2:-}; branch=${3:-}
 if [ -z "$pr" ] || [ -z "$branch" ] || { [ "$verb" != restore ] && [ "$verb" != save ]; }; then
   echo "usage: pr-mutmut-state.sh restore|save PR_DIR BRANCH" >&2
@@ -39,21 +43,30 @@ if [ ! -f mutmut-state-version ] || [ ! -d mutants ]; then
   exit 2
 fi
 version=$(cat mutmut-state-version)
-entry=$pr/$(printf '%s' "$branch" | tr -c 'A-Za-z0-9._-' '_')@$version
+flat=$(printf '%s' "$branch" | tr -c 'A-Za-z0-9._-' '_')
+if [ "$flat" != "$branch" ]; then
+  flat=$flat-$(printf '%s' "$branch" | sha256sum | cut -c1-12)
+fi
+entry=$pr/$flat@$version
 
 restore() {
   if [ ! -d "$pr" ]; then
     echo "pr-mutmut-state: no $pr mounted: this push starts from the state $version"
-  elif [ ! -e "$entry/current" ]; then
-    echo "pr-mutmut-state: nothing kept for $branch against state $version: this push starts from the state"
-  else
-    rm -rf mutants
-    mv mutmut-baseline.json mutmut-baseline.json.state
-    bash "$here/fetch-mutmut-state.sh" "$entry" > /dev/null
-    mv mutmut-baseline.json.state mutmut-baseline.json
-    echo "$version" > mutmut-state-version
-    echo "pr-mutmut-state: restored $branch's own state against $version: only what changed since its last run is judged"
+    return
   fi
+  if [ ! -e "$entry/current" ]; then
+    echo "pr-mutmut-state: nothing kept for $branch against state $version: this push starts from the state"
+    return
+  fi
+  copy=$(mktemp -d ./.pr-mutmut-state.XXXXXX)
+  trap 'rm -rf "$copy"' EXIT
+  if ! (cd "$copy" && bash "$here/fetch-mutmut-state.sh" "$entry") > /dev/null 2>&1; then
+    echo "pr-mutmut-state: could not read $branch's kept state: this push starts from the state $version"
+    return
+  fi
+  rm -rf mutants
+  mv "$copy/mutants" mutants
+  echo "pr-mutmut-state: restored $branch's own state against $version: only what changed since its last run is judged"
 }
 
 save() {
