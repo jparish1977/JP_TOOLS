@@ -10,6 +10,7 @@ PR directory: a pull request's own mutmut state, kept between its pushes.
     - After the nightly publishes a new state version, the branch's entry is
       still restored, under the new baseline.
     - A save removes entries no push has saved for 14 days; newer ones stay.
+    - An entry is writable by its owner only, under CI's umask 0 too.
     - No PR directory, nothing kept, a PR directory that cannot be written:
       said, exit 0, the checkout's state copy untouched.
     - No state copied, or a usage error: exit 2.
@@ -54,8 +55,9 @@ def _checkout(where: Path, meta: str, version: str = "v-1", baseline: str = "B")
 
 
 def _pr(verb: str, cwd: Path, pr: Path, branch: str = "feat/x y") -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["bash", str(PR), verb, str(pr), branch], cwd=cwd, capture_output=True,
-                          text=True, check=False, env=_ENV)
+    """VERB run as CI runs it: under umask 0, so a mode it does not set itself is open to all."""
+    return subprocess.run(["bash", "-c", 'umask 0 && exec bash "$@"', "pr", str(PR), verb, str(pr), branch],
+                          cwd=cwd, capture_output=True, text=True, check=False, env=_ENV)
 
 
 def _meta(co: Path) -> str:
@@ -75,6 +77,8 @@ def test_a_saved_state_is_restored_by_the_next_push() -> None:
               (0, "pr-mutmut-state: kept feat/x y's state for its next push\n"))
         check("  as the branch's entry, its unsafe characters as _ and its name's hash",
               sorted(e.name for e in pr.iterdir()), [FEAT])
+        check("  writable by its owner only, though CI's umask is 0",
+              oct((pr / FEAT).stat().st_mode & 0o777), oct(0o755))
         check_true("  and no baseline.json left in the checkout", not (first / "baseline.json").exists())
         second = _checkout(Path(td) / "push2", "the state's own", baseline="STATE")
         p = _pr("restore", second, pr)
