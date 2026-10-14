@@ -16,9 +16,10 @@
 # A current that is still a plain directory (the layout before this) is
 # moved to a version first.
 #
-# From mutants/ it takes the files git tracks there and mutmut's own (.meta,
-# .spans, mutmut-stats.json), so mutmut-gate's .git link, the linked installs
-# and anything a mutant wrote stay out. The list goes to tar NUL-separated
+# From mutants/ it takes the files git tracks there, mutmut's own (.meta,
+# .spans, mutmut-stats.json) and mutmut-gate's record of the commit it judged
+# (mutmut-gate.json), so mutmut-gate's .git link, the linked installs and
+# anything a mutant wrote stay out. The list goes to tar NUL-separated
 # with -T, so no name is quoted or read as a pattern (GNU tar does not read
 # --exclude-from NUL-separated: a name after the first was kept, measured).
 #
@@ -51,13 +52,15 @@ keep=$(mktemp)
 trap 'rm -f "$keep"' EXIT
 # What goes in is listed, not what stays out: the files git tracks there that
 # mutmut wrote, and mutmut's own, NUL-separated and read literally by -T.
-mutmuts() { grep -z -e '\.meta$' -e '\.spans$' -e '^mutmut-stats\.json$' || true; }
+mutmuts() { grep -z -e '\.meta$' -e '\.spans$' -e '^mutmut-stats\.json$' -e '^mutmut-gate\.json$' || true; }
 { git -C mutants ls-files -z; git -C mutants ls-files -z --others | mutmuts; } \
   | while IFS= read -r -d '' f; do
       if [ -e "mutants/$f" ]; then printf 'mutants/%s\0' "$f"; fi
     done > "$keep"
 printf 'baseline.json\0' >> "$keep"
-left=$(git -C mutants ls-files -z --others | { grep -z -v -e '\.meta$' -e '\.spans$' -e '^mutmut-stats\.json$' || true; } | tr -cd '\0' | wc -c)
+left=$(git -C mutants ls-files -z --others \
+  | { grep -z -v -e '\.meta$' -e '\.spans$' -e '^mutmut-stats\.json$' -e '^mutmut-gate\.json$' || true; } \
+  | tr -cd '\0' | wc -c)
 echo "publish-mutmut-state: left out, written by mutants: $left path(s)"
 tar -cf - --null --no-wildcards -T "$keep" | tar -C "$dir" -xf -
 chmod -R go-w "$dir"
