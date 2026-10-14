@@ -1,5 +1,5 @@
 {
-  "about": "mutmut-gate's record of the commit it judged is named as publish-mutmut-state.sh keeps it; module level, so mutmut does not mutate it. Run: mutate-on-target.py TREE mutmut-gate.py tests/test_mutmut_gate.py tests/mutants/jpt-judged-on-mutmut-gate.json",
+  "about": "mutmut-gate's record of the commit it judged is named as publish-mutmut-state.sh keeps it; module level, so mutmut does not mutate it. Run: mutate-on-target.py TREE mutmut-gate.py tests/test_mutmut_gate_state.py tests/mutants/jpt-judged-on-mutmut-gate.json",
   "mutants": [
     {
       "name": "the record under a name publish leaves out, so a state copied on forgets what it judged",
