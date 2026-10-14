@@ -156,6 +156,26 @@ def git_test_warnings_that_rise_fail() -> None:
         check("  and back at one: exit 0", check_py("a.sh", "--baseline", base, cwd=r).returncode, 0)
 
 
+def git_test_touched_holds_a_file_of_warnings() -> None:
+    """A touched file whose recorded findings are all warnings must lower them."""
+    if not shutil.which("shellcheck"):
+        print("SKIP: shellcheck not found")
+        return
+    with repo() as r:
+        two = "#!/bin/sh\necho $1\necho $2\n"  # two SC2086 warnings, no error
+        (r / "a.sh").write_text(two, encoding="utf-8")
+        base = str(r / "base.json")
+        check_py(".", "--record-baseline", base, cwd=r)
+        check("CONTROL: recorded with two shellcheck warnings and no error",
+              {k: json.loads(Path(base).read_text(encoding="utf-8"))["files"]["a.sh"]["shellcheck"][k]
+               for k in ("errors", "warnings")}, {"errors": 0, "warnings": 2})
+        check("touched and unchanged: NOT_LOWERED (3)",
+              check_py("a.sh", "--baseline", base, "--touched", cwd=r).returncode, 3)
+        (r / "a.sh").write_text("#!/bin/sh\necho \"$1\"\necho $2\n", encoding="utf-8")
+        check("  one warning fixed: exit 0",
+              check_py("a.sh", "--baseline", base, "--touched", cwd=r).returncode, 0)
+
+
 def git_test_a_per_file_run_compares_only_what_it_measured() -> None:
     """The hook checks one staged file per run; every other baselined file must
     be counted, never compared as if it had improved to zero."""
@@ -419,6 +439,12 @@ def git_test_touched_never_counts_cross_file_tools() -> None:
     was2 = {"a.py": {"ruff": {"errors": 3, "warnings": 0}}}
     check("a tool that cannot be compared is not counted either",
           baseline._not_reduced("a.py", was2, was2, {"ruff"}), None)
+    warned = {"b.sh": {"shellcheck": {"errors": 0, "warnings": 2}}}
+    check("a file holding only warnings, none fixed, is not lowered",
+          baseline._not_reduced("b.sh", warned, warned, set()), (2, 2))
+    fixed = {"b.sh": {"shellcheck": {"errors": 0, "warnings": 1}}}
+    check("  and one warning fixed lowers it",
+          baseline._not_reduced("b.sh", fixed, warned, set()), None)
     rose = {"a.py": {"mypy": {"errors": 5, "warnings": 0}, "ruff": {"errors": 0, "warnings": 0}}}
     worse, _ = baseline._deltas({"a.py"}, rose, was, set())
     check("but a mypy count that RISES is worse, as any tool's is",

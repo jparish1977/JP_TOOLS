@@ -7,6 +7,11 @@
       "target": "with --touched an unchanged count is refused, as NOT_LOWERED (3)"
     },
     {
+      "name": "only errors must fall, as before #233's review",
+      "edits": [["    before = sum(_count(was, path, t, key) for t in tools for key in _COMPARED)\n    after = sum(_count(now, path, t, key) for t in tools for key in _COMPARED)", "    before = sum(_count(was, path, t, \"errors\") for t in tools)\n    after = sum(_count(now, path, t, \"errors\") for t in tools)"]],
+      "target": "a file holding only warnings, none fixed, is not lowered"
+    },
+    {
       "name": "not lowered reads as worse",
       "edits": [["        return jpexit.NOT_LOWERED", "        return jpexit.FINDINGS"]],
       "target": "with --touched an unchanged count is refused, as NOT_LOWERED (3)"

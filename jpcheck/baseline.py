@@ -494,10 +494,14 @@ def _own_tools(path: str, now: dict[str, Any], was: dict[str, Any],
 
 def _not_reduced(path: str, now: dict[str, Any], was: dict[str, Any],
                  skip: set[str]) -> tuple[int, int] | None:
-    """(before, after) when a touched file had findings and kept as many; else None."""
+    """(before, after) when a touched file had findings and kept as many; else None.
+
+    Findings are its errors and its warnings, as _deltas and _lock_in count
+    them: a file holding only warnings must lower them too. It is asked only
+    once no count rose, so an unchanged sum means no count fell."""
     tools = _own_tools(path, now, was, skip)
-    before = sum(_count(was, path, t, "errors") for t in tools)
-    after = sum(_count(now, path, t, "errors") for t in tools)
+    before = sum(_count(was, path, t, key) for t in tools for key in _COMPARED)
+    after = sum(_count(now, path, t, key) for t in tools for key in _COMPARED)
     return (before, after) if before > 0 and after >= before else None
 
 
