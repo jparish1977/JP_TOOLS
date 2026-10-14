@@ -46,5 +46,6 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `lab-use-sweep.py` | which tracked files across ~/projects and which Claude memories name one of this repo's lab tools, per tool: the candidates for METHODOLOGY 2.9's promotion rule |
 | `mutmut-by-module.py` | after a mutmut run, which modules hold the "no tests" mutants and how many, with killed, survived and pending beside |
 | `scratch-guard-live.sh` | is the scratch commit guard live on this box: a real commit through the installed hook, with a clean one as the control |
+| `purge-prescrub-pull-refs.sh` | after a history rewrite, which refs of a forge's bare repository still reach the old history; `--apply` deletes them, purges the objects and proves none is left |
 
 Every header carries all three fields.
