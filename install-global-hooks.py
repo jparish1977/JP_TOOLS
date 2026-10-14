@@ -13,7 +13,8 @@ nothing a repository had stops running.
 
 A repository whose LOCAL core.hooksPath is set reads its own directory, not
 the global one. Each such repository under the scanned directory is named:
-covered when its own pre-commit runs scratch-refs.py, NOT COVERED otherwise.
+covered when its own pre-commit runs scratch-refs.py or hands to the global
+pre-commit (HANDOFF below), NOT COVERED otherwise, with the line to add.
 
 usage:
     install-global-hooks.py [--scan DIR]   install, then name the repositories
@@ -50,6 +51,13 @@ HOOKS = (
     "post-merge", "pre-push", "pre-auto-gc", "post-rewrite", "sendemail-validate",
     "fsmonitor-watchman", "post-index-change", "reference-transaction", "push-to-checkout",
 )
+
+
+# What a repository's own pre-commit runs to hand its commits to this box's
+# global pre-commit: the one line that covers a repository whose local
+# core.hooksPath keeps the global hooks out. With no global hooks installed
+# sh cannot open it, so the commit is refused rather than let through.
+HANDOFF = 'sh "$HOME/.config/git/jp-tools-hooks/pre-commit"'
 
 
 def hooks_dir() -> Path:
@@ -95,7 +103,8 @@ def local_hooks_paths(scan: Path) -> list[tuple[Path, str, bool]]:
             continue
         local = r.stdout.strip()
         pre = (repo / local if not Path(local).is_absolute() else Path(local)) / "pre-commit"
-        covered = pre.is_file() and "scratch-refs.py" in pre.read_text(encoding="utf-8", errors="replace")
+        text = pre.read_text(encoding="utf-8", errors="replace") if pre.is_file() else ""
+        covered = "scratch-refs.py" in text or HANDOFF in text
         out.append((repo, local, covered))
     return out
 
@@ -111,7 +120,8 @@ def report_scan(scan: Path) -> int:
         else:
             uncovered += 1
             print(f"  NOT COVERED: {repo} sets core.hooksPath={local}, whose pre-commit does not "
-                  f"run scratch-refs.py; add: python3 \"{(TOOLS / 'scratch-refs.py').as_posix()}\" --hook")
+                  f"run the scratch check; put this line first in {local}/pre-commit: "
+                  f"{HANDOFF} \"$@\" || exit 1")
     return jpexit.FINDINGS if uncovered else jpexit.OK
 
 

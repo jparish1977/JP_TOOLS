@@ -23,8 +23,13 @@
     },
     {
       "name": "a covered repository is called uncovered",
-      "edits": [["        covered = pre.is_file() and \"scratch-refs.py\" in", "        covered = False and \"scratch-refs.py\" in"]],
-      "target": "  one whose pre-commit runs it: covered"
+      "edits": [["        covered = \"scratch-refs.py\" in text or HANDOFF in text", "        covered = HANDOFF in text"]],
+      "target": "  one whose pre-commit runs it: covered, and only the one not covered is NOT COVERED"
+    },
+    {
+      "name": "a hand-off is not counted as covered",
+      "edits": [["        covered = \"scratch-refs.py\" in text or HANDOFF in text", "        covered = \"scratch-refs.py\" in text"]],
+      "target": "  one whose pre-commit hands to the global one: covered"
     },
     {
       "name": "--check calls nothing installed current",

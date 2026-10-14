@@ -153,13 +153,33 @@ def test_what_the_global_hooks_cannot_reach_is_named() -> None:
             body = "#!/bin/sh\n" + ("python3 /x/scratch-refs.py --hook\n" if runs_check else "exit 0\n")
             (repo / "hooks" / "pre-commit").write_text(body, encoding="utf-8")
             _git(home, repo, "config", "--local", "core.hooksPath", "hooks")
+        handoff = _new_repo(home, "handoff-local")
+        (handoff / "hooks").mkdir()
+        (handoff / "hooks" / "pre-commit").write_text(
+            '#!/bin/sh\nsh "$HOME/.config/git/jp-tools-hooks/pre-commit" "$@" || exit 1\n', encoding="utf-8")
+        (handoff / "hooks" / "pre-commit").chmod(0o755)
+        _git(home, handoff, "config", "--local", "core.hooksPath", "hooks")
+        r = _commit(home, handoff, "a.md", "clean\n")
+        check("before any install, the hand-off fails closed: even a clean commit is refused",
+              r.returncode != 0, True)
+        _git(home, handoff, "reset", "-q")
         _new_repo(home, "plain")
         p = _install(home)
         check_true("a local core.hooksPath whose pre-commit skips the check: FINDINGS, NOT COVERED, named",
                    p.returncode == FINDINGS and "NOT COVERED: " in p.stdout and "bare-local" in p.stdout)
-        check_true("  one whose pre-commit runs it: covered", "covered: " in p.stdout
-                   and "checked-local" in p.stdout)
+        check_true("  with the hand-off line to add",
+                   'sh "$HOME/.config/git/jp-tools-hooks/pre-commit" "$@" || exit 1' in p.stdout)
+        checked = home / "projects" / "checked-local"
+        check_true("  one whose pre-commit runs it: covered, and only the one not covered is NOT COVERED",
+                   f"\n  covered: {checked} " in "\n" + p.stdout and p.stdout.count("NOT COVERED: ") == 1)
+        check_true("  one whose pre-commit hands to the global one: covered",
+                   f"covered: {handoff} " in p.stdout)
         check_true("  and a plain repository is not listed at all", "plain" not in p.stdout)
+        r = _commit(home, handoff, "a.md", "clean\n")
+        check("the hand-off after the install: a clean commit goes through", r.returncode, 0)
+        r = _commit(home, handoff, "b.md", f"~/{WORD}/x\n")
+        check_true("  and one naming a scratch path is refused",
+                   r.returncode != 0 and "you fucking idiot" in r.stdout + r.stderr)
 
 
 def test_another_global_hooks_path_is_refused() -> None:

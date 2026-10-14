@@ -214,14 +214,15 @@ def test_hook_prints_the_refusal_around_the_list() -> None:
         check("--hook with nothing found: OK and silent", (p.returncode, p.stdout), (OK, ""))
         _stage(repo, "b.md", f"~/{WORD}/x\n")
         p = _run(repo, "--hook")
-        lines = p.stdout.splitlines()
+        bar = "=====================================\n"
         check("--hook: FINDINGS, the refusal head, the list, the rule, the fix",
-              (p.returncode, lines[1:3], lines[3], lines[-1]),
-              (FINDINGS, ["=====================================",
-                          " Pre-commit check FAILED: you fucking idiot, this commit relies on scratch:"],
-               f"  b.md:1: ~/{WORD}/x", "====================================="))
-        check_true("  naming the rule and what to do",
-                   "(METHODOLOGY 2.11, rule 6)" in p.stdout and "delete the scratch copy" in p.stdout)
+              (p.returncode, p.stdout),
+              (FINDINGS, "\n" + bar
+               + " Pre-commit check FAILED: you fucking idiot, this commit relies on scratch:\n"
+               + f"  b.md:1: ~/{WORD}/x\n"
+               + " Nothing anyone relies on runs from scratch or reads anything from it\n"
+               + " (METHODOLOGY 2.11, rule 6). Commit what these point at, in the\n"
+               + " repository, point at that instead, and delete the scratch copy.\n" + bar))
 
 
 if __name__ == "__main__":
