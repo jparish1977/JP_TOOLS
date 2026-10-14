@@ -1,0 +1,55 @@
+{
+  "about": "mutmut_log's module-level shapes and numbers, which mutmut does not mutate: mutmut 3.8's spinner, counter, testing line and result list, the progress line's fields, and its pacing. Run: mutate-on-target.py TREE jpcheck/mutmut_log.py tests/test_mutmut_log.py tests/mutants/jpt-constants-on-mutmut-log.json",
+  "mutants": [
+    {
+      "name": "a spinner character is not known, so its frames pass through",
+      "edits": [["SPINNER = \"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\"", "SPINNER = \"⠙⠹⠸⠼⠴⠦⠧⠇⠏\""]],
+      "target": "each phase said once, by its subject; mutmut's other lines whole; frames and blank lines dropped"
+    },
+    {
+      "name": "the counter's spacing is not mutmut's, so no progress frame is read",
+      "edits": [["COUNTER = re.compile(r\"(\\d+)/(\\d+)  🎉", "COUNTER = re.compile(r\"(\\d+)/(\\d+) 🎉"]],
+      "target": "progress on each new tenth and after a minute's quiet, counted from the start"
+    },
+    {
+      "name": "mutation testing's line is not known, so it passes through unsaid",
+      "edits": [["TESTING = \"Running mutation testing\"", "TESTING = \"Running mutation tests\""]],
+      "target": "each phase said once, by its subject; mutmut's other lines whole; frames and blank lines dropped"
+    },
+    {
+      "name": "a listed result past mutant 9 is not known, so it is printed",
+      "edits": [["LISTED = re.compile(r\"\\S+ \\S+__mutmut_\\d+\")", "LISTED = re.compile(r\"\\S+ \\S+__mutmut_\\d\")"]],
+      "target": "the list left out and counted, once; a line still unended at the close passed through"
+    },
+    {
+      "name": "the list's heading is printed",
+      "edits": [["LISTING = (\"Mutant results\", ", "LISTING = (\"Mutant result\", "]],
+      "target": "the list left out and counted, once; a line still unended at the close passed through"
+    },
+    {
+      "name": "the counter's fields named out of order",
+      "edits": [["TALLIES = (\"killed\", \"no tests\", ", "TALLIES = (\"no tests\", \"killed\", "]],
+      "target": "progress on each new tenth and after a minute's quiet, counted from the start"
+    },
+    {
+      "name": "timeouts said only when there are some",
+      "edits": [["ALWAYS = (\"killed\", \"survived\", \"no tests\", \"timeout\")", "ALWAYS = (\"killed\", \"survived\", \"no tests\")"]],
+      "target": "progress on each new tenth and after a minute's quiet, counted from the start"
+    },
+    {
+      "name": "progress each fifth, not each tenth",
+      "edits": [["STEPS = 10", "STEPS = 5"]],
+      "target": "progress each tenth and each minute, mutmut's output waited for a second at a time"
+    },
+    {
+      "name": "a quiet line each half minute",
+      "edits": [["EVERY = 60.0", "EVERY = 30.0"]],
+      "target": "progress each tenth and each minute, mutmut's output waited for a second at a time"
+    },
+    {
+      "name": "mutmut's output waited for two seconds at a time",
+      "edits": [["TICK = 1.0", "TICK = 2.0"]],
+      "target": "progress each tenth and each minute, mutmut's output waited for a second at a time"
+    }
+  ]
+}
