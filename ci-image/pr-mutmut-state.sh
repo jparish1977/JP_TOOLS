@@ -80,6 +80,8 @@ save() {
     echo "pr-mutmut-state: could not keep $branch's state: the next push starts from the state"
     return
   fi
+  # CI's umask 0 made the entry writable by anyone; only its owner writes it.
+  chmod go-w "$entry"
   touch "$entry"
   find "$pr" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
   echo "pr-mutmut-state: kept $branch's state for its next push"

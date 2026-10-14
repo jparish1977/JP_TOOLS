@@ -47,5 +47,6 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `mutmut-by-module.py` | after a mutmut run, which modules hold the "no tests" mutants and how many, with killed, survived and pending beside |
 | `scratch-guard-live.sh` | is the scratch commit guard live on this box: a real commit through the installed hook, with a clean one as the control |
 | `purge-prescrub-pull-refs.sh` | after a history rewrite, which refs of a forge's bare repository still reach the old history; `--apply` deletes them, purges the objects and proves none is left |
+| `rename-pr-mutmut-entry.sh` | how to keep a pull request's mutmut state in the runner volume across a change in how its entries are named, without overwriting one |
 
 Every header carries all three fields.
