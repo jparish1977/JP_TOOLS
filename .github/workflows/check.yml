@@ -5,6 +5,21 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # Proving a change before it reaches its pull request: this whole workflow,
+  # dispatched on a work branch, runs every job a pull request runs, on the
+  # same runner, so nothing about it is a copy that can drift from CI.
+  #   forgejo.py dispatch check.yml --ref WORK_BRANCH -i pr_branch=PR_BRANCH --repo OWNER/NAME
+  # The mutation job keeps its state as PR_BRANCH's, so the pull request's own
+  # run after the push judges only what changed since. Smells are judged
+  # against BASE, as a pull request's are against its base.
+  workflow_dispatch:
+    inputs:
+      pr_branch:
+        description: the pull request branch whose kept mutmut state this run uses and saves
+        required: true
+      base:
+        description: what a smell is new against
+        default: origin/master
 
 # Every tracked file of each language is checked, by listing them from git:
 # a hand-kept list lets a new file go unchecked while the build is green.
@@ -122,7 +137,7 @@ jobs:
       - name: Check every Python, shell, PHP and PowerShell file
         shell: bash
         env:
-          SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before || inputs.base }}
         run: |
           base="$SMELLS_BASE"
           case "$base" in *[!0]*) ;; *) base="" ;; esac
@@ -249,13 +264,14 @@ jobs:
   # re-tests only its own changes, not everything merged since the nightly.
   mutation:
     name: Mutation (mutmut, changed functions)
-    if: github.event_name == 'pull_request'  # a push to master moves the state instead (mutation-state)
+    # A push to master moves the state instead (mutation-state).
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: fleet-ci
     # Python block-buffers stdout into a pipe: unbuffered, each line reaches
     # the log when it is printed, not when the step ends.
     env:
       PYTHONUNBUFFERED: '1'
-      PR_BRANCH: ${{ github.head_ref }}
+      PR_BRANCH: ${{ github.head_ref || inputs.pr_branch }}
     # --cpus caps the job, mutmut's workers and every child their tests start
     # (check.py, mypy), at MUTMUT_WORKERS cores: uncapped, 24 workers and their
     # children held the whole box (load 65 on 32, 2026-10-13). Container
@@ -370,7 +386,7 @@ jobs:
       - name: Check every JS file
         shell: bash
         env:
-          SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before || inputs.base }}
         run: |
           base="$SMELLS_BASE"
           case "$base" in *[!0]*) ;; *) base="" ;; esac
