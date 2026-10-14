@@ -39,11 +39,11 @@ function in any changed source file, are taken out of the stats; mutmut then
 counts them as new and traces just those. A change to a file the tests share
 (a conftest.py; a helper, case table or fixture under tests/) can move a
 test's reach without touching its file. A data file that only suites name,
-by its file name, moves only those suites' tests, so just they are traced
-again; anything else shared (a conftest.py, the configuration, a Python
-helper, a data file no suite names or a helper names), and a state whose
-commit this clone cannot diff against, has all reach traced afresh: slower,
-never wrong.
+by its file name, or a Python helper that only suites import, moves only
+those suites' tests, so just they are traced again; anything else shared (a
+conftest.py, the configuration, a file nothing names or a helper reads), and
+a state whose commit this clone cannot diff against, has all reach traced
+afresh: slower, never wrong.
 
 mutmut also keeps each mutant's verdict until its function's code changes,
 whatever happens to the tests: a function a test newly reaches would stay
@@ -103,9 +103,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import jpexit
 from jpcheck import mutmut_log, pyproject_moves
-from jpcheck.mutmut_paths import CONFIG_FILES
 from jpcheck.mutmut_paths import is_suite as _is_suite
 from jpcheck.mutmut_paths import module as _module
+from jpcheck.mutmut_paths import readers as _readers
 from jpcheck.mutmut_paths import shared_by_tests as _shared_by_tests
 from platformtools.procname import name_process
 
@@ -167,23 +167,11 @@ def prepare(root: Path) -> Path:
 
 
 def _suites_naming(root: Path, path: str) -> set[str] | None:
-    """The suites whose own text names the changed shared file PATH by its file
-    name, so only their tests can have moved; None when the change can move
-    any test's reach: a conftest.py or a configuration file, any Python file
-    (a helper is imported, not named), or a data file that no suite names or
-    that a helper names (then whoever imports the helper reads it)."""
-    name = path.rpartition("/")[2]
-    # A conftest.py is a Python file, so the .py test covers it.
-    if path in CONFIG_FILES or name.endswith(".py"):
-        return None
+    """The suites whose reach a change to the shared file PATH can move, read
+    from the checkout's test files (jpcheck.mutmut_paths.readers); None when
+    it can move any test's."""
     tests = [p for p in _git("-C", str(root), "ls-files", "tests").splitlines() if p.endswith(".py")]
-    # Matched as bytes: a file name is ASCII here, and a test file that is not
-    # valid UTF-8 is still searched rather than refused.
-    needle = name.encode()
-    naming = {p for p in tests if needle in (root / p).read_bytes()}
-    if not naming or not all(map(_is_suite, naming)):
-        return None
-    return naming
+    return _readers(path, {p: (root / p).read_bytes() for p in tests})
 
 
 def _since(root: Path, mutants: Path, doc: dict[str, object]) -> object:
