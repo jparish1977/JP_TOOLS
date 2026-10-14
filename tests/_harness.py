@@ -22,6 +22,7 @@ points GIT_CONFIG_GLOBAL at the null device, so the box's global git config
 (a global core.hooksPath above all) is never read, as in CI.
 """
 
+import difflib
 import importlib.util
 import os
 import shutil
@@ -88,10 +89,44 @@ def load_script(filename: str) -> ModuleType:
     return module
 
 
+# Past this many characters of repr, a mismatch is shown as what differs, not
+# as both values whole: two copies of a long output on one line hide the line
+# that changed.
+LONG = 200
+
+
+def _text_lines(value: object) -> list[str] | None:
+    """VALUE's lines, each as its repr so a trailing newline or a \\r shows,
+    when it is text or a list of text; else None."""
+    if isinstance(value, str):
+        return [repr(line) for line in value.splitlines(keepends=True)]
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return [repr(v) for v in value]
+    return None
+
+
+def mismatch(expected: object, actual: object) -> str:
+    """What a failed check says after its label. Short values: both, whole.
+    Long text or lists of text: a unified diff, - expected + got, one line of
+    context. Long tuples of the same length: each differing item, by index,
+    in the same way."""
+    if len(repr(expected)) + len(repr(actual)) <= LONG:
+        return f"expected {expected!r}, got {actual!r}"
+    want, got = _text_lines(expected), _text_lines(actual)
+    if want is not None and got is not None:
+        diff = list(difflib.unified_diff(want, got, "expected", "got", lineterm="", n=1))[2:]
+        if diff:  # none when only the type differs (a str against a list of its lines)
+            return "differs (- expected, + got):\n" + "\n".join(diff)
+    if isinstance(expected, tuple) and isinstance(actual, tuple) and len(expected) == len(actual):
+        return "\n".join(f"[{i}] {mismatch(e, a)}" for i, (e, a) in enumerate(zip(expected, actual, strict=True))
+                         if e != a)
+    return f"expected {expected!r}, got {actual!r}"
+
+
 def check(label: str, actual: object, expected: object) -> None:
-    """Record a failure when ACTUAL is not EXPECTED."""
+    """Record a failure when ACTUAL is not EXPECTED, saying what differs."""
     if actual != expected:
-        FAILURES.append(f"{label}: expected {expected!r}, got {actual!r}")
+        FAILURES.append(f"{label}: {mismatch(expected, actual)}")
 
 
 def check_true(label: str, value: bool) -> None:
