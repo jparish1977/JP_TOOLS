@@ -45,6 +45,8 @@ def test_which_suites_read_a_changed_file() -> None:
            "tests/_helper.py": {"tests/test_e.py"}})
     check("a name read as a pattern only literally", mp.readers("tests/a.c.py", {"tests/test_x.py": b"import abc\n"}),
           None)
+    check("a conftest.py moves every test, even one a suite imports",
+          mp.readers("tests/conftest.py", {"tests/test_x.py": b"from conftest import FIX\n"}), None)
 
 
 if __name__ == "__main__":

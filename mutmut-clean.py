@@ -43,7 +43,7 @@ _serial = ForkRunner.run_clean_tests
 def run_clean_tests(self: ForkRunner, tests: Iterable[str]) -> int:
     """The clean run across WORKERS processes, then the same tests collected
     in this one; mutmut's own when WORKERS is not set."""
-    workers = os.environ.get(WORKERS, "")
+    workers = os.environ.get(WORKERS) or ""
     if not workers:
         return int(_serial(self, tests))
     # A fork run's runner is mutmut's PytestRunner, whose pytest helpers its

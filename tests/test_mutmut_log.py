@@ -218,6 +218,15 @@ def test_the_relay_says_progress_each_tenth_and_each_minute() -> None:
     with mock.patch.object(time, "gmtime", return_value=_EPOCH), contextlib.redirect_stdout(out):
         relay.feed(_frame(0, 2000, 0, 0, 0, 0, 0, 0, 0))
         relay.feed(_frame(2000, 2000, 1500, 0, 0, 1000, 0, 0, 0))
+    relay, _ = _relay(clock)
+    glued = io.StringIO()
+    with mock.patch.object(time, "gmtime", return_value=_EPOCH), contextlib.redirect_stdout(glued):
+        relay.feed(_frame(0, 10, 0, 0, 0, 0, 0, 0, 0))
+        relay.feed(_frame(1, 10, 1, 0, 0, 0, 0, 0, 0) + "Traceback (most recent call last):\n")
+    check("a child's line on the end of a frame: the frame counted, the line passed through",
+          glued.getvalue().splitlines(),
+          ["Traceback (most recent call last):",
+           "mutmut-gate 00:00:00Z: 1 / 10 judged: 1 killed, 0 no tests, 0 timeout, 0 survived; OPEN"])
     check("counts past a thousand grouped", out.getvalue().splitlines(),
           [("mutmut-gate 00:00:00Z: 2,000 / 2,000 judged: 1,500 killed, 0 no tests, 0 timeout, 1,000 suspicious,"
             " 0 survived; OPEN")])
