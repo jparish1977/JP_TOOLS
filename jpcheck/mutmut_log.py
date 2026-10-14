@@ -296,9 +296,11 @@ def run_relayed(cmd: list[str], cwd: Path, env: dict[str, str], relay: _Fed) -> 
 
 def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed, ended: Callable[[], bool]) -> None:
     """Feed RELAY each piece until the pipe's end, or until CMD has ENDED and
-    TICK seconds pass with nothing: what still holds the pipe then is a
-    process CMD left behind, not CMD."""
+    TICK seconds pass with nothing, or TICK seconds pass since it ended: what
+    still holds the pipe then is a process CMD left behind, not CMD, and one
+    that keeps writing must not hold the run until it stops."""
     decoder = utf_8.IncrementalDecoder("replace")
+    ended_at: float | None = None
     while True:
         try:
             chunk = chunks.get(timeout=TICK)
@@ -311,6 +313,10 @@ def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed, ended: Callable
             break
         relay.feed(decoder.decode(chunk))
         relay.tick()
+        if ended_at is None and ended():
+            ended_at = time.monotonic()
+        if ended_at is not None and time.monotonic() - ended_at >= TICK:
+            break
     relay.feed(decoder.decode(b"", final=True))
     relay.close()
 

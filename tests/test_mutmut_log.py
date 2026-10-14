@@ -494,6 +494,28 @@ def test_a_child_that_leaves_the_pipe_held_does_not_hold_the_run() -> None:
           (0, "", True))
 
 
+# A child that leaves a process of its own writing to the pipe every 0.05 s
+# for 5 s, and ends.
+_CHATTY = ("import subprocess, sys\n"
+           "subprocess.Popen([sys.executable, '-c', 'import sys, time\\n"
+           "for _ in range(100):\\n    print(\"left\", flush=True); time.sleep(0.05)'])\n"
+           "print('the child is done', flush=True)\n")
+
+
+def test_a_child_that_leaves_a_writer_behind_does_not_hold_the_run() -> None:
+    """What it left behind is never quiet for a TICK, so the run ends a TICK
+    after the child does, whatever still comes."""
+    rec = _Rec()
+    began = time.monotonic()
+    with mock.patch.object(ml, "TICK", 0.2):
+        rc = ml.run_relayed([sys.executable, "-c", _CHATTY], Path.cwd(), dict(os.environ), rec)
+    fed = "".join(text for what, text in rec.events if what == "feed")
+    check("the child's exit and output, long before what it left behind stops",
+          (rc, "the child is done\n" in fed,
+           time.monotonic() - began < 3), (0, True, True))
+    check("  and closed, last", rec.events[-1], ("close", ""))
+
+
 class _Broken(_Rec):
     """A relay that fails on the first output it is given."""
 
