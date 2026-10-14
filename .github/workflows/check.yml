@@ -251,6 +251,10 @@ jobs:
     name: Mutation (mutmut, changed functions)
     if: github.event_name == 'pull_request'  # a push to master moves the state instead (mutation-state)
     runs-on: fleet-ci
+    # Python block-buffers stdout into a pipe: unbuffered, each line reaches
+    # the log when it is printed, not when the step ends.
+    env:
+      PYTHONUNBUFFERED: '1'
     # --cpus caps the job, mutmut's workers and every child their tests start
     # (check.py, mypy), at MUTMUT_WORKERS cores: uncapped, 24 workers and their
     # children held the whole box (load 65 on 32, 2026-10-13). Container
@@ -296,6 +300,8 @@ jobs:
     name: Mutation state onto master
     if: github.event_name == 'push'
     runs-on: fleet-ci
+    env:
+      PYTHONUNBUFFERED: '1'  # each line in the log when printed, as the mutation job
     container:
       image: fleet-ci:current
       options: --cpus 24 -v mutmut-state:/mutmut-state  # MUTMUT_WORKERS cores, as the mutation job

@@ -63,6 +63,13 @@ already written and mutate nothing. node_modules/ and vendor/ are linked in,
 not copied (see pyproject.toml). A state restored from elsewhere carries a
 .git link to a worktree that does not exist; `prepare` makes a new one.
 
+THE LOG. `run` reads mutmut's output instead of passing it on (jpcheck/
+mutmut_log.py): each phase is said once, with what it works on and why (which
+files, which tests, which functions' mutants), mutation testing's progress
+every tenth of the way or each minute, and any other line mutmut writes (a
+warning, an error, a traceback) whole. Every line of the gate's is stamped
+with the UTC time and flushed, and one comes at least each minute.
+
 --results FILE reads `mutmut results --all true` output from FILE instead of
 running it, so a run's results are read once and judged twice (record, gate).
 
@@ -86,6 +93,7 @@ from typing import NoReturn
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import jpexit
+from jpcheck import mutmut_log
 from platformtools.procname import name_process
 
 LINKED = ("node_modules", "vendor")
@@ -282,7 +290,8 @@ def _hashes(mutants: Path) -> dict[str, str]:
 
 def reset_moved_verdicts(mutants: Path, before: dict[str, frozenset[str]] | None,
                          hashes_before: dict[str, str],
-                         edited: frozenset[str] | None) -> tuple[int, int]:
+                         edited: frozenset[str] | None,
+                         why: dict[str, str] | None = None) -> tuple[int, int]:
     """Clear the verdicts of every function whose tests may now judge it
     differently, so the next run tests them again; return (verdicts,
     functions) cleared. mutmut keeps a verdict until the function's code
@@ -293,16 +302,23 @@ def reset_moved_verdicts(mutants: Path, before: dict[str, frozenset[str]] | None
     of reaching tests changed, or when any test now reaching it is in an
     EDITED file (edited_tests; None: every test). A function whose code
     changed (or that is new) was tested by that run already. With no reach
-    recorded before it, every other function counts as moved."""
+    recorded before it, every other function counts as moved. WHY, when
+    given, gets each moved function's reason."""
     after = _reach(mutants / STATS) or {}
     hashes = _hashes(mutants)
     fresh = {fn for fn, h in hashes.items() if hashes_before.get(fn) != h}
+    reasons: dict[str, str] = {}
     if before is None or edited is None:
-        moved = (hashes.keys() | after.keys()) - fresh
+        reasons = dict.fromkeys((hashes.keys() | after.keys()) - fresh, "every test counts as edited")
     else:
-        moved = {fn for fn in before.keys() | after.keys()
-                 if before.get(fn, frozenset()) != after.get(fn, frozenset())
-                 or any(t.partition("::")[0] in edited for t in after.get(fn, frozenset()))} - fresh
+        for fn in (before.keys() | after.keys()) - fresh:
+            if before.get(fn, frozenset()) != after.get(fn, frozenset()):
+                reasons[fn] = "test reach moved"
+            elif any(t.partition("::")[0] in edited for t in after.get(fn, frozenset())):
+                reasons[fn] = "tests edited"
+    moved = reasons.keys()
+    if why is not None:
+        why.update(reasons)
     verdicts = 0
     functions: set[str] = set()
     for meta, _ in _metas(mutants):
@@ -320,18 +336,26 @@ def reset_moved_verdicts(mutants: Path, before: dict[str, frozenset[str]] | None
     return verdicts, len(functions)
 
 
-def _mutmut_run(root: Path, children: int, names: list[str]) -> None:
+def _mutmut_run(root: Path, children: int, plan: mutmut_log.Plan) -> None:
     """mutmut run, its Python first on PATH: the git hooks start `python3`,
-    and in mutants/ every script imports mutmut. NAMES, when given, are the
-    only mutants it runs, and its clean run then covers only the tests that
-    reach them instead of the whole suite in one process."""
-    env = dict(os.environ, PATH=os.pathsep.join(
+    and in mutants/ every script imports mutmut. The plan's NAMES, when
+    given, are the only mutants it runs, and its clean run then covers only
+    the tests that reach them instead of the whole suite in one process. Its
+    output goes through mutmut_log's relay (THE LOG), unbuffered, so
+    mutmut's own lines reach it as they are printed."""
+    env = dict(os.environ, PYTHONUNBUFFERED="1", PATH=os.pathsep.join(
         [str(Path(sys.executable).parent), os.environ.get("PATH", "")]))
-    # call, not run: only the exit code is read, and a nonzero one is ours to name.
-    rc = subprocess.call([sys.executable, "-m", "mutmut", "run", "--max-children", str(children), *names],
-                         cwd=root, env=env)
+    rc = mutmut_log.run_relayed(
+        [sys.executable, "-m", "mutmut", "run", "--max-children", str(children), *plan.names],
+        root, env, mutmut_log.Relay(plan))
     if rc != 0:
         raise GateError(f"mutmut run exited {rc}")
+
+
+def _codes(mutants: Path) -> dict[str, int | None]:
+    """Every mutant's exit code as mutmut keeps it now; None, no verdict."""
+    return {k: code for meta, _ in _metas(mutants)
+            for k, code in json.loads(meta.read_bytes()).get("exit_code_by_key", {}).items()}
 
 
 # The most a named run's mutant names may take on its command line. Linux
@@ -344,9 +368,7 @@ NAMES_MAX_BYTES = 256 * 1024
 def _cleared(mutants: Path) -> list[str]:
     """Every mutant with no verdict, as mutmut keys it: after a run, exactly
     the ones reset_moved_verdicts just cleared."""
-    return sorted(k for meta, _ in _metas(mutants)
-                  for k, code in json.loads(meta.read_bytes()).get("exit_code_by_key", {}).items()
-                  if code is None)
+    return sorted(k for k, code in _codes(mutants).items() if code is None)
 
 
 def _named(names: list[str]) -> list[str]:
@@ -366,15 +388,47 @@ def run(root: Path, full: bool, children: int) -> None:
     before = _reach(mutants / STATS)
     hashes_before = _hashes(mutants)
     edited = edited_tests(root, mutants / STATS)
-    print(f"mutmut-gate: {forget_moved_reach(root, mutants / STATS)}")
-    _mutmut_run(root, children, [])
-    verdicts, functions = reset_moved_verdicts(mutants, before, hashes_before, edited)
+    sources = _sources(root, mutants)
+    traced = forget_moved_reach(root, mutants / STATS)
+    mutmut_log.say(traced)
+
+    def codes() -> dict[str, int | None]:
+        return _codes(mutants)
+
+    _mutmut_run(root, children, mutmut_log.Plan(codes, [], traced, sources,
+                                                 lambda: _code_reasons(mutants, hashes_before)))
+    why: dict[str, str] = {}
+    verdicts, functions = reset_moved_verdicts(mutants, before, hashes_before, edited, why)
     if verdicts:
         names = _named(_cleared(mutants))
         how = f"by name, {len(names)} mutant(s)" if names else "unnamed: too many names for one command line"
-        print(f"mutmut-gate: test reach moved or tests edited for {functions} function(s): "
-              f"their {verdicts} verdict(s) tested again ({how})")
-        _mutmut_run(root, children, names)
+        mutmut_log.say(f"test reach moved or tests edited for {functions} function(s): "
+                       f"their {verdicts} verdict(s) tested again ({how})")
+        _mutmut_run(root, children, mutmut_log.Plan(codes, names, "the first run traced it",
+                                                    "none changed since the first run", lambda: why))
+
+
+def _sources(root: Path, mutants: Path) -> str:
+    """What mutmut will rebuild mutants for: the source files it keeps, and
+    those changed since the state's commit, named. Read before
+    forget_moved_reach, which may remove the trace that holds the commit."""
+    kept = len(_metas(mutants))
+    try:
+        since = json.loads((mutants / STATS).read_bytes()).get("git_commit")
+        changed = sorted(p for p in _git("-C", str(root), "diff", "--name-only", str(since)).splitlines()
+                         if _module(p) and not p.startswith("tests/"))
+    except (FileNotFoundError, ValueError, GateError):  # reason: with no commit to diff against, mutmut decides by file times alone
+        return f"{kept} source files kept, no state commit to say which changed"
+    named = f" ({', '.join(changed[:5])}{', ...' if len(changed) > 5 else ''})" if changed else ""
+    return f"{kept} source files kept, {len(changed)} changed since the state{named}"
+
+
+def _code_reasons(mutants: Path, hashes_before: dict[str, str]) -> dict[str, str]:
+    """Why each function's mutants are tested in the first run: its code is
+    new or changed since the state, by mutmut's hashes before and now; any
+    other function tested then had no verdict kept."""
+    return {fn: "new" if fn not in hashes_before else "code changed"
+            for fn, h in _hashes(mutants).items() if hashes_before.get(fn) != h}
 
 
 def results_text(root: Path, source: str | None) -> str:
