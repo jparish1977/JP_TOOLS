@@ -425,25 +425,38 @@ def _compared_paths(target: str, root: Path, now: dict[str, Any],
     return compared, unmeasured
 
 
+# The counts a file can get worse in: its errors, and its warnings, each on its
+# own, so a warning fixed does not pay for an error added. fixable and
+# fixable_unsafe say how a finding could be fixed, not how many there are.
+_COMPARED = ("errors", "warnings")
+
+
+def _count(counts: dict[str, Any], path: str, tool: str, key: str) -> int:
+    """COUNTS' KEY for PATH's TOOL, zero when there is none. Every entry of a
+    baseline this reads (version 2) holds every count, so zero means the file
+    or tool was not recorded, which is counting from zero."""
+    return int(counts.get(path, {}).get(tool, {}).get(key, 0))
+
+
 def _deltas(compared: set[str], now: dict[str, Any], was: dict[str, Any],
-            skip: set[str]) -> tuple[list[tuple[str, str, int, int]], list[str]]:
-    """(each (path, tool, before, after) that got worse, a line per changed count)."""
+            skip: set[str]) -> tuple[list[tuple[str, str, str, int, int]], list[str]]:
+    """(each (path, tool, count, before, after) that got worse, a line per changed count)."""
     worse, deltas = [], []
     for path in sorted(compared):
         tools = set(now.get(path, {})) | set(was.get(path, {}))
         for tool in sorted(tools - skip):
-            before = int(was.get(path, {}).get(tool, {}).get("errors", 0))
-            after  = int(now.get(path, {}).get(tool, {}).get("errors", 0))
-            if after != before:
-                deltas.append(f"  {path}  {tool}  {before} -> {after} "
-                              f"({after - before:+d})")
-            if after > before:
-                worse.append((path, tool, before, after))
+            for key in _COMPARED:
+                before, after = _count(was, path, tool, key), _count(now, path, tool, key)
+                if after != before:
+                    deltas.append(f"  {path}  {tool}  {key}  {before} -> {after} "
+                                  f"({after - before:+d})")
+                if after > before:
+                    worse.append((path, tool, key, before, after))
     return worse, deltas
 
 
 def _report_comparison(source: str, skipped: list[tuple[str, str]], deltas: list[str],
-                       unmeasured: int, worse: list[tuple[str, str, int, int]]) -> None:
+                       unmeasured: int, worse: list[tuple[str, str, str, int, int]]) -> None:
     for tool, why in skipped:
         print(f"baseline: cannot compare {tool} -- {why}. Excluded from the "
               f"verdict rather than counted as zero.", file=sys.stderr)
@@ -459,8 +472,8 @@ def _report_comparison(source: str, skipped: list[tuple[str, str]], deltas: list
     if worse:
         print(file=sys.stderr)
         print("baseline: WORSE than recorded --", file=sys.stderr)
-        for path, tool, before, after in worse:
-            print(f"  {path}  {tool}  {before} -> {after}", file=sys.stderr)
+        for path, tool, key, before, after in worse:
+            print(f"  {path}  {tool}  {key}  {before} -> {after}", file=sys.stderr)
 
 
 # TOUCHED. A file a commit changes must leave with fewer findings than it
@@ -479,16 +492,12 @@ def _own_tools(path: str, now: dict[str, Any], was: dict[str, Any],
     return sorted(tools - skip - _CROSS_FILE)
 
 
-def _errors(counts: dict[str, Any], path: str, tool: str) -> int:
-    return int(counts.get(path, {}).get(tool, {}).get("errors", 0))
-
-
 def _not_reduced(path: str, now: dict[str, Any], was: dict[str, Any],
                  skip: set[str]) -> tuple[int, int] | None:
     """(before, after) when a touched file had findings and kept as many; else None."""
     tools = _own_tools(path, now, was, skip)
-    before = sum(_errors(was, path, t) for t in tools)
-    after = sum(_errors(now, path, t) for t in tools)
+    before = sum(_count(was, path, t, "errors") for t in tools)
+    after = sum(_count(now, path, t, "errors") for t in tools)
     return (before, after) if before > 0 and after >= before else None
 
 
@@ -504,24 +513,29 @@ def _move_totals(totals: dict[str, Any], old: dict[str, Any], new: dict[str, Any
 
 def _lock_in(source: str, doc: dict[str, Any], path: str, now: dict[str, Any],
              skip: set[str]) -> list[str]:
-    """Write each lowered count for PATH back to SOURCE; a line per tool lowered.
+    """Write each lowered count for PATH back to SOURCE; a line per count lowered.
 
-    Only a lower count is written, never a higher one. "totals" moves with
-    it: each of its counts falls by what each replaced entry held more than
-    its new one, so they match a fresh record of the same tree.
+    A tool's entry is replaced when its errors or its warnings fell. Called
+    only once no count rose, so nothing compared is written higher. "totals"
+    moves with it: each of its counts falls by what each replaced entry held
+    more than its new one, so they match a fresh record of the same tree.
     """
     was = doc.setdefault("files", {})
     totals = doc.get("totals")
     lowered = []
     for tool in _own_tools(path, now, was, skip):
-        before, after = _errors(was, path, tool), _errors(now, path, tool)
-        if after < before:
+        fell = []
+        for key in _COMPARED:
+            before, after = _count(was, path, tool, key), _count(now, path, tool, key)
+            if after < before:
+                fell.append(f"  {path}  {tool}  {key}  {before} -> {after}")
+        if fell:
             old = was.get(path, {}).get(tool, {})
             new = now.get(path, {}).get(tool, dict.fromkeys(_COUNTS, 0))
             was.setdefault(path, {})[tool] = new
             if isinstance(totals, dict):
                 _move_totals(totals, old, new)
-            lowered.append(f"  {path}  {tool}  {before} -> {after}")
+            lowered.extend(fell)
     if lowered:
         Path(source).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n",
                                 encoding=_UTF8)

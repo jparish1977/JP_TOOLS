@@ -175,15 +175,45 @@ def test_report_recorded() -> None:
 def test_report_comparison() -> None:
     check("comparison: worse, each line on its stream",
           _captured(baseline._report_comparison, "/x/base.json", [("mypy", "did not run (error)")],
-                    ["  a.py  ruff  1 -> 2 (+1)"], 2, [("a.py", "ruff", 1, 2)]),
-          (None, ("  a.py  ruff  1 -> 2 (+1)\n"
+                    ["  a.py  ruff  errors  1 -> 2 (+1)"], 2, [("a.py", "ruff", "errors", 1, 2)]),
+          (None, ("  a.py  ruff  errors  1 -> 2 (+1)\n"
                   "baseline: 2 other baselined file(s) not measured in this run, so not compared\n"),
            ("baseline: cannot compare mypy -- did not run (error). Excluded from the verdict "
             "rather than counted as zero.\n"
-            "\nbaseline: WORSE than recorded --\n  a.py  ruff  1 -> 2\n")))
+            "\nbaseline: WORSE than recorded --\n  a.py  ruff  errors  1 -> 2\n")))
     check("comparison: no change, said",
           _captured(baseline._report_comparison, "/x/base.json", [], [], 0, []),
           (None, "baseline: no change against base.json\n", ""))
+
+
+def test_warnings_count_against_worse() -> None:
+    was = {"a.sh": {"shellcheck": _entry(0, 1)}}
+    check("warnings 1 -> 3: worse, the count named",
+          baseline._deltas({"a.sh"}, {"a.sh": {"shellcheck": _entry(0, 3)}}, was, set()),
+          ([("a.sh", "shellcheck", "warnings", 1, 3)], ["  a.sh  shellcheck  warnings  1 -> 3 (+2)"]))
+    check("a warning fixed does not pay for an error added",
+          baseline._deltas({"a.sh"}, {"a.sh": {"shellcheck": _entry(1, 0)}}, was, set()),
+          ([("a.sh", "shellcheck", "errors", 0, 1)],
+           ["  a.sh  shellcheck  errors  0 -> 1 (+1)", "  a.sh  shellcheck  warnings  1 -> 0 (-1)"]))
+    check("fixable counts are never compared",
+          baseline._deltas({"a.sh"}, {"a.sh": {"shellcheck": _entry(0, 1, 5, 5)}}, was, set()), ([], []))
+    check("an entry with no warnings count counts them from zero, as a file with no entry does",
+          baseline._deltas({"a.sh"}, {"a.sh": {"shellcheck": _entry(0, 2)}},
+                           {"a.sh": {"shellcheck": {"errors": 0}}}, set()),
+          ([("a.sh", "shellcheck", "warnings", 0, 2)], ["  a.sh  shellcheck  warnings  0 -> 2 (+2)"]))
+    check("a file or tool the baseline lacks counts both from zero",
+          baseline._deltas({"b.sh"}, {"b.sh": {"shellcheck": _entry(0, 2)}}, was, set()),
+          ([("b.sh", "shellcheck", "warnings", 0, 2)], ["  b.sh  shellcheck  warnings  0 -> 2 (+2)"]))
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "base.json"
+        doc: dict[str, Any] = {"files": {"a.sh": {"shellcheck": _entry(2, 3)}},
+                               "totals": {"errors": 2, "warnings": 3, "total": 5}}
+        lowered = baseline._lock_in(str(source), doc, "a.sh", {"a.sh": {"shellcheck": _entry(2, 1)}}, set())
+        check("a warnings drop alone is locked in, the line naming it",
+              (lowered, doc["files"]["a.sh"]["shellcheck"], doc["totals"]["warnings"], doc["totals"]["total"]),
+              (["  a.sh  shellcheck  warnings  3 -> 1"], _entry(2, 1), 1, 3))
+        check("  and written", json.loads(source.read_text(encoding="utf-8"))["files"]["a.sh"]["shellcheck"],
+              _entry(2, 1))
 
 
 _STUCK = ("\nbaseline: a.py was changed and still has 2 of its 2 recorded finding(s). A commit "
@@ -206,7 +236,7 @@ def test_touched_verdict() -> None:
         check("touched: lowered passes, each line said",
               _captured(baseline._touched_verdict, str(source), doc, "a.py",
                         {"a.py": {"ruff": _entry(1)}}, set()),
-              (True, "baseline: lowered in base.json, so the gain is kept:\n  a.py  ruff  2 -> 1\n", ""))
+              (True, "baseline: lowered in base.json, so the gain is kept:\n  a.py  ruff  errors  2 -> 1\n", ""))
 
 
 def test_uncomparable() -> None:
