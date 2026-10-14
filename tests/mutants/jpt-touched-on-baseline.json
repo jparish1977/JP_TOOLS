@@ -23,7 +23,7 @@
     },
     {
       "name": "the gain is not written back",
-      "edits": [["        if after < before:\n            old = ", "        if False:\n            old = "]],
+      "edits": [["        if fell:\n            old = ", "        if False:\n            old = "]],
       "target": "  and the lower count is written back"
     },
     {
@@ -38,8 +38,13 @@
     },
     {
       "name": "a cross-file tool's rise not counted as worse",
-      "edits": [["        for tool in sorted(tools - skip):\n            before = int(was", "        for tool in sorted(tools - skip - _CROSS_FILE):\n            before = int(was"]],
+      "edits": [["        for tool in sorted(tools - skip):\n            for key in _COMPARED:", "        for tool in sorted(tools - skip - _CROSS_FILE):\n            for key in _COMPARED:"]],
       "target": "but a mypy count that RISES is worse"
+    },
+    {
+      "name": "warnings not compared, as before",
+      "edits": [["_COMPARED = (\"errors\", \"warnings\")", "_COMPARED = (\"errors\",)"]],
+      "target": "warnings 1 -> 3: exit 1, the count named on stderr"
     }
   ]
 }
