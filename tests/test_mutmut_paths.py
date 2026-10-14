@@ -5,10 +5,12 @@ jpcheck/mutmut_paths.py: which suites read a changed shared file.
 
 WHAT IS CHECKED
     A Python helper is read by the files that import it, in any form (from
-    it, it whole, beside others, from a package, through importlib), not by
-    one that only names it on a line without import or imports a longer name; a data
-    file by those that name it. A conftest.py, a configuration file, a file
-    nothing reads, or one a helper reads: any test (None).
+    it, it whole, beside others, from a package, through importlib, in
+    parentheses across lines), and by one that imports anything and names it
+    anywhere (an over-count, a re-trace); not by one that names it and imports
+    nothing, or imports a longer name; a data file by those that name it. A
+    conftest.py, a configuration file, a file nothing reads, or one a helper
+    reads: any test (None).
 
     python3 tests/test_mutmut_paths.py
 """
@@ -21,11 +23,14 @@ from jpcheck import mutmut_paths as mp
 TESTS = {
     "tests/test_a.py": b"from support import repo\nF = FIX / 'help.txt'\n",
     "tests/test_b.py": b"import support\n",
-    "tests/test_c.py": b"# support is named here\nimport support_more\nfrom support_more import x\n",
+    "tests/test_c.py": b"import support_more\nfrom support_more import x\n",
     "tests/sub/test_d.py": b"    from other import y\n",
     "tests/test_f.py": b"import os, listed\n",
     "tests/test_g.py": b"from tests import packaged\n",
     "tests/test_h.py": b"m = importlib.import_module('loaded')\n",
+    "tests/test_i.py": b"from tests import (\n    wrapped,\n)\n",
+    "tests/test_j.py": b"# commented is named here\nimport os\n",
+    "tests/test_k.py": b"# unread is named here, alone\n",
     "tests/_helper.py": b"import chained\nG = FIX / 'shared.txt'\n",
     "tests/test_e.py": b"from _helper import G\n\xff not UTF-8\n",
 }
@@ -33,9 +38,13 @@ TESTS = {
 
 def test_which_suites_read_a_changed_file() -> None:
     check("every form of import counts", {p: mp.readers(p, TESTS) for p in (
-        "tests/listed.py", "tests/packaged.py", "tests/loaded.py")},
+        "tests/listed.py", "tests/packaged.py", "tests/loaded.py", "tests/wrapped.py")},
           {"tests/listed.py": {"tests/test_f.py"}, "tests/packaged.py": {"tests/test_g.py"},
-           "tests/loaded.py": {"tests/test_h.py"}})
+           "tests/loaded.py": {"tests/test_h.py"}, "tests/wrapped.py": {"tests/test_i.py"}})
+    check("named in a file that imports anything: counted, a re-trace too many at most",
+          mp.readers("tests/commented.py", TESTS), {"tests/test_j.py"})
+    check("named in a file that imports nothing: not counted",
+          mp.readers("tests/unread.py", TESTS), None)
     check("each file's readers", {p: mp.readers(p, TESTS) for p in (
         "tests/support.py", "tests/other.py", "tests/fixtures/help.txt", "tests/chained.py",
         "tests/fixtures/shared.txt", "tests/fixtures/orphan.txt", "tests/nobody.py", "tests/conftest.py",
