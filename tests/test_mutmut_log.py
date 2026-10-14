@@ -28,6 +28,7 @@ import contextlib
 import io
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from unittest import mock
@@ -80,7 +81,50 @@ def test_say_stamps_and_flushes() -> None:
     check("the gate's line, the UTC time first, flushed once", (out.getvalue(), out.flushes),
           ("mutmut-gate 01:02:03Z: hello\n", 1))
     check("progress each tenth and each minute, mutmut's output waited for a second at a time",
-          (ml.STEPS, ml.EVERY, ml.TICK), (10, 60.0, 1.0))
+          (ml.STEPS, ml.EVERY, ml.TICK, ml.STOP_WAIT), (10, 60.0, 1.0, 30.0))
+
+
+class _HalfWritten(_StubPlan):
+    """A plan whose reads meet a .meta mutmut is rewriting."""
+
+    def subject(self, title: str) -> str:
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    def open_functions(self) -> str:
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+
+def test_what_the_log_cannot_read_it_says_and_goes_on() -> None:
+    clock = [0.0]
+    relay = ml.Relay(_HalfWritten(), clock=lambda: clock[0])
+    out = io.StringIO()
+    with mock.patch.object(time, "gmtime", return_value=_EPOCH), contextlib.redirect_stdout(out):
+        relay.feed("Running mutation testing\n")
+        relay.feed(_frame(0, 10, 0, 0, 0, 0, 0, 0, 0))
+        relay.feed(_frame(5, 10, 5, 0, 0, 0, 0, 0, 0))
+    check("a phase and a progress line it could not read: said so, the run not stopped",
+          out.getvalue().splitlines(),
+          [("mutmut-gate 00:00:00Z: mutmut: Running mutation testing (what it works on could not be read:"
+            " Expecting value: line 1 column 1 (char 0))"),
+           ("mutmut-gate 00:00:00Z: 5 / 10 judged: 5 killed, 0 no tests, 0 timeout, 0 survived;"
+            " functions open could not be read: Expecting value: line 1 column 1 (char 0)")])
+    out = io.StringIO()
+    with mock.patch.object(time, "gmtime", return_value=_EPOCH), contextlib.redirect_stdout(out):
+        relay.plan = _OSErrorPlan()
+        relay.feed(_frame(10, 10, 10, 0, 0, 0, 0, 0, 0))
+        relay.feed("\r⠋ Running clean tests\n")
+    check("  and an OSError the same", out.getvalue().splitlines(),
+          [("mutmut-gate 00:00:00Z: 10 / 10 judged: 10 killed, 0 no tests, 0 timeout, 0 survived;"
+            " functions open could not be read: gone"),
+           "mutmut-gate 00:00:00Z: mutmut: Running clean tests (what it works on could not be read: gone)"])
+
+
+class _OSErrorPlan(_StubPlan):
+    def subject(self, title: str) -> str:
+        raise OSError("gone")
+
+    def open_functions(self) -> str:
+        raise OSError("gone")
 
 
 def test_the_relay_says_each_phase_once_and_passes_the_rest() -> None:
@@ -334,6 +378,52 @@ def test_relayed_output_reaches_the_relay_as_it_comes() -> None:
     check("a child that never goes quiet: ticked after each piece all the same",
           [e for e in rec.events if e != ("feed", "")],
           [("feed", "x"), ("tick", ""), ("feed", "y"), ("tick", ""), ("feed", "z"), ("tick", ""), ("close", "")])
+
+
+class _Broken(_Rec):
+    """A relay that fails on the first output it is given."""
+
+    def feed(self, text: str) -> None:
+        if text:
+            raise RuntimeError("the relay broke")
+
+
+def _stopped(script: str, td: str) -> tuple[str, float, int]:
+    """Run SCRIPT under run_relayed with a relay that breaks: what was raised,
+    how long it took, and the child's pid (the child writes it to pid)."""
+    began = time.monotonic()
+    try:
+        ml.run_relayed([sys.executable, "-c", script], Path(td), dict(os.environ), _Broken())
+        raised = ""
+    except RuntimeError as e:
+        raised = str(e)
+    return raised, time.monotonic() - began, int((Path(td) / "pid").read_text(encoding="utf-8"))
+
+
+def _gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:  # reason: no such process is the answer asked for
+        return True
+    return False
+
+
+def test_a_broken_relay_stops_the_child() -> None:
+    """The relay failing while the child runs: the child is interrupted (and
+    killed if it ignores that), the failure raised, nothing left running."""
+    head = ("import os, signal, sys, time\n"
+            "open('pid', 'w').write(str(os.getpid()))\n")
+    tail = "sys.stdout.write('out\\n'); sys.stdout.flush(); time.sleep(30)\n"
+    with tempfile.TemporaryDirectory() as td:
+        raised, took, pid = _stopped(head + "def stop(*a):\n    open('interrupted', 'w').write('yes')\n"
+                                     "    sys.exit(0)\nsignal.signal(signal.SIGINT, stop)\n" + tail, td)
+        check("an interrupt it heeds: the relay's failure raised, the child interrupted, at once",
+              (raised, (Path(td) / "interrupted").exists(), took < 10, _gone(pid)),
+              ("the relay broke", True, True, True))
+    with tempfile.TemporaryDirectory() as td, mock.patch.object(ml, "STOP_WAIT", 0.5):
+        raised, took, pid = _stopped(head + "signal.signal(signal.SIGINT, signal.SIG_IGN)\n" + tail, td)
+        check("an interrupt it ignores: killed after STOP_WAIT", (raised, took < 10, _gone(pid)),
+              ("the relay broke", True, True))
 
 
 if __name__ == "__main__":
