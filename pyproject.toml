@@ -30,6 +30,9 @@ dependencies = []
 # install when absent. It uses the package's internal modules, and 1.2.0 is
 # the release its docstring describes.
 autoit = ["autoit-ripper==1.2.0"]
+# mutmut-clean.py only, which mutmut-gate.py runs mutmut through. The pin is
+# requirements-dev.txt's, where the mutation run installs it from.
+mutation = ["mutmut==3.8.0"]
 
 # The suites are plain scripts (`python tests/test_x.py`); pytest runs them only
 # for mutmut. Only test_* functions are tests (git_test_* in

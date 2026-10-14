@@ -4,7 +4,7 @@
     {
       "name": "a spinner character is not known, so its frames pass through",
       "edits": [["SPINNER = \"⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\"", "SPINNER = \"⠙⠹⠸⠼⠴⠦⠧⠇⠏\""]],
-      "target": "each phase said once, by its subject; mutmut's other lines whole; frames and blank lines dropped"
+      "target": "each phase said once, by its subject (a frame with none is none); mutmut's other lines whole; frames and blank lines dropped"
     },
     {
       "name": "the counter's spacing is not mutmut's, so no progress frame is read",
@@ -14,7 +14,7 @@
     {
       "name": "mutation testing's line is not known, so it passes through unsaid",
       "edits": [["TESTING = \"Running mutation testing\"", "TESTING = \"Running mutation tests\""]],
-      "target": "each phase said once, by its subject; mutmut's other lines whole; frames and blank lines dropped"
+      "target": "each phase said once, by its subject (a frame with none is none); mutmut's other lines whole; frames and blank lines dropped"
     },
     {
       "name": "a listed result past mutant 9 is not known, so it is printed",
@@ -50,6 +50,16 @@
       "name": "mutmut given ten seconds, not thirty, to stop its workers",
       "edits": [["STOP_WAIT = 30.0", "STOP_WAIT = 10.0"]],
       "target": "progress each tenth and each minute, mutmut's output waited for a second at a time"
+    },
+    {
+      "name": "a half-written .meta read twice, not three times",
+      "edits": [["READS = 3", "READS = 2"]],
+      "target": "read again, READS times, REREAD seconds apart"
+    },
+    {
+      "name": "a second between reads of a half-written .meta",
+      "edits": [["REREAD = 0.2", "REREAD = 1.0"]],
+      "target": "read again, READS times, REREAD seconds apart"
     },
     {
       "name": "mutmut's output waited for two seconds at a time",

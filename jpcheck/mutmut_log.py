@@ -51,6 +51,10 @@ EVERY = 60.0
 TICK = 1.0
 # Seconds mutmut has to stop its workers after an interrupt before it is killed.
 STOP_WAIT = 30.0
+# Reads of the codes before a half-written .meta is given up on, and the
+# seconds between them.
+READS = 3
+REREAD = 0.2
 
 
 def say(message: str) -> None:
@@ -98,8 +102,7 @@ class Plan:
         """The line said for mutmut's phase TITLE."""
         if title == TESTING:
             return self._testing()
-        clean = (f"the {len(self.names)} named mutants' tests" if self.names
-                 else "the whole suite in one process")
+        clean = f"the {len(self.names)} named mutants' tests" if self.names else "the whole suite"
         lines = {
             "Generating mutants": f"generating mutants: {self.sources}",
             "Listing all tests": "listing tests: every test pytest collects, to find the ones not traced yet",
@@ -115,7 +118,7 @@ class Plan:
         each one's reason, biggest first."""
         wanted = set(self.names)
         self.tested = {}
-        for k, code in self.codes().items():
+        for k, code in self._read().items():
             if k in wanted if wanted else code is None:
                 self.tested.setdefault(k.partition("__mutmut_")[0], []).append(k)
         known = self.why()
@@ -129,10 +132,21 @@ class Plan:
 
     def open_functions(self) -> str:
         """How many tested functions are done, and the biggest still open."""
-        codes = self.codes()
+        codes = self._read()
         left = {fn: n for fn, keys in self.tested.items() if (n := sum(codes.get(k) is None for k in keys))}
         named = "".join(f", {fn} ({left[fn]} left)" for fn in sorted(left, key=lambda fn: (-left[fn], fn))[:3])
         return f"{len(self.tested) - len(left)} of {len(self.tested)} functions done{named}"
+
+    def _read(self) -> dict[str, int | None]:
+        """The codes. mutmut rewrites a .meta as each verdict lands, so a read
+        can meet one half written: it is read again after REREAD seconds, READS
+        times in all, and the last failure is raised (the relay says it)."""
+        for _ in range(READS - 1):
+            try:
+                return self.codes()
+            except ValueError:  # reason: a .meta caught half written; mutmut finishes it at once
+                time.sleep(REREAD)
+        return self.codes()
 
 
 class _Subjects(Protocol):
