@@ -1,0 +1,65 @@
+{
+  "about": "scratch-refs --check lists every scratch path form in the staged copy of every staged file, binary and deleted files left out, renames read under the new name, and a git step that fails or a missing --check never reads as clean. Run: mutate-on-target.py TREE scratch-refs.py tests/test_scratch_refs.py tests/mutants/jpt-scratch-on-scratch-refs.json",
+  "mutants": [
+    {
+      "name": "$HOME not a scratch root",
+      "edits": [["~|\\$HOME|\\$\\{HOME\\}", "~|\\$\\{HOME\\}"]],
+      "target": "each form: FINDINGS, its line listed, no lookalike"
+    },
+    {
+      "name": "a path ending at the word is not one",
+      "edits": [["(?:/|\\b)\")", "(?:/)\")"]],
+      "target": "each form: FINDINGS, its line listed, no lookalike"
+    },
+    {
+      "name": "any word starting scratch is one",
+      "edits": [["(?:/|\\b)\")", "\")"]],
+      "target": "each form: FINDINGS, its line listed, no lookalike"
+    },
+    {
+      "name": "found exits OK",
+      "edits": [["    return jpexit.FINDINGS if found else jpexit.OK", "    return jpexit.OK"]],
+      "target": "each form: FINDINGS, its line listed, no lookalike"
+    },
+    {
+      "name": "a binary file is read",
+      "edits": [["        if b\"\\0\" in blob:\n            continue\n", ""]],
+      "target": "a binary file is not read"
+    },
+    {
+      "name": "deleted files are read",
+      "edits": [["\"--diff-filter=ACMR\"", "\"--diff-filter=ACMRD\""]],
+      "target": "a deleted file is not read"
+    },
+    {
+      "name": "renames not read",
+      "edits": [["\"--diff-filter=ACMR\"", "\"--diff-filter=ACM\""]],
+      "target": "a renamed file is read under its new name"
+    },
+    {
+      "name": "the working copy is read",
+      "edits": [["        blob = git_out(\"show\", f\":{path}\")", "        blob = Path(path).read_bytes()"]],
+      "target": "the staged copy is what is read: fixed only in the working tree, still refused"
+    },
+    {
+      "name": "a failed git step reads as its empty output",
+      "edits": [["    if result.returncode != 0:\n        said", "    if False:\n        said"]],
+      "target": "a git step that fails: NOT_RUN, naming it, never clean"
+    },
+    {
+      "name": "a git failure exits OK",
+      "edits": [["nothing was checked\", file=sys.stderr)\n        return jpexit.NOT_RUN", "nothing was checked\", file=sys.stderr)\n        return jpexit.OK"]],
+      "target": "a git step that fails: NOT_RUN, naming it, never clean"
+    },
+    {
+      "name": "outside a repository exits OK",
+      "edits": [["not in a git repository\", file=sys.stderr)\n        return jpexit.NOT_RUN", "not in a git repository\", file=sys.stderr)\n        return jpexit.OK"]],
+      "target": "not a repository: NOT_RUN, said on stderr"
+    },
+    {
+      "name": "no --check exits OK",
+      "edits": [["        return jpexit.OK if {\"-h\", \"--help\"} & set(sys.argv[1:]) else jpexit.NOT_RUN", "        return jpexit.OK"]],
+      "target": "no --check: NOT_RUN and the usage, never a silent OK"
+    }
+  ]
+}

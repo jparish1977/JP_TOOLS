@@ -109,6 +109,30 @@ check_emdashes() {
     fi
 }
 
+# NOTHING RELIED ON RUNS FROM SCRATCH (METHODOLOGY 2.11, rule 6). Every staged
+# file is read whole, as staged, and one naming a scratch path refuses the
+# commit. There is no variable that lets it through: commit the thing the
+# file points at, and point at that.
+# FAILS CLOSED, as the em-dash check: 0 none, 1 listed, anything else BROKEN.
+check_scratch_refs() {
+    REFS=$("$PY" "$TOOLS_DIR/scratch-refs.py" --check)
+    refs_rc=$?
+    if [ "$refs_rc" -eq 1 ] && [ -n "$REFS" ]; then
+        echo ""
+        echo "====================================="
+        echo " Pre-commit check FAILED: you fucking idiot, this commit relies on scratch:"
+        echo "$REFS"
+        echo " Nothing anyone relies on runs from scratch or reads anything from it"
+        echo " (METHODOLOGY 2.11, rule 6). Commit what these point at, in the"
+        echo " repository, point at that instead, and delete the scratch copy."
+        echo "====================================="
+        exit 1
+    elif [ "$refs_rc" -ne 0 ]; then
+        broken "the scratch check (scratch-refs.py --check) exited $refs_rc, so it did not run." \
+            "run it by hand to see why: $PY \"$TOOLS_DIR/scratch-refs.py\" --check"
+    fi
+}
+
 # Why check.py skipped a file, from the one JSON object it prints for a skip
 # ({"target": ..., "skipped": "no language detected"}, or "ignored by
 # .jp-tools-ignore: ENTRY (WHERE)"): the reason up to its first colon, so one
@@ -326,6 +350,7 @@ DEBT_FILE=$(git rev-parse --git-path jp-tools-lint-debt)
 rm -f "$DEBT_FILE"
 check_flags
 check_emdashes
+check_scratch_refs
 STAGED=$(git diff --cached --name-only --diff-filter=ACM)
 [ -z "$STAGED" ] && exit 0
 baseline_must_be_clean

@@ -435,9 +435,10 @@ def fake_jp_tools(at: Path, with_template: bool = True, git_repo: bool = True) -
     for package in ("jpcheck", "jpexit", "platformtools"):
         shutil.copytree(ROOT / package, at / package,
                         ignore=shutil.ignore_patterns("__pycache__"))
-    # The template runs it before check.py and fails closed without it, so a
-    # tree missing it would read as BROKEN rather than as the case under test.
-    shutil.copy2(ROOT / "fix-dashes.py", at / "fix-dashes.py")
+    # The template runs these before check.py and fails closed without them, so
+    # a tree missing one would read as BROKEN rather than as the case under test.
+    for script in ("fix-dashes.py", "scratch-refs.py"):
+        shutil.copy2(ROOT / script, at / script)
     shutil.copytree(ROOT / "configs", at / "configs")
     if with_template:
         (at / "hooks").mkdir()

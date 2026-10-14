@@ -42,10 +42,10 @@ python_functions = ["test_*", "git_test_*"]
 addopts = ["-p", "no:cacheprovider"]
 
 # What mutmut mutates: every package and top-level script. Not tools/ (all
-# lab code, METHODOLOGY 2.9) and not tests/. Not the four scripts whose suites
+# lab code, METHODOLOGY 2.9) and not tests/. Not the five scripts whose suites
 # must run them as processes, because they drive git hooks and child
-# processes (install-hooks.py, fix-dashes.py, mutate-on-target.py,
-# mutate-spec.py): mutmut cannot see a test in another process, so they stay
+# processes (install-hooks.py, fix-dashes.py, scratch-refs.py,
+# mutate-on-target.py, mutate-spec.py): mutmut cannot see a test in another process, so they stay
 # on hand-written tests/mutants specs. tests/test_mutmut_config.py holds
 # these lists to the tracked files. also_copy is everything else the suites
 # read from the checkout, so they run in mutmut's copy (mutants/) as they do
@@ -54,7 +54,7 @@ addopts = ["-p", "no:cacheprovider"]
 # into files and eslint and stylelint stop honouring disable comments, and
 # mutmut re-copies also_copy on every run, which fails on the read-only git
 # packs composer leaves under vendor/.
-# tests/mutants keeps a hand spec only where mutmut cannot judge: the four
+# tests/mutants keeps a hand spec only where mutmut cannot judge: the five
 # scripts above; shell, PHP and config files, which it does not mutate;
 # module-level code (constants, compiled patterns), since it mutates only
 # inside functions; and code its tests reach only through a child process,
@@ -91,5 +91,5 @@ also_copy = [
     "jp_node_resolve.mjs", "jp_php_ast.php", "jp_stylelint.mjs", "lib/", "oob/",
     "package.json", "prove-head.sh", "requirements-dev.txt", "requirements-system.txt",
     "run-suites.sh", "templates/", "tools/",
-    "install-hooks.py", "fix-dashes.py", "mutate-on-target.py", "mutate-spec.py",
+    "install-hooks.py", "fix-dashes.py", "scratch-refs.py", "mutate-on-target.py", "mutate-spec.py",
 ]

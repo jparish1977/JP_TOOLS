@@ -33,7 +33,7 @@ from _harness import ROOT, check, check_true, run
 NOT_MUTATED = {"tests", "tools"}
 # Scripts their suites must run as processes (git hooks, child processes):
 # mutmut cannot see such a test, so these stay on tests/mutants specs.
-ON_SPECS = {"install-hooks.py", "fix-dashes.py", "mutate-on-target.py", "mutate-spec.py"}
+ON_SPECS = {"install-hooks.py", "fix-dashes.py", "scratch-refs.py", "mutate-on-target.py", "mutate-spec.py"}
 # mutmut copies these itself, whatever also_copy says.
 COPIED_BY_MUTMUT = {"pyproject.toml", "setup.cfg"}
 
