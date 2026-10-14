@@ -1,0 +1,15 @@
+{
+  "about": "mutmut-clean.py's core limit is module level, so mutmut does not mutate it. Run: mutate-on-target.py TREE mutmut-clean.py tests/test_mutmut_clean.py tests/mutants/jpt-core-limit-on-mutmut-clean.json",
+  "mutants": [
+    {
+      "name": "a 0-byte core limit, which a piped core_pattern ignores",
+      "edits": [["CORE_LIMIT = 1", "CORE_LIMIT = 0"]],
+      "target": "  under a 1-byte core limit, set before it"
+    },
+    {
+      "name": "the workers' variable misnamed, so the gate's setting never reaches the clean run",
+      "edits": [["WORKERS = \"MUTMUT_CLEAN_WORKERS\"", "WORKERS = \"MUTMUT_WORKERS\""]],
+      "target": "the workers' name in the environment"
+    }
+  ]
+}

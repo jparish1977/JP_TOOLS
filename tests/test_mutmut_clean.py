@@ -102,8 +102,10 @@ def test_main_runs_mutmut_with_the_clean_run_replaced() -> None:
         seen.append(clean.ForkRunner.run_clean_tests)
         return 3
 
+    limits: list[tuple[int, tuple[int, int]]] = []
     try:
-        with mock.patch.object(clean.mutmut_main, "cli", cli):
+        with mock.patch.object(clean.mutmut_main, "cli", cli), \
+                mock.patch.object(clean.resource, "setrlimit", lambda r, v: limits.append((r, v))):
             try:
                 clean.main()
                 code: object = None
@@ -113,6 +115,8 @@ def test_main_runs_mutmut_with_the_clean_run_replaced() -> None:
         clean.ForkRunner.run_clean_tests = original
     check("mutmut's command line run with ForkRunner's clean run replaced, and its code the exit",
           (seen, code), ([clean.run_clean_tests], 3))
+    check("  under a 1-byte core limit, set before it", (limits, clean.CORE_LIMIT),
+          ([(clean.resource.RLIMIT_CORE, (1, 1))], 1))
 
 
 if __name__ == "__main__":
