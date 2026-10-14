@@ -27,6 +27,7 @@ from pathlib import Path
 
 from _harness import ROOT, check, check_true, run
 from jpexit import FINDINGS, NOT_RUN, OK
+from process_check import NONZERO, check_exit
 
 WORD = "scr" + "atch"
 INSTALL = ROOT / "install-global-hooks.py"
@@ -70,19 +71,17 @@ def test_every_repository_is_behind_the_guard() -> None:
         home = Path(td)
         (home / "projects").mkdir()
         p = _install(home)
-        check("install: exit 0, saying where", (p.returncode, "global core.hooksPath set" in p.stdout), (OK, True))
+        check_exit("install: exit 0, saying where", p, OK, says=["global core.hooksPath set"])
         repo = _new_repo(home, "made-after")
         r = _commit(home, repo, "a.md", "clean\n")
-        check("CONTROL: a repository made after the install commits a clean file", r.returncode, 0)
+        check_exit("CONTROL: a repository made after the install commits a clean file", r, 0)
         r = _commit(home, repo, "b.md", f"run ~/{WORD}/x.sh\n")
-        out = r.stdout + r.stderr
-        check_true("  and refuses one naming a scratch path, saying so",
-                   r.returncode != 0 and f"b.md:1: run ~/{WORD}/x.sh" in out and "you fucking idiot" in out)
+        check_exit("  and refuses one naming a scratch path, saying so", r, NONZERO,
+                   says=[f"b.md:1: run ~/{WORD}/x.sh", "you fucking idiot"])
         p = _install(home, "--check")
-        check("--check after the install: OK, installed and current",
-              (p.returncode, "installed and current" in p.stdout), (OK, True))
+        check_exit("--check after the install: OK, installed and current", p, OK, says=["installed and current"])
         p = _install(home)
-        check("installing again over its own: OK", p.returncode, OK)
+        check_exit("installing again over its own: OK", p, OK)
 
 
 def test_a_repository_s_own_hooks_still_run() -> None:
@@ -102,19 +101,17 @@ def test_a_repository_s_own_hooks_still_run() -> None:
             (hooks / h).chmod(0o755)
         _install(home)
         r = _commit(home, repo, "a.md", "clean\n")
-        out = r.stdout + r.stderr
-        check_true("its own pre-commit and commit-msg run, commit-msg with git's argument",
-                   r.returncode == 0 and "own-pre-commit ran" in out
-                   and "own-commit-msg got .git/COMMIT_EDITMSG" in out)
+        check_exit("its own pre-commit and commit-msg run, commit-msg with git's argument", r, 0,
+                   says=["own-pre-commit ran", "own-commit-msg got .git/COMMIT_EDITMSG"])
         (repo / "refuse").write_text("x", encoding="utf-8")
         r = _commit(home, repo, "b.md", "clean too\n")
-        check("  its own pre-commit refusing still refuses", r.returncode != 0, True)
+        check_exit("  its own pre-commit refusing still refuses", r, NONZERO)
         (repo / "refuse").unlink()
         r = _commit(home, repo, "c.md", "clean\n", msg="nope")
-        check("  and its own commit-msg refusing still refuses", r.returncode != 0, True)
+        check_exit("  and its own commit-msg refusing still refuses", r, NONZERO)
         r = _commit(home, repo, "d.md", f"~/{WORD}/x\n")
-        check_true("  and a scratch path is refused before its own hook runs",
-                   r.returncode != 0 and "own-pre-commit ran" not in r.stdout + r.stderr)
+        check_exit("  and a scratch path is refused before its own hook runs", r, NONZERO,
+                   lacks=["own-pre-commit ran"])
 
 
 def test_a_check_that_cannot_run_refuses_every_commit() -> None:
@@ -135,9 +132,8 @@ def test_a_check_that_cannot_run_refuses_every_commit() -> None:
         _install(home, tools=tools)
         repo = _new_repo(home, "r")
         r = _commit(home, repo, "a.md", "clean\n")
-        out = r.stdout + r.stderr
-        check_true("a scratch check exiting 3: even a clean commit is refused, BROKEN, naming the exit",
-                   r.returncode != 0 and "BROKEN" in out and "--hook) exited 3" in out)
+        check_exit("a scratch check exiting 3: even a clean commit is refused, BROKEN, naming the exit", r,
+                   NONZERO, says=["BROKEN", "--hook) exited 3"])
 
 
 def test_what_the_global_hooks_cannot_reach_is_named() -> None:
@@ -160,13 +156,12 @@ def test_what_the_global_hooks_cannot_reach_is_named() -> None:
         (handoff / "hooks" / "pre-commit").chmod(0o755)
         _git(home, handoff, "config", "--local", "core.hooksPath", "hooks")
         r = _commit(home, handoff, "a.md", "clean\n")
-        check("before any install, the hand-off fails closed: even a clean commit is refused",
-              r.returncode != 0, True)
+        check_exit("before any install, the hand-off fails closed: even a clean commit is refused", r, NONZERO)
         _git(home, handoff, "reset", "-q")
         _new_repo(home, "plain")
         p = _install(home)
-        check_true("a local core.hooksPath whose pre-commit skips the check: FINDINGS, NOT COVERED, named",
-                   p.returncode == FINDINGS and "NOT COVERED: " in p.stdout and "bare-local" in p.stdout)
+        check_exit("a local core.hooksPath whose pre-commit skips the check: FINDINGS, NOT COVERED, named", p,
+                   FINDINGS, says=["NOT COVERED: ", "bare-local"])
         check_true("  with the hand-off line to add",
                    'sh "$HOME/.config/git/jp-tools-hooks/pre-commit" "$@" || exit 1' in p.stdout)
         checked = home / "projects" / "checked-local"
@@ -176,10 +171,9 @@ def test_what_the_global_hooks_cannot_reach_is_named() -> None:
                    f"covered: {handoff} " in p.stdout)
         check_true("  and a plain repository is not listed at all", "plain" not in p.stdout)
         r = _commit(home, handoff, "a.md", "clean\n")
-        check("the hand-off after the install: a clean commit goes through", r.returncode, 0)
+        check_exit("the hand-off after the install: a clean commit goes through", r, 0)
         r = _commit(home, handoff, "b.md", f"~/{WORD}/x\n")
-        check_true("  and one naming a scratch path is refused",
-                   r.returncode != 0 and "you fucking idiot" in r.stdout + r.stderr)
+        check_exit("  and one naming a scratch path is refused", r, NONZERO, says=["you fucking idiot"])
 
 
 def test_another_global_hooks_path_is_refused() -> None:
@@ -189,12 +183,11 @@ def test_another_global_hooks_path_is_refused() -> None:
     with tempfile.TemporaryDirectory() as td:
         home = Path(td)
         p = _install(home, "--check")
-        check("--check before any install: FINDINGS, not installed",
-              (p.returncode, "NOT INSTALLED" in p.stdout), (FINDINGS, True))
+        check_exit("--check before any install: FINDINGS, not installed", p, FINDINGS, says=["NOT INSTALLED"])
         subprocess.run(["git", "config", "--global", "core.hooksPath", "/elsewhere"], env=_env(home), check=True)
         p = _install(home)
-        check_true("another global core.hooksPath: NOT_RUN, refused, naming it",
-                   p.returncode == NOT_RUN and "already /elsewhere: refused" in p.stdout)
+        check_exit("another global core.hooksPath: NOT_RUN, refused, naming it", p, NOT_RUN,
+                   says=["already /elsewhere: refused"])
         got = subprocess.run(["git", "config", "--global", "--get", "core.hooksPath"], env=_env(home),
                              capture_output=True, text=True, check=False).stdout.strip()
         check("  and it is left as it was", got, "/elsewhere")

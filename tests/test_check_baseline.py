@@ -34,6 +34,7 @@ from pathlib import Path
 from unittest import mock
 
 from _harness import ROOT, check, check_true, load_script, run
+from process_check import check_exit
 
 DIRTY = "import os\nimport sys\nx = 1\n"  # unused imports: ruff findings to count
 WORSE = "import os\nimport sys\nimport json\nx = 1\n"
@@ -86,7 +87,7 @@ def _files(path: Path) -> list[str]:
 def git_test_recording() -> None:
     with repo() as r:
         base = r / "base.json"
-        check("record exits 0", check_py(".", "--record-baseline", str(base), cwd=r).returncode, 0)
+        check_exit("record exits 0", check_py(".", "--record-baseline", str(base), cwd=r), 0)
         doc = _doc(base)
         check("records mode=per-file", doc.get("mode"), "per-file")
         tools = doc.get("tools")
@@ -111,11 +112,12 @@ def git_test_a_version_1_baseline_is_refused_with_the_command() -> None:
         doc["baseline_version"] = 1
         base.write_text(json.dumps(doc), encoding="utf-8")
         p = check_py("dirty.py", "--baseline", str(base), cwd=r)
-        check("a version 1 baseline is not compared: NOT_RUN", p.returncode, 2)
+        check_exit("a version 1 baseline is not compared: NOT_RUN", p, 2)
         check_true("  and the refusal gives the command that re-records it",
                    f"check.py . --record-baseline {base}" in p.stderr)
         p = check_py(".", "--record-baseline", str(base), cwd=r)
-        check("re-recording over it works", (p.returncode, _doc(base).get("baseline_version")), (0, 2))
+        check_exit("re-recording over it works", p, 0)
+        check("  as version 2", _doc(base).get("baseline_version"), 2)
 
 
 def git_test_the_three_acceptance_cases() -> None:
@@ -123,15 +125,15 @@ def git_test_the_three_acceptance_cases() -> None:
         base = str(r / "base.json")
         check_py(".", "--record-baseline", base, cwd=r)
         (r / "dirty.py").write_text(DIRTY + "z = 3\n", encoding="utf-8")
-        check("unchanged count exits 0", check_py("dirty.py", "--baseline", base, cwd=r).returncode, 0)
+        check_exit("unchanged count exits 0", check_py("dirty.py", "--baseline", base, cwd=r), 0)
         (r / "dirty.py").write_text(WORSE, encoding="utf-8")
         p = check_py("dirty.py", "--baseline", base, cwd=r)
-        check("a raised count exits 1", p.returncode, 1)
+        check_exit("a raised count exits 1", p, 1)
         check_true("the refusal names the file and both numbers",
                    "dirty.py" in p.stderr and "3 -> 4" in p.stderr)
         (r / "dirty.py").write_text(CLEAN, encoding="utf-8")
         p = check_py("dirty.py", "--baseline", base, cwd=r)
-        check("a lowered count exits 0", p.returncode, 0)
+        check_exit("a lowered count exits 0", p, 0)
         check_true("the gain is reported, not silently accepted", "-3" in p.stdout)
 
 
@@ -150,10 +152,10 @@ def git_test_warnings_that_rise_fail() -> None:
               | {"fixable": 0, "fixable_unsafe": 0}, {"errors": 0, "warnings": 1, "fixable": 0, "fixable_unsafe": 0})
         (r / "a.sh").write_text(one + "echo $2\necho $3\n", encoding="utf-8")
         p = check_py("a.sh", "--baseline", base, cwd=r)
-        check_true("warnings 1 -> 3: exit 1, the count named on stderr",
-                   p.returncode == 1 and "a.sh  shellcheck  warnings  1 -> 3" in p.stderr)
+        check_exit("warnings 1 -> 3: exit 1, the count named on stderr", p, 1,
+                   says=["a.sh  shellcheck  warnings  1 -> 3"])
         (r / "a.sh").write_text(one, encoding="utf-8")
-        check("  and back at one: exit 0", check_py("a.sh", "--baseline", base, cwd=r).returncode, 0)
+        check_exit("  and back at one: exit 0", check_py("a.sh", "--baseline", base, cwd=r), 0)
 
 
 def git_test_a_per_file_run_compares_only_what_it_measured() -> None:
@@ -163,12 +165,11 @@ def git_test_a_per_file_run_compares_only_what_it_measured() -> None:
         (r / "other.py").write_text(DIRTY, encoding="utf-8")
         two = str(r / "two.json")
         p = check_py(".", "--record-baseline", two, cwd=r)
-        check_true("CONTROL: both dirty files are recorded",
-                   p.returncode == 0 and {"dirty.py", "other.py"} <= set(_files(Path(two))))
+        check_exit("CONTROL: both dirty files are recorded", p, 0)
+        check_true("  both of them", {"dirty.py", "other.py"} <= set(_files(Path(two))))
         p = check_py("dirty.py", "--baseline", two, cwd=r)
         check_true("an unmeasured baselined file is not printed as improved", "other.py" not in p.stdout)
-        check_true("and the measured file's unchanged count says no change",
-                   p.returncode == 0 and "baseline: no change" in p.stdout)
+        check_exit("and the measured file's unchanged count says no change", p, 0, says=["baseline: no change"])
         check_true("and the unmeasured one is counted on one line",
                    "1 other baselined file(s) not measured" in p.stdout)
         (r / "dirty.py").write_text(CLEAN, encoding="utf-8")
@@ -186,14 +187,13 @@ def git_test_a_directory_against_a_baseline_is_measured_per_file() -> None:
         check_py(".", "--record-baseline", str(base), cwd=r)
         for args in ((".",), (".", "--lang", "python")):
             p = check_py(*args, "--baseline", str(base), cwd=r)
-            check(f"{' '.join(args)}: unchanged, so no change and exit 0",
-                  (p.returncode, "baseline: no change" in p.stdout), (0, True))
+            check_exit(f"{' '.join(args)}: unchanged, so no change and exit 0", p, 0, says=["baseline: no change"])
         (r / "dirty.py").write_text(WORSE, encoding="utf-8")
         p = check_py(".", "--baseline", str(base), cwd=r)
-        check_true("a file that got worse fails the directory run, named",
-                   p.returncode == 1 and "dirty.py  ruff  errors  3 -> 4" in p.stderr)
+        check_exit("a file that got worse fails the directory run, named", p, 1,
+                   says=["dirty.py  ruff  errors  3 -> 4"])
         p = check_py(".", "--lang", "js", "--baseline", str(base), cwd=r)
-        check("--lang keeps only that language's files: none here, so nothing worse", p.returncode, 0)
+        check_exit("--lang keeps only that language's files: none here, so nothing worse", p, 0)
         p = check_py(".", "--tools", "ruff,smells", "--baseline", str(base), cwd=r)
         # The report, then the baseline's own lines after it.
         out, _ = json.JSONDecoder().raw_decode(p.stdout)
@@ -234,17 +234,17 @@ def git_test_counts_with_their_keys_missing() -> None:
         base = r / "base.json"
         base.write_text(json.dumps({"baseline_version": 2}), encoding="utf-8")
         p = check_py("dirty.py", "--baseline", str(base), cwd=r)
-        check_true("a baseline naming no mode is refused, saying 'unknown'",
-                   p.returncode == 2 and "mode='unknown'" in p.stderr)
+        check_exit("a baseline naming no mode is refused, saying 'unknown'", p, 2, says=["mode='unknown'"])
         base.write_text(json.dumps({"baseline_version": 2, "mode": "per-file"}), encoding="utf-8")
         p = check_py("dirty.py", "--baseline", str(base), cwd=r)
-        check_true("one with no files and no tools: every finding is new, so worse",
-                   p.returncode == 1 and "dirty.py  ruff  errors  0 -> 3" in p.stderr)
+        check_exit("one with no files and no tools: every finding is new, so worse", p, 1,
+                   says=["dirty.py  ruff  errors  0 -> 3"])
         base.write_text("{ not json", encoding="utf-8")
         p = check_py("dirty.py", "--baseline", str(base), cwd=r)
-        check_true("  and a baseline that is not JSON is named on stderr, not stdout",
-                   p.returncode == 2 and p.stderr.startswith(f"baseline: cannot read {base}: ")
-                   and "cannot read" not in p.stdout)
+        check_exit("  and a baseline that is not JSON is named on stderr, not stdout", p, 2,
+                   says=[f"baseline: cannot read {base}: "])
+        check_true("    stderr first, stdout without it",
+                   p.stderr.startswith(f"baseline: cannot read {base}: ") and "cannot read" not in p.stdout)
         p = check_py(".", "--record-baseline", str(base), "--force-baseline", cwd=r)
         check("forced over a file that is not a baseline: says so, not 'a baseline of 0 file(s)'",
               p.stdout.splitlines()[1:],
@@ -296,7 +296,7 @@ def git_test_modes_and_versions_are_never_compared_across() -> None:
         doc["mode"] = "whole-repo"
         base.write_text(json.dumps(doc), encoding="utf-8")
         p = check_py("dirty.py", "--baseline", str(base), cwd=r)
-        check("a per-file run against a whole-repo baseline REFUSES", p.returncode, 2)
+        check_exit("a per-file run against a whole-repo baseline REFUSES", p, 2)
         check_true("and says which two modes disagree", "per-file" in p.stderr and "whole-repo" in p.stderr)
         check_py(".", "--record-baseline", str(base), "--force-baseline", cwd=r)
         doc = _doc(base)
@@ -307,7 +307,7 @@ def git_test_modes_and_versions_are_never_compared_across() -> None:
         (r / "dirty.py").write_text(WORSE, encoding="utf-8")
         p = check_py("dirty.py", "--baseline", str(base), cwd=r)
         # Genuinely worse, under a different ruff: "cannot tell", not regression and not pass.
-        check("a version mismatch excludes that tool instead of failing", p.returncode, 0)
+        check_exit("a version mismatch excludes that tool instead of failing", p, 0)
         check_true("and says so out loud", "cannot compare ruff" in p.stderr)
 
 
@@ -316,20 +316,18 @@ def git_test_recording_never_silently_discards() -> None:
     one path would drop the first; it is refused, and the file left intact."""
     with repo() as r:
         narrow = str(r / "narrow.json")
-        check("recording one file exits 0",
-              check_py("dirty.py", "--record-baseline", narrow, cwd=r).returncode, 0)
+        check_exit("recording one file exits 0", check_py("dirty.py", "--record-baseline", narrow, cwd=r), 0)
         p = check_py("clean.py", "--record-baseline", narrow, cwd=r)
-        check("recording a second file over it REFUSES", p.returncode, 2)
+        check_exit("recording a second file over it REFUSES", p, 2)
         check_true("and names the file that would be lost, and the path that works",
                    "dirty.py" in p.stderr and "--record-baseline" in p.stderr and "<dir>" in p.stderr)
         check("and leaves the existing baseline intact", _files(Path(narrow)), ["dirty.py"])
         p = check_py("clean.py", "--record-baseline", narrow, "--force-baseline", cwd=r)
-        check_true("--force-baseline writes it and says what it discarded",
-                   p.returncode == 0 and "discarding" in p.stdout)
+        check_exit("--force-baseline writes it and says what it discarded", p, 0, says=["discarding"])
         check("and the discard really happened", "dirty.py" in _files(Path(narrow)), False)
         p = check_py(".", "--record-baseline", narrow, cwd=r)
-        check_true("widening over a narrower baseline exits 0 and says what it replaced",
-                   p.returncode == 0 and "replaced a baseline of" in p.stdout)
+        check_exit("widening over a narrower baseline exits 0 and says what it replaced", p, 0,
+                   says=["replaced a baseline of"])
 
 
 def git_test_an_unreadable_baseline_is_not_an_absent_one() -> None:
@@ -339,16 +337,16 @@ def git_test_an_unreadable_baseline_is_not_an_absent_one() -> None:
         broken = r / "broken.json"
         broken.write_text("{ this is not json", encoding="utf-8")
         p = check_py("dirty.py", "--record-baseline", str(broken), cwd=r)
-        check_true("recording over an unparseable baseline REFUSES, saying why",
-                   p.returncode == 2 and "cannot be read as a baseline" in p.stderr)
+        check_exit("recording over an unparseable baseline REFUSES, saying why", p, 2,
+                   says=["cannot be read as a baseline"])
         check("and leaves it untouched", broken.read_text(encoding="utf-8"), "{ this is not json")
         p = check_py("dirty.py", "--record-baseline", str(broken), "--force-baseline", cwd=r)
-        check_true("--force-baseline still overwrites it deliberately",
-                   p.returncode == 0 and "dirty.py" in _files(broken))
+        check_exit("--force-baseline still overwrites it deliberately", p, 0)
+        check_true("  with the file recorded", "dirty.py" in _files(broken))
         alien = r / "alien.json"
         alien.write_text('{"something": "else"}', encoding="utf-8")
-        check("a parseable non-baseline is refused too",
-              check_py("dirty.py", "--record-baseline", str(alien), cwd=r).returncode, 2)
+        check_exit("a parseable non-baseline is refused too",
+                   check_py("dirty.py", "--record-baseline", str(alien), cwd=r), 2)
 
 
 def git_test_touched_must_lower_and_keeps_the_gain() -> None:
@@ -362,21 +360,21 @@ def git_test_touched_must_lower_and_keeps_the_gain() -> None:
         assert isinstance(files, dict)
         n = files["dirty.py"]["ruff"]["errors"]
         (r / "dirty.py").write_text(DIRTY + "z = 3\n", encoding="utf-8")
-        check("CONTROL: without --touched an unchanged count passes",
-              check_py("dirty.py", "--baseline", str(base), cwd=r).returncode, 0)
+        check_exit("CONTROL: without --touched an unchanged count passes",
+                   check_py("dirty.py", "--baseline", str(base), cwd=r), 0)
         p = check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r)
-        check("with --touched an unchanged count is refused, as NOT_LOWERED (3)", p.returncode, 3)
+        check_exit("with --touched an unchanged count is refused, as NOT_LOWERED (3)", p, 3)
         check_true("  naming the file and both numbers",
                    f"dirty.py was changed and still has {n} of its {n}" in p.stderr)
         check_true("  and the escape", "LINT-DEBT-OK: <reason>" in p.stderr)
         check("  and the baseline is not written", base.read_text(encoding="utf-8"), recorded)
         (r / "dirty.py").write_text(DIRTY + "import json\n", encoding="utf-8")
-        check("a count that grows is still FINDINGS (1), which no message lets through",
-              check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r).returncode, 1)
+        check_exit("a count that grows is still FINDINGS (1), which no message lets through",
+                   check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r), 1)
 
         (r / "dirty.py").write_text("import os\nx = 1\n", encoding="utf-8")
         p = check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r)
-        check("one fixed passes", p.returncode, 0)
+        check_exit("one fixed passes", p, 0)
         files = _doc(base).get("files")
         assert isinstance(files, dict)
         check_true("  and the lower count is written back", 0 < files["dirty.py"]["ruff"]["errors"] < n)
@@ -391,16 +389,14 @@ def git_test_touched_must_lower_and_keeps_the_gain() -> None:
         check_true("  CONTROL: the fresh record's errors and fixable did fall",
                    again["errors"] < json.loads(recorded)["totals"]["errors"]
                    and again["fixable"] < json.loads(recorded)["totals"]["fixable"])
-        check("the same count again is refused: each change fixes one",
-              check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r).returncode, 3)
+        check_exit("the same count again is refused: each change fixes one",
+                   check_py("dirty.py", "--baseline", str(base), "--touched", cwd=r), 3)
 
         written = base.read_text(encoding="utf-8")
-        check("a clean file passes", check_py("clean.py", "--baseline", str(base), "--touched",
-                                              cwd=r).returncode, 0)
+        check_exit("a clean file passes", check_py("clean.py", "--baseline", str(base), "--touched", cwd=r), 0)
         check("  and writes nothing", base.read_text(encoding="utf-8"), written)
-        check("--touched on a directory refuses",
-              check_py(".", "--lang", "python", "--baseline", str(base), "--touched",
-                       cwd=r).returncode, 2)
+        check_exit("--touched on a directory refuses",
+                   check_py(".", "--lang", "python", "--baseline", str(base), "--touched", cwd=r), 2)
 
 
 def git_test_touched_never_counts_cross_file_tools() -> None:
@@ -432,8 +428,8 @@ def git_test_touched_never_counts_cross_file_tools() -> None:
 
 def git_test_no_baseline_behaves_as_before() -> None:
     with repo() as r:
-        check("dirty file with no --baseline still exits 1", check_py("dirty.py", cwd=r).returncode, 1)
-        check("clean file with no --baseline still exits 0", check_py("clean.py", cwd=r).returncode, 0)
+        check_exit("dirty file with no --baseline still exits 1", check_py("dirty.py", cwd=r), 1)
+        check_exit("clean file with no --baseline still exits 0", check_py("clean.py", cwd=r), 0)
 
 
 def git_test_a_linked_worktree_under_the_hooks_git_dir() -> None:
@@ -459,11 +455,11 @@ def git_test_a_linked_worktree_under_the_hooks_git_dir() -> None:
         check("recorded in the worktree, the key is the path from the root", _files(Path(base)),
               ["sub/dirty.py"])
         (wt / "sub" / "dirty.py").write_text(DIRTY + "z = 3\n", encoding="utf-8")
-        check("CONTROL: an unchanged count, without GIT_DIR, exits 0",
-              check_py("sub/dirty.py", "--baseline", base, cwd=wt).returncode, 0)
+        check_exit("CONTROL: an unchanged count, without GIT_DIR, exits 0",
+                   check_py("sub/dirty.py", "--baseline", base, cwd=wt), 0)
         env = dict(os.environ, GIT_DIR=git("rev-parse", "--absolute-git-dir", cwd=wt))
-        check("with the hook's GIT_DIR set, the same unchanged count still exits 0",
-              check_py("sub/dirty.py", "--baseline", base, cwd=wt, env=env).returncode, 0)
+        check_exit("with the hook's GIT_DIR set, the same unchanged count still exits 0",
+                   check_py("sub/dirty.py", "--baseline", base, cwd=wt, env=env), 0)
 
 
 def _entry(errors: int = 0, warnings: int = 0, fixable: int = 0, unsafe: int = 0) -> dict[str, int]:
@@ -515,13 +511,14 @@ def git_test_a_baseline_may_only_fall() -> None:
                        "  a.py  ruff  fixable  2 -> 3\n  a.py  ruff  fixable_unsafe  0 -> 1\n")))
         o.write_text("{ not json", encoding="utf-8")
         p = check_py(str(n), "--raised-over", str(o), cwd=Path(tmp))
-        check_true("an unreadable old baseline: NOT_RUN, saying which",
-                   p.returncode == 2 and p.stderr.startswith(f"baseline: cannot read {o}: ") and p.stdout == "")
+        check_exit("an unreadable old baseline: NOT_RUN, saying which", p, 2, says=[f"baseline: cannot read {o}: "])
+        check_true("  first on stderr, nothing on stdout",
+                   p.stderr.startswith(f"baseline: cannot read {o}: ") and p.stdout == "")
         o.write_text(json.dumps(old), encoding="utf-8")
         n.write_text("{ not json", encoding="utf-8")
         p = check_py(str(n), "--raised-over", str(o), cwd=Path(tmp))
-        check_true("an unreadable new one: the same, naming it",
-                   p.returncode == 2 and p.stderr.startswith(f"baseline: cannot read {new}: "))
+        check_exit("an unreadable new one: the same, naming it", p, 2, says=[f"baseline: cannot read {new}: "])
+        check_true("  first on stderr", p.stderr.startswith(f"baseline: cannot read {new}: "))
 
 
 def git_test_a_lang_run_compares_only_that_language() -> None:
@@ -532,14 +529,14 @@ def git_test_a_lang_run_compares_only_that_language() -> None:
         check_py(".", "--record-baseline", str(base), cwd=r)
         (r / "b.sh").write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
         p = check_py(".", "--lang", "shell", "--baseline", str(base), cwd=r)
-        check("a --lang shell run against a python file's baseline passes", p.returncode, 0)
+        check_exit("a --lang shell run against a python file's baseline passes", p, 0)
         check_true("  printing no line for the python file it never measured",
                    "dirty.py" not in p.stdout)
         check_true("  and counting it as not measured",
                    "baseline: 1 other baselined file(s) not measured in this run" in p.stdout)
         p = check_py(".", "--lang", "python", "--baseline", str(base), cwd=r)
-        check_true("--lang python still compares it", p.returncode == 0
-                   and "baseline: no change against base.json" in p.stdout and "not measured" not in p.stdout)
+        check_exit("--lang python still compares it", p, 0, says=["baseline: no change against base.json"],
+                   lacks=["not measured"])
         from jpcheck import baseline as bl
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):

@@ -4,7 +4,7 @@
     {
       "name": "MUTATE_COPY_DIR ignored, copies beside ROOT",
       "edits": [["                            dir=os.environ.get(\"MUTATE_COPY_DIR\") or os.path.dirname(root))", "                            dir=os.path.dirname(root))"]],
-      "target": "MUTATE_COPY_DIR: every run's copy made there, none beside ROOT"
+      "target": "  both runs' copies there"
     }
   ]
 }

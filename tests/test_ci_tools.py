@@ -31,6 +31,7 @@ from typing import Any
 import yaml
 
 from _harness import ROOT, check, check_true, run
+from process_check import check_exit
 
 PHP = ROOT / "ci-image" / "install-php-tools.sh"
 MUT = ROOT / "ci-image" / "mutation-tools.sh"
@@ -97,7 +98,7 @@ def test_it_refuses_without_each_of_the_three() -> None:
     for missing in full:
         with tempfile.TemporaryDirectory() as td:
             p, calls = _php(Path(td), **{k: v for k, v in full.items() if k != missing})
-            check(f"no {missing}: exit 1", p.returncode, 1)
+            check_exit(f"no {missing}: exit 1", p, 1)
             check_true("  naming the secret and the variable to set",
                        "FLEET_READ_TOKEN" in p.stderr and "variable LIBRARIES_OWNER" in p.stderr)
             check("  and composer never called", calls, [])
@@ -106,7 +107,7 @@ def test_it_refuses_without_each_of_the_three() -> None:
 def test_it_installs_with_the_token_in_the_environment() -> None:
     with tempfile.TemporaryDirectory() as td:
         p, calls = _php(Path(td), FLEET_READ_TOKEN="tok", OWNER="own", SERVER="http://forge:3000")
-        check("exit 0", p.returncode, 0)
+        check_exit("exit 0", p, 0)
         check("the two repositories, http allowed, then the install", [c[0] for c in calls], [
             ["config", "-g", "repositories.iteration8-core", "vcs", "http://forge:3000/own/iteration8-core.git"],
             ["config", "-g", "repositories.iteration8-utilities", "vcs",

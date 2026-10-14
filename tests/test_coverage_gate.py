@@ -23,6 +23,7 @@ from pathlib import Path
 from _harness import check, check_true, load_script, run
 from jpcheck.common import tool_roots
 from jpexit import FINDINGS, NOT_RUN, OK
+from process_check import check_exit
 
 GATE = load_script("coverage-gate.py")
 
@@ -155,9 +156,9 @@ def test_a_real_phpunit_clover_report() -> None:
         made = subprocess.run(["php", "-d", "xdebug.mode=coverage", str(vendor / "bin" / "phpunit"),
                                "--coverage-clover", str(report)],
                               cwd=d, capture_output=True, text=True, check=False)
-        check("phpunit wrote a Clover report", (made.returncode, report.exists()), (0, True))
+        check_exit("phpunit wrote a Clover report", made, 0)
+        check_true("  the report there", report.exists())
         if not report.exists():
-            print(made.stdout[-800:] + made.stderr[-800:])
             return
         code, out = gate(report.read_text(encoding="utf-8"), "--fail-under", "95")
         check("real report, half covered, at 95: exit", code, FINDINGS)

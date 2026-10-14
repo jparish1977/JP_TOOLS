@@ -4,7 +4,7 @@
     {
       "name": "the user's cache, as before",
       "edits": [["                             env=dict(os.environ, XDG_CACHE_HOME=os.path.join(work, \".cache\")))", "                             env=dict(os.environ))"]],
-      "target": "a copy's cache: every run's inside its own copy, one copy each, none left"
+      "target": "  each run's cache in its own copy, none left"
     }
   ]
 }

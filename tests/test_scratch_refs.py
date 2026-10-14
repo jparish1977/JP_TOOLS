@@ -27,6 +27,7 @@ from pathlib import Path
 
 from _harness import ROOT, check, check_true, run
 from jpexit import FINDINGS, NOT_RUN, OK
+from process_check import NONZERO, check_exit
 
 WORD = "scr" + "atch"
 CLAUDE_TMP = "/tmp/claude-" + "1000"
@@ -96,21 +97,18 @@ def test_the_hook_refuses_the_whole_file_as_staged() -> None:
         repo = _repo(Path(td))
         _stage(repo, "new.md", "nothing here\n")
         r = _git(repo, "commit", "-m", "clean")
-        check("CONTROL: a file with none commits", r.returncode, 0)
+        check_exit("CONTROL: a file with none commits", r, 0)
         _stage(repo, "old.md", f"line one\nran ~/{WORD}/x.sh\nline three\n")
         r = _git(repo, "commit", "-m", "touches the old file")
-        out = r.stdout + r.stderr
-        check_true("a staged file whose OLD line names scratch is refused, named, and the idiot told",
-                   r.returncode != 0 and f"old.md:2: ran ~/{WORD}/x.sh" in out
-                   and "you fucking idiot" in out and "METHODOLOGY 2.11, rule 6" in out)
+        check_exit("a staged file whose OLD line names scratch is refused, named, and the idiot told", r, NONZERO,
+                   says=[f"old.md:2: ran ~/{WORD}/x.sh", "you fucking idiot", "METHODOLOGY 2.11, rule 6"])
         (repo / "old.md").write_text("line one\nfixed\n", encoding="utf-8")
         r = _git(repo, "commit", "-m", "fixed in the tree only")
-        check("the staged copy is what is read: fixed only in the working tree, still refused",
-              r.returncode != 0, True)
+        check_exit("the staged copy is what is read: fixed only in the working tree, still refused", r, NONZERO)
         _git(repo, "add", "old.md")
         (repo / "old.md").write_text(f"~/{WORD}/again\n", encoding="utf-8")
         r = _git(repo, "commit", "-m", "fixed as staged")
-        check("  and fixed as staged, with scratch only in the working tree, it commits", r.returncode, 0)
+        check_exit("  and fixed as staged, with scratch only in the working tree, it commits", r, 0)
 
 
 def test_what_is_and_is_not_read() -> None:
@@ -138,11 +136,10 @@ def test_what_cannot_look_says_so() -> None:
               (NOT_RUN, "", "scratch-refs: not in a git repository\n"))
         p = subprocess.run([sys.executable, str(ROOT / "scratch-refs.py")], cwd=plain, capture_output=True,
                            text=True, check=False)
-        check_true("no --check: NOT_RUN and the usage, never a silent OK",
-                   p.returncode == NOT_RUN and "usage:" in p.stdout)
+        check_exit("no --check: NOT_RUN and the usage, never a silent OK", p, NOT_RUN, says=["usage:"])
         p = subprocess.run([sys.executable, str(ROOT / "scratch-refs.py"), "--help"], cwd=plain,
                            capture_output=True, text=True, check=False)
-        check_true("--help: OK and the usage", p.returncode == OK and "usage:" in p.stdout)
+        check_exit("--help: OK and the usage", p, OK, says=["usage:"])
         if os.geteuid() == 0:
             print("SKIP: running as root, which reads a mode-000 index anyway")
             return
@@ -179,9 +176,8 @@ def test_a_checker_that_crashes_is_broken() -> None:
         repo = _repo(Path(td) / "r")
         _stage(repo, "a.md", "clean\n")
         r = _git(repo, "commit", "-m", "x", env=dict(os.environ, JP_TOOLS_DIR=str(tools)))
-        out = r.stdout + r.stderr
-        check_true("a scratch check that exits 3 refuses the commit as BROKEN, not as clean",
-                   r.returncode != 0 and "BROKEN" in out and "scratch-refs.py --hook) exited 3" in out)
+        check_exit("a scratch check that exits 3 refuses the commit as BROKEN, not as clean", r, NONZERO,
+                   says=["BROKEN", "scratch-refs.py --hook) exited 3"])
 
 
 def _run(repo: Path, flag: str) -> subprocess.CompletedProcess[str]:

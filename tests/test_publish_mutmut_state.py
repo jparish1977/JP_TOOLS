@@ -32,6 +32,7 @@ import time
 from pathlib import Path
 
 from _harness import ROOT, check, check_true, run
+from process_check import check_exit
 
 PUBLISH = ROOT / "ci-image" / "publish-mutmut-state.sh"
 FETCH = ROOT / "ci-image" / "fetch-mutmut-state.sh"
@@ -77,7 +78,7 @@ def test_publishes_a_version_and_points_current_at_it() -> None:
         state = Path(td) / "state"
         state.mkdir()
         p = _publish(_checkout(Path(td) / "co1"), state)
-        check("exit 0", p.returncode, 0)
+        check_exit("exit 0", p, 0)
         current = state / "current"
         check_true("current is a symlink to the version", current.is_symlink()
                    and os.readlink(current) == _versions(state)[0])
@@ -105,7 +106,7 @@ def test_a_plain_directory_current_is_replaced() -> None:
         state = Path(td) / "state"
         (state / "current").mkdir(parents=True)
         (state / "current" / "old-file").write_text("old", encoding="utf-8")
-        check("exit 0", _publish(_checkout(Path(td) / "co"), state).returncode, 0)
+        check_exit("exit 0", _publish(_checkout(Path(td) / "co"), state), 0)
         check_true("current is now a symlink", (state / "current").is_symlink())
         check("  and the old layout is kept as the version before",
               _versions(state)[0], "v-0-before-versions")
@@ -170,7 +171,7 @@ def test_refusals_leave_the_state() -> None:
         empty.mkdir()
         state = Path(td) / "state"
         state.mkdir()
-        check("nothing to publish: exit 2", _publish(empty, state).returncode, 2)
+        check_exit("nothing to publish: exit 2", _publish(empty, state), 2)
         check("  and the state is untouched", sorted(p.name for p in state.iterdir()), [])
         if os.geteuid() != 0 and shutil.which("git"):
             here = _checkout(Path(td) / "co")
@@ -179,7 +180,7 @@ def test_refusals_leave_the_state() -> None:
                 p = _publish(here, state)
             finally:
                 os.chmod(state, 0o755)
-            check("a state that cannot be written: exit 2", p.returncode, 2)
+            check_exit("a state that cannot be written: exit 2", p, 2)
 
 
 def test_fetch_copies_the_current_version() -> None:
@@ -192,11 +193,10 @@ def test_fetch_copies_the_current_version() -> None:
         out = Path(td) / "out"
         out.mkdir()
         fetch = ["bash", str(FETCH), str(state)]
-        check("no state: exit 2",
-              subprocess.run(fetch, cwd=out, capture_output=True, check=False).returncode, 2)
+        check_exit("no state: exit 2", subprocess.run(fetch, cwd=out, capture_output=True, text=True, check=False), 2)
         _publish(_checkout(Path(td) / "co", baseline="7"), state)
         p = subprocess.run(fetch, cwd=out, capture_output=True, text=True, check=False)
-        check("a state: exit 0", p.returncode, 0)
+        check_exit("a state: exit 0", p, 0)
         check("  the baseline, as mutmut-baseline.json",
               (out / "mutmut-baseline.json").read_text(encoding="utf-8"), "7")
         check_true("  and mutants/", (out / "mutants" / "a.py.meta").is_file())

@@ -32,6 +32,7 @@ from pathlib import Path
 
 from _harness import ROOT, check, check_true, run
 from fake_tools import LOG_ARGV, calls, fake_tools
+from process_check import check_exit
 
 SCRIPT = ROOT / "install-pwsh.sh"
 MANIFEST = ("shellcheck 0.9.0 shellcheck koalaman.shellcheck\n"
@@ -66,7 +67,7 @@ def test_pwsh_already_there() -> None:
         r = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
                            env={**os.environ, "HOME": str(work)})
         ran = calls(log)
-    check("pwsh present: exit", r.returncode, 0)
+    check_exit("pwsh present: exit", r, 0)
     check("pwsh present: nothing downloaded", [c for c in ran if c[0] == "curl"], [])
     check_true("pwsh present: the module installed at the manifest's pin",
                any("Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0" in " ".join(c) for c in ran))
@@ -108,10 +109,10 @@ def fetch_without_pwsh(tmp: str, sha256: str | None = None) -> tuple[subprocess.
 def test_a_download_that_does_not_match_its_hash() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         r, ran, dest, _ = fetch_without_pwsh(tmp, sha256="0" * 64)
-        check("hash mismatch: exit 1, says so, nothing unpacked or left, no module install",
-              (r.returncode, "does not match the sha256" in r.stderr, sorted(p.name for p in dest.iterdir()),
-               [c for c in ran if c[0] == "pwsh"]),
-              (1, True, [], []))
+        check_exit("hash mismatch: exit 1, says so, nothing unpacked or left, no module install", r, 1,
+                   says=["does not match the sha256"])
+        check("  nothing unpacked or left, no module install",
+              (sorted(p.name for p in dest.iterdir()), [c for c in ran if c[0] == "pwsh"]), ([], []))
 
 
 def test_no_pwsh_fetches_the_pinned_release() -> None:
@@ -147,7 +148,8 @@ def test_a_failed_module_install_fails_the_script() -> None:
     installs = [" ".join(c) for c in ran if "Install-Module" in " ".join(c)]
     # Two pwsh calls ran: the installed-modules query, then the failed
     # install. The $PSVersionTable query after it never ran.
-    check("install fails: exit 1, the version query never run", (r.returncode, len(ran)), (1, 2))
+    check_exit("install fails: exit 1, the version query never run", r, 1)
+    check("  two pwsh calls, the version query not among them", len(ran), 2)
     check_true("install fails: the command stops on any error",
                bool(installs) and "$ErrorActionPreference = 'Stop';" in installs[0])
 
@@ -163,7 +165,7 @@ def module_installed(versions: str) -> list[str]:
         r = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
                            env={**os.environ, "HOME": str(work)})
         ran = calls(log)
-    check(f"module {versions!r} installed: exit", r.returncode, 0)
+    check_exit(f"module {versions!r} installed: exit", r, 0)
     return [" ".join(c) for c in ran if "Install-Module" in " ".join(c)]
 
 
@@ -180,8 +182,8 @@ def test_a_manifest_without_the_lines() -> None:
         r = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
                            env={**os.environ, "HOME": str(work)})
         ran = calls(log)
-    check("no pwsh line: exit 1, naming it, and nothing run",
-          (r.returncode, "no 'pwsh' line" in r.stderr, ran), (1, True, []))
+    check_exit("no pwsh line: exit 1, naming it, and nothing run", r, 1, says=["no 'pwsh' line"])
+    check("  nothing run", ran, [])
 
 
 if __name__ == "__main__":

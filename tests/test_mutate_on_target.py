@@ -53,6 +53,7 @@ import tempfile
 import time
 
 from _harness import ROOT, check, check_true, run
+from process_check import check_exit
 
 RUNNER = os.environ.get("MUTATE_RUNNER") or str(ROOT / "mutate-on-target.py")
 ORIGINAL = b"VALUE = 1\r\nOTHER = 0\r\n"
@@ -107,8 +108,7 @@ def runner(tree: str, spec: str, env: dict[str, str]) -> subprocess.CompletedPro
 def test_a_clean_run() -> None:
     tree, spec, env = fixture("clean")
     r = runner(tree, spec, env)
-    check("a clean run: exit 0, the mutant killed on target",
-          (r.returncode, "every one killed on target" in r.stdout), (0, True))
+    check_exit("a clean run: exit 0, the mutant killed on target", r, 0, says=["every one killed on target"])
     check("a clean run: TARGET restored byte for byte, CRLF kept", target_bytes(tree), ORIGINAL)
     check_true("a clean run: no saved original left behind",
                not os.path.exists(saved_path(tree, env)))
@@ -122,8 +122,8 @@ def test_a_held_tree() -> None:
         r = runner(tree, spec, env)
     finally:
         os.close(fd)
-    check("a held tree: refused, exit 2, saying another run holds it",
-          (r.returncode, "another mutate-on-target run holds" in r.stderr), (2, True))
+    check_exit("a held tree: refused, exit 2, saying another run holds it", r, 2,
+               says=["another mutate-on-target run holds"])
     check("a held tree: TARGET untouched", target_bytes(tree), ORIGINAL)
 
 
@@ -137,8 +137,7 @@ def test_a_killed_run() -> None:
     with open(saved, "wb") as fh:
         fh.write(ORIGINAL)
     r = runner(tree, spec, env)
-    check("a killed run's original: refused, exit 2, naming it",
-          (r.returncode, saved in r.stderr and "killed" in r.stderr), (2, True))
+    check_exit("a killed run's original: refused, exit 2, naming it", r, 2, says=[saved, "killed"])
     check("a killed run's original: neither file is touched",
           (target_bytes(tree), os.path.exists(saved)), (mutated, True))
 
@@ -170,8 +169,7 @@ def test_no_anchor() -> None:
         json.dump({"mutants": [{"name": "gone", "edits": [["NOT THERE", "x"]],
                                 "target": "value is one"}]}, fh)
     r = runner(tree, spec, env)
-    check("a spec that does not anchor: refused, exit 2, 'occurs 0 times'",
-          (r.returncode, "occurs 0 times" in r.stderr), (2, True))
+    check_exit("a spec that does not anchor: refused, exit 2, 'occurs 0 times'", r, 2, says=["occurs 0 times"])
 
 
 # A test for proving runs overlap without timing them: unmutated, it counts
@@ -235,8 +233,8 @@ def test_specs_at_once() -> None:
                                     "target": "value is one"}]}, fh)
         specs.append(sp)
     r, meet, _ = meet_run("spec", specs, tree, env, 2)
-    check("mutate-spec: both specs killed on target, exit 0",
-          (r.returncode, r.stdout.count("every one killed on target")), (0, 2))
+    check_exit("mutate-spec: both specs killed on target, exit 0", r, 0)
+    check("  both of them", r.stdout.count("every one killed on target"), 2)
     check("mutate-spec: the two specs' mutants ran at once, each saw the other",
           saw(meet), {"2": "2 3", "3": "2 3"})
     check("mutate-spec: specs in one directory keep their file names as labels",
@@ -255,8 +253,8 @@ def test_one_spec_mutants_at_once() -> None:
                    "mutants": [{"name": f"to-{v}", "edits": [["VALUE = 1", f"VALUE = {v}"]],
                                 "target": "value is one"} for v in (2, 3, 4)]}, fh)
     r, meet, count = meet_run("per-mutant", [spec], tree, env, 3)
-    check("one spec: every mutant killed on target, exit 0, one control said",
-          (r.returncode, "3 mutant(s), one control, every one killed on target" in r.stdout), (0, True))
+    check_exit("one spec: every mutant killed on target, exit 0, one control said", r, 0,
+               says=["3 mutant(s), one control, every one killed on target"])
     with open(count, encoding="utf-8") as fh:
         check("one spec: the control ran once, not once per mutant", fh.read(), "control\n")
     check("one spec: its three mutants ran at once, each saw all three",
@@ -328,8 +326,8 @@ def test_a_worktree_copy_has_its_own_index() -> None:
                         tree, spec], capture_output=True, text=True, check=False, timeout=120,
                        env=dict(genv, MUTATE_OUT_DIR=outdir, EXPECT_HEAD=git("rev-parse", "HEAD"),
                                 EXPECT_COMMON=os.path.join(repo, ".git")))
-    check("a worktree ROOT: every mutant killed on target, each copy's git as ROOT's, detached",
-          (r.returncode, "every one killed on target" in r.stdout), (0, True))
+    check_exit("a worktree ROOT: every mutant killed on target, each copy's git as ROOT's, detached", r, 0,
+               says=["every one killed on target"])
     check("a worktree ROOT: no mutant's git add reached ROOT's index",
           subprocess.run(["git", "-C", tree, "ls-files"], capture_output=True, text=True,
                          env=genv, check=True).stdout.split(), ["t.py", "test.py"])
@@ -441,8 +439,8 @@ def test_spec_a_copy_shares_tools_and_git() -> None:
                        env=dict(genv, MUTATE_OUT_DIR=outdir, SEEN=seen))
     rows = read_seen(os.path.join(seen, "share"))
     common = os.path.realpath(os.path.join(repo, ".git"))
-    check("a copy of a plain clone: tools linked, a worktree of ROOT's repository, every run",
-          (r.returncode, rows), (0, [repr([True, True, True, common])] * 2))
+    check_exit("a copy of a plain clone: tools linked, a worktree of ROOT's repository, every run", r, 0)
+    check("  in every run", rows, [repr([True, True, True, common])] * 2)
     check("a copy of a plain clone: no copy's gitdir left in the repository",
           os.path.exists(os.path.join(repo, ".git", "worktrees"))
           and os.listdir(os.path.join(repo, ".git", "worktrees")), [])
@@ -468,9 +466,9 @@ def test_spec_copies_where_mutate_copy_dir_says() -> None:
                         tree, spec], capture_output=True, text=True, check=False, timeout=120,
                        env=dict(env, MUTATE_OUT_DIR=outdir, SEEN=seen, MUTATE_COPY_DIR=elsewhere))
     caches = read_seen(os.path.join(seen, "cache"))
-    check("MUTATE_COPY_DIR: every run's copy made there, none beside ROOT",
-          (r.returncode, len(caches), all(c.startswith(elsewhere + os.sep) for c in caches)),
-          (0, 2, True))
+    check_exit("MUTATE_COPY_DIR: every run's copy made there, none beside ROOT", r, 0)
+    check("  both runs' copies there", (len(caches), all(c.startswith(elsewhere + os.sep) for c in caches)),
+          (2, True))
 
 
 CACHE_TEST = """import os, sys
@@ -502,10 +500,11 @@ def test_spec_a_copy_has_its_own_cache() -> None:
                        env=dict(env, MUTATE_OUT_DIR=outdir, SEEN=seen))
     caches = read_seen(os.path.join(seen, "cache"))
     copies = os.path.join(TMP, ".mutate-own-cache-")
-    check("a copy's cache: every run's inside its own copy, one copy each, none left",
-          (r.returncode, len(caches), all(c.startswith(copies) for c in caches),
+    check_exit("a copy's cache: every run's inside its own copy, one copy each, none left", r, 0)
+    check("  each run's cache in its own copy, none left",
+          (len(caches), all(c.startswith(copies) for c in caches),
            len({c.split(os.sep)[-2] for c in caches}), any(os.path.exists(c) for c in caches)),
-          (0, 2, True, 2, False))
+          (2, True, 2, False))
 
 
 def test_specs_with_one_file_name() -> None:
@@ -533,7 +532,7 @@ def test_specs_with_one_file_name() -> None:
     check_true("same file name: each label carries its own spec's line",
                "every one killed" in by_label.get("books__code", "")
                and "1 wrong" in by_label.get("figures__code", ""))
-    check("same file name: the surviving mutant still fails the run", r.returncode, 1)
+    check_exit("same file name: the surviving mutant still fails the run", r, 1)
 
 
 def two_mutant_spec(name: str) -> tuple[str, str, dict[str, str]]:
@@ -557,18 +556,18 @@ def test_only_and_list() -> None:
     --list names each mutant and its target and touches nothing."""
     tree, spec, env = two_mutant_spec("only")
     r = runner_with(tree, spec, env, "--only", "nine")
-    check("--only nine: exit, one of two run, and it says so",
-          (r.returncode, "1 of 2 mutant(s) (--only), every one killed" in r.stdout), (0, True))
+    check_exit("--only nine: exit, one of two run, and it says so", r, 0,
+               says=["1 of 2 mutant(s) (--only), every one killed"])
     check("--only nine: the other mutant did not run", "  two " in r.stdout, False)
     r = runner_with(tree, spec, env, "--only", "two", "--only", "nine")
-    check("--only twice: both run", (r.returncode, "2 of 2 mutant(s) (--only)" in r.stdout), (0, True))
+    check_exit("--only twice: both run", r, 0, says=["2 of 2 mutant(s) (--only)"])
     r = runner_with(tree, spec, env, "--only", "seven")
-    check("--only a name no mutant has: refused, exit 2, naming the spec's names",
-          (r.returncode, "no mutant has that name" in r.stderr and "'two'" in r.stderr), (2, True))
+    check_exit("--only a name no mutant has: refused, exit 2, naming the spec's names", r, 2,
+               says=["no mutant has that name", "'two'"])
     check("--only a name no mutant has: TARGET untouched", target_bytes(tree), ORIGINAL)
     r = runner_with(tree, spec, env, "--list")
-    check("--list: exit, each name and target",
-          (r.returncode, r.stdout.splitlines()), (0, ["two\t-> value is one", "nine\t-> value is one"]))
+    check_exit("--list: exit, each name and target", r, 0)
+    check("  each name and target", r.stdout.splitlines(), ["two\t-> value is one", "nine\t-> value is one"])
     check("--list: TARGET untouched", target_bytes(tree), ORIGINAL)
 
 
@@ -590,17 +589,17 @@ def test_spec_only_and_list() -> None:
                               text=True, env=dict(env, MUTATE_OUT_DIR=outdir), check=False, timeout=120)
 
     r = spec_run("--only", "nine")
-    check("mutate-spec --only nine: exit, and only the spec that has it ran",
-          (r.returncode, [ln.split(":")[0] for ln in r.stdout.splitlines()]), (0, ["spec-only"]))
+    check_exit("mutate-spec --only nine: exit, and only the spec that has it ran", r, 0)
+    check("  only the spec that has it", [ln.split(":")[0] for ln in r.stdout.splitlines()], ["spec-only"])
     check_true("mutate-spec --only nine: one of its two mutants", "1 of 2 mutant(s) (--only)" in r.stdout)
     r = spec_run("--only", "seven")
-    check("mutate-spec --only a name no spec has: refused, exit 2",
-          (r.returncode, "no mutant in the given specs" in r.stderr, r.stdout), (2, True, ""))
+    check_exit("mutate-spec --only a name no spec has: refused, exit 2", r, 2, says=["no mutant in the given specs"])
+    check("  nothing on stdout", r.stdout, "")
     r = spec_run("--list")
-    check("mutate-spec --list: exit, every spec's names",
-          (r.returncode, sorted(r.stdout.splitlines())),
-          (0, ["spec-only-other: three\t-> value is one", "spec-only: nine\t-> value is one",
-               "spec-only: two\t-> value is one"]))
+    check_exit("mutate-spec --list: exit, every spec's names", r, 0)
+    check("  every spec's names", sorted(r.stdout.splitlines()),
+          ["spec-only-other: three\t-> value is one", "spec-only: nine\t-> value is one",
+           "spec-only: two\t-> value is one"])
     check("mutate-spec --list and the refusal: TARGET untouched", target_bytes(tree), ORIGINAL)
 
 
@@ -617,8 +616,8 @@ def test_spec_a_bad_spec_beside_a_good_one() -> None:
                         tree, spec, bad], capture_output=True, text=True,
                        env=dict(env, MUTATE_OUT_DIR=outdir), check=False, timeout=120)
     by_label = {line.split(":")[0]: line for line in r.stdout.splitlines()}
-    check("a bad spec: exit 1, a line for each spec", (r.returncode, sorted(by_label)),
-          (1, ["bad-spec", "bad-spec-bad"]))
+    check_exit("a bad spec: exit 1, a line for each spec", r, 1)
+    check("  a line for each spec", sorted(by_label), ["bad-spec", "bad-spec-bad"])
     check_true("a bad spec: its line names the error", "rc=1 KeyError: 'mutants'" in by_label.get("bad-spec-bad", ""))
     check_true("a bad spec: the good spec's mutants still killed",
                "every one killed on target" in by_label.get("bad-spec", ""))

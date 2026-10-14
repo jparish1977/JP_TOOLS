@@ -19,7 +19,7 @@
     {
       "name": "--list goes on to run the spec",
       "edits": [["            print(f\"{m['name']}\\t-> {m['target']}\")\n        return 0\n", "            print(f\"{m['name']}\\t-> {m['target']}\")\n"]],
-      "target": "--list: exit, each name and target"
+      "target": "  each name and target"
     }
   ]
 }
