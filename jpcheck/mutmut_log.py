@@ -21,7 +21,6 @@ has it. Every line of the gate's own is stamped with the UTC time and
 flushed when it is said.
 """
 
-import codecs
 import io
 import queue
 import re
@@ -31,8 +30,9 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable
+from encodings import utf_8
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol
 
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 COUNTER = re.compile(r"(\d+)/(\d+)  🎉 (\d+) 🫥 (\d+)  ⏰ (\d+)  🤔 (\d+)  🙁 (\d+)  🔇 (\d+)  🧙 (\d+)")
@@ -152,8 +152,9 @@ class Relay:
         self.phase = ""
         self.doing = "starting mutmut"
         self.began = self.said = clock()
-        self.start: list[int] = []
-        self.now: list[int] = []
+        # The counter where testing began, and the latest; None before the first.
+        self.start: list[int] | None = None
+        self.now: list[int] | None = None
         self.step = 0
         self.listed = 0
 
@@ -181,7 +182,7 @@ class Relay:
         """Say how far it has got when nothing was said for EVERY seconds."""
         if self.clock() - self.said < EVERY:
             return
-        if self.now:
+        if self.now is not None:
             self._progress()
         else:
             self._say(f"still {self.doing}, {int(self.clock() - self.began)} s in")
@@ -192,7 +193,7 @@ class Relay:
 
     def _line(self, line: str) -> None:
         text = line.strip()
-        if line[:1] and line[0] in SPINNER and line[1:2] == " ":
+        if line[1:2] == " " and line[0] in SPINNER:
             self._frame(text[2:])
         elif text == TESTING:
             self._phase(TESTING)
@@ -208,7 +209,8 @@ class Relay:
                 self._phase(text)
             return
         self.now = [int(n) for n in counter.groups()]
-        self.start = self.start or self.now
+        if self.start is None:
+            self.start = self.now
         done, todo = self.now[0] - self.start[0], self.start[1] - self.start[0]
         if done and done * STEPS >= (self.step + 1) * todo:
             self.step = done * STEPS // todo
@@ -229,6 +231,8 @@ class Relay:
 
     def _progress(self) -> None:
         start, now = self.start, self.now
+        assert start is not None  # reason: called only once a counter was read; tells mypy
+        assert now is not None  # reason: as above
         done = {t: now[i] - start[i] for i, t in enumerate(TALLIES, 2)}
         tallies = ", ".join(f"{done[t]:,} {t}" for t in TALLIES if t in ALWAYS or done[t])
         try:
@@ -258,8 +262,10 @@ def run_relayed(cmd: list[str], cwd: Path, env: dict[str, str], relay: _Fed) -> 
     exit code. The output is read on a thread so RELAY's tick runs each TICK
     seconds while CMD is silent, and after each piece while it is not."""
     proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    out = proc.stdout
+    assert isinstance(out, io.BufferedReader)  # reason: stdout=PIPE, unbuffered=-1, opens one; it has read1
     chunks: queue.Queue[bytes] = queue.Queue()
-    threading.Thread(target=_drain, args=(cast(io.BufferedReader, proc.stdout), chunks)).start()
+    threading.Thread(target=_drain, args=(out, chunks)).start()
     try:
         _relay_until_done(chunks, relay)
     except BaseException:
@@ -269,7 +275,7 @@ def run_relayed(cmd: list[str], cwd: Path, env: dict[str, str], relay: _Fed) -> 
 
 
 def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed) -> None:
-    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    decoder = utf_8.IncrementalDecoder("replace")
     while True:
         try:
             chunk = chunks.get(timeout=TICK)

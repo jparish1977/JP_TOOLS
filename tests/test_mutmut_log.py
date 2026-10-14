@@ -27,6 +27,7 @@ WHAT IS CHECKED
 import contextlib
 import io
 import os
+import queue
 import sys
 import tempfile
 import time
@@ -131,7 +132,7 @@ def test_the_relay_says_each_phase_once_and_passes_the_rest() -> None:
     clock = [0.0]
     relay, plan = _relay(clock)
     out = _Flushes()
-    feed = ("\r⠋ Generating mutants\r⠙ Generating mutants\r⠹ Generating mutants\n"
+    feed = ("\r⠏ \r⠋ Generating mutants\r⠙ Generating mutants\r⠹ Generating mutants\n"
             "    done in 141ms (0 files mutated, 0 ignored, 78 unmodified)\n"
             "\r⠸ Listing all tests\r⠼ Listing all tests\n"
             "Found 2 new tests, rerunning stats collection\n"
@@ -143,7 +144,8 @@ def test_the_relay_says_each_phase_once_and_passes_the_rest() -> None:
         for i in range(0, len(feed), 7):  # in pieces, a line split across them
             relay.feed(feed[i:i + 7])
         relay.close()
-    check("each phase said once, by its subject; mutmut's other lines whole; frames and blank lines dropped",
+    check("each phase said once, by its subject (a frame with none is none); mutmut's other lines whole;"
+          " frames and blank lines dropped",
           out.getvalue().splitlines(),
           ["mutmut-gate 00:00:00Z: <Generating mutants>",
            "    done in 141ms (0 files mutated, 0 ignored, 78 unmodified)",
@@ -205,6 +207,14 @@ def test_the_relay_says_progress_each_tenth_and_each_minute() -> None:
     relay, _ = _relay(clock)
     out = io.StringIO()
     with mock.patch.object(time, "gmtime", return_value=_EPOCH), contextlib.redirect_stdout(out):
+        relay.feed(_frame(0, 20, 0, 0, 0, 0, 0, 0, 0))
+        relay.feed(_frame(1, 20, 1, 0, 0, 0, 0, 0, 0))
+        relay.feed(_frame(2, 20, 2, 0, 0, 0, 0, 0, 0))     # 2 of 20: a tenth exactly
+    check("a tenth reached exactly is a tenth", out.getvalue().splitlines(),
+          ["mutmut-gate 00:00:00Z: 2 / 20 judged: 2 killed, 0 no tests, 0 timeout, 0 survived; OPEN"])
+    relay, _ = _relay(clock)
+    out = io.StringIO()
+    with mock.patch.object(time, "gmtime", return_value=_EPOCH), contextlib.redirect_stdout(out):
         relay.feed(_frame(0, 2000, 0, 0, 0, 0, 0, 0, 0))
         relay.feed(_frame(2000, 2000, 1500, 0, 0, 1000, 0, 0, 0))
     check("counts past a thousand grouped", out.getvalue().splitlines(),
@@ -250,6 +260,12 @@ def test_the_relay_counts_the_listed_results_instead_of_printing_them() -> None:
           ["0.50 mutations/second", "the last line, unended",
            ("mutmut-gate 00:00:00Z: mutmut listed the 2 named mutants' results one per line: "
             "left out here, `mutmut results` has them")])
+    with mock.patch.object(time, "gmtime", return_value=_EPOCH), contextlib.redirect_stdout(out):
+        relay.feed("🎉 a.x_g__mutmut_3\n")
+        relay.close()
+    check("  and counted afresh after it", out.getvalue().splitlines()[-1],
+          ("mutmut-gate 00:00:00Z: mutmut listed the 1 named mutants' results one per line: "
+           "left out here, `mutmut results` has them"))
     relay, _ = _relay(clock)
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
@@ -291,6 +307,10 @@ def test_the_plan_names_what_each_phase_works_on() -> None:
     check("  and it tests just the named, a verdict or not",
           named.subject(ml.TESTING), "testing 1 mutants in 1 functions (no verdict kept: 1): "
                                      "1 in b.x_k (no verdict kept)")
+    odd = _plan({"a.x__mutmut_odd__mutmut_1": None, "a.x__mutmut_2": None}, [])
+    check("a name holding __mutmut_ twice is its function up to the first, as mutmut reads it",
+          odd.subject(ml.TESTING), "testing 2 mutants in 1 functions (no verdict kept: 1): "
+                                   "2 in a.x (no verdict kept)")
 
 
 def test_the_plan_lists_ten_functions_at_most() -> None:
@@ -308,6 +328,10 @@ def test_the_plan_lists_ten_functions_at_most() -> None:
           _plan(many, ten).subject(ml.TESTING),
           "testing 10 mutants in 10 functions (no verdict kept: 10): "
           + ", ".join(f"1 in c.x_{n:02d} (no verdict kept)" for n in range(10)))
+    eleven = [f"c.x_{n:02d}__mutmut_1" for n in range(11)]
+    check("eleven: ten, and one more", _plan(many, eleven).subject(ml.TESTING),
+          "testing 11 mutants in 11 functions (no verdict kept: 11): "
+          + ", ".join(f"1 in c.x_{n:02d} (no verdict kept)" for n in range(10)) + ", and 1 more")
     big = {**many, **{f"d.x_k__mutmut_{i}": None for i in range(1, 1235)}}
     check("counts past a thousand grouped", _plan(big, []).subject(ml.TESTING),
           "testing 1,247 mutants in 13 functions (no verdict kept: 13): 1,234 in d.x_k (no verdict kept), "
@@ -348,6 +372,19 @@ class _Rec:
         self.events.append(("close", ""))
 
 
+def test_drain_passes_each_piece_then_the_end() -> None:
+    chunks: queue.Queue[bytes] = queue.Queue()
+    read, write = os.pipe()
+    os.write(write, b"abc")
+    os.close(write)
+    with open(read, "rb") as pipe:
+        ml._drain(pipe, chunks)
+    got = []
+    while not chunks.empty():
+        got.append(chunks.get())
+    check("the pipe's bytes, then b'' and nothing else", got, [b"abc", b""])
+
+
 def test_relayed_output_reaches_the_relay_as_it_comes() -> None:
     """A real child: stdout and stderr in one stream, a character split across
     two writes decoded whole, an undecodable byte replaced, the relay ticked
@@ -370,6 +407,11 @@ def test_relayed_output_reaches_the_relay_as_it_comes() -> None:
           ["tick"] * 3)
     check("  closed once, last", ([what for what, _ in rec.events].count("close"), rec.events[-1]),
           (1, ("close", "")))
+    rec = _Rec()
+    ml.run_relayed([sys.executable, "-c", "import os; print(os.environ['JPT_SEEN'])"], Path.cwd(),
+                   {**os.environ, "JPT_SEEN": "the environment given"}, rec)
+    check("the child runs in the environment it is given",
+          "".join(text for what, text in rec.events if what == "feed"), "the environment given\n")
     rec = _Rec()
     with mock.patch.object(ml, "TICK", 30.0):
         ml.run_relayed([sys.executable, "-c", ("import sys, time\nfor c in 'xyz':\n"
