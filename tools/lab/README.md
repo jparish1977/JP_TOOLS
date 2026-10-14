@@ -48,5 +48,6 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `scratch-guard-live.sh` | is the scratch commit guard live on this box: a real commit through the installed hook, with a clean one as the control |
 | `purge-prescrub-pull-refs.sh` | after a history rewrite, which refs of a forge's bare repository still reach the old history; `--apply` deletes them, purges the objects and proves none is left |
 | `rename-pr-mutmut-entry.sh` | how to keep a pull request's mutmut state in the runner volume across a change in how its entries are named, without overwriting one |
+| `m18-proof-check.sh` | what the m18's WSL still lacks to run JP_TOOLS' whole proof as iteration8 does, read only |
 
 Every header carries all three fields.
