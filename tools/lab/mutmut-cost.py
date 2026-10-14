@@ -9,12 +9,16 @@ ANSWERS: from a kept mutmut state (MUTANTS_DIR holding mutmut-stats.json and
   when every reaching test runs, and that times its mutants; per test: its
   duration, how many functions it reaches, and the mutant-runs it is charged
   across them (its duration times every mutant of every function it reaches).
-  The top N of each, largest first, and the totals. It ranks what to make
+  The top N of each, largest first, and the totals: the upper bound, and the
+  survivors' seconds alone, which are exact (a survivor runs every reaching
+  test), so a floor. It ranks what to make
   cheaper before the next whole-reach run (the gate's slow tail).
 
 TESTED AGAINST: a hand-made state of two functions and three tests whose
-  costs were worked out on paper first, every printed figure matching
-  (positive control: the function reached by the slowest test ranks first).
+  costs were worked out on paper first, every printed figure matching: 17 s
+  in all, 52.9% / 47.1% by function, 88.2% / 11.8% by test, one survivor
+  costing a 4 s floor (positive control: the function with the most mutant
+  seconds ranks first though it is reached by fewer tests).
   Then the nightly state of 2026-10-14 (fleet-ci volume mutmut-state).
 
 NOT TESTED AGAINST: mutmut other than 3.8.0, whose stats keys
@@ -38,13 +42,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from platformtools.procname import name_process
 
 
-def mutants_by_function(mutants: Path) -> collections.Counter[str]:
-    """Every mutant in MUTANTS' .meta files, counted by the function it is of."""
+# mutmut 3.8's exit code for a mutant every reaching test passed on.
+SURVIVED = 0
+
+
+def mutants_by_function(mutants: Path) -> tuple[collections.Counter[str], collections.Counter[str]]:
+    """Every mutant in MUTANTS' .meta files, and every survivor, counted by
+    the function it is of."""
     counts: collections.Counter[str] = collections.Counter()
+    survived: collections.Counter[str] = collections.Counter()
     for meta in mutants.rglob("*.meta"):
-        for key in json.loads(meta.read_bytes()).get("exit_code_by_key", {}):
-            counts[key.partition("__mutmut_")[0]] += 1
-    return counts
+        for key, code in json.loads(meta.read_bytes()).get("exit_code_by_key", {}).items():
+            fn = key.partition("__mutmut_")[0]
+            counts[fn] += 1
+            survived[fn] += code == SURVIVED
+    return counts, survived
 
 
 def main() -> int:
@@ -56,7 +68,7 @@ def main() -> int:
     stats = json.loads((args.mutants / "mutmut-stats.json").read_bytes())
     reach: dict[str, list[str]] = stats.get("tests_by_mangled_function_name", {})
     took: dict[str, float] = stats.get("duration_by_test", {})
-    counts = mutants_by_function(args.mutants)
+    counts, survived = mutants_by_function(args.mutants)
 
     rows = []
     charged: collections.Counter[str] = collections.Counter()
@@ -64,18 +76,21 @@ def main() -> int:
     for fn, n in counts.items():
         tests = reach.get(fn, [])
         per = sum(took.get(t, 0.0) for t in tests)
-        rows.append((per * n, fn, n, len(tests), per))
+        rows.append((per * n, fn, n, survived[fn], len(tests), per))
         for t in tests:
             charged[t] += took.get(t, 0.0) * n
             functions_of[t] += 1
     rows.sort(reverse=True)
     total = sum(r[0] for r in rows)
+    floor = sum(r[5] * r[3] for r in rows)
     print(f"{len(counts):,} functions, {sum(counts.values()):,} mutants, {len(took):,} timed tests; "
           f"every mutant running every reaching test: {total:,.0f} s, {total / 3600:,.1f} h (an upper bound)")
+    print(f"survivors alone, each of which runs every reaching test: {sum(survived.values()):,} mutants, "
+          f"{floor:,.0f} s, {floor / 3600:,.1f} h (exact for them, so a floor)")
     print(f"\nfunctions by mutants x reaching seconds (top {args.top}):")
-    print(f"  {'est h':>7} {'share':>6} {'mutants':>7} {'tests':>5} {'s/mutant':>8}  function")
-    for cost, fn, n, k, per in rows[:args.top]:
-        print(f"  {cost / 3600:7.2f} {cost / total:6.1%} {n:7,} {k:5} {per:8.2f}  {fn}")
+    print(f"  {'est h':>7} {'share':>6} {'mutants':>7} {'surv':>5} {'tests':>5} {'s/mutant':>8}  function")
+    for cost, fn, n, s, k, per in rows[:args.top]:
+        print(f"  {cost / 3600:7.2f} {cost / total:6.1%} {n:7,} {s:5,} {k:5} {per:8.2f}  {fn}")
     print(f"\ntests by mutant-runs charged to them (top {args.top}):")
     print(f"  {'est h':>7} {'share':>6} {'secs':>7} {'fns':>5}  test")
     for t, cost in charged.most_common(args.top):
