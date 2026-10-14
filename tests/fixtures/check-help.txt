@@ -19,9 +19,10 @@ options:
   --skip-unsupported    Exit 0 on a file whose language cannot be detected, instead of 2. For
                         callers handed an arbitrary file list (the pre-commit hook), where a
                         README is not a failure.
-  --baseline FILE       Compare against a recorded baseline and fail only where a file got WORSE,
-                        instead of failing on any finding at all. Refuses if the baseline was
-                        recorded in a different mode.
+  --baseline FILE       Compare against a recorded baseline and fail only where a file got WORSE
+                        (a tool's errors or its warnings rose, each counted on its own), instead
+                        of failing on any finding at all. Refuses if the baseline was recorded in
+                        a different mode.
   --touched             With --baseline, on one file a commit changes: it must have fewer findings
                         than recorded, until it has none, and a lowered count is written back to
                         the baseline. Every tool counts against getting worse; mypy and phpstan
