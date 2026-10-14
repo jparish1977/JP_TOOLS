@@ -36,6 +36,21 @@
 #   - one nightly run, by hand (workflow_dispatch) the first time: until a
 #     state exists, the mutation job fails as could-not-look rather than pass.
 # MUTMUT_WORKERS (default 8) is how many mutants run at once.
+# What the repo's tests/conftest.py does under mutmut, which runs its tests
+# in its own copy of the checkout, again and again in one process:
+#   - each test in an empty working directory of its own: a mutant that turns
+#     an output path into None or a flag writes into mutmut's copy otherwise.
+#   - EXCEPT in mutmut's stats pass (MUTANT_UNDER_TEST=stats), which records
+#     which tests reach which code: there a child that inherits the marker
+#     (a forked pool worker included) loads mutmut's config from its working
+#     directory, and crashes in an empty one. Keep the copy as the working
+#     directory for that pass.
+#   - in the stats pass, start subprocesses without the marker: a child given
+#     a working directory of its own (cwd=) crashes the same way, and its
+#     calls are lost to mutmut anyway.
+# A change to a file every test shares (conftest.py, a shared test helper,
+# the pytest or mutmut settings in pyproject.toml) re-tests every function
+# those tests reach, about a nightly's worth: batch such changes.
 #
 # --- Where JP_TOOLS comes from ---
 # On GitHub, the public copy, unless the repository variable
