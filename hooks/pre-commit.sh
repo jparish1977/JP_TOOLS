@@ -56,6 +56,24 @@ tools_git() {
     (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR; git -C "$TOOLS_DIR" "$@")
 }
 
+# The check.py the staged files are linted with: TOOLS_DIR's, except for a
+# commit in JP_TOOLS itself, from a worktree of the repository TOOLS_DIR is
+# (the same git common directory), which is linted by that worktree's own
+# check.py and so its own configs: a branch changing configs/ruff.toml is
+# held to the rules it brings, not master's. The em-dash and scratch checks
+# stay TOOLS_DIR's, so a branch cannot weaken them. git prints the common
+# directory relative to where it ran, so each is resolved from there.
+choose_check_py() {
+    CHECK_PY="$TOOLS_DIR/check.py"
+    top=$(git rev-parse --show-toplevel) || return 0
+    [ -f "$top/check.py" ] || return 0
+    ours=$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P) || return 0
+    theirs=$(cd "$TOOLS_DIR" && cd "$(tools_git rev-parse --git-common-dir)" 2>/dev/null && pwd -P) || return 0
+    [ "$ours" = "$theirs" ] || return 0
+    CHECK_PY="$top/check.py"
+    echo "JP_TOOLS: a commit in JP_TOOLS itself: linting with this worktree's check.py ($top), its own configs." >&2
+}
+
 # A tree at master can still lack a flag this template passes, if the two are
 # ever out of step. Ask check.py, and refuse rather than let "unrecognized
 # arguments" read as a failing check.
@@ -339,7 +357,7 @@ choose_python
 # baseline recorded in a different mode, so a whole-repo baseline dropped here
 # fails loudly instead of reporting scope difference as regression.
 BASELINE_FILE="$(git rev-parse --show-toplevel)/quality-baseline.json"
-CHECK_PY="$TOOLS_DIR/check.py"
+choose_check_py
 DEBT_FILE=$(git rev-parse --git-path jp-tools-lint-debt)
 rm -f "$DEBT_FILE"
 check_flags

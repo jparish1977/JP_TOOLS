@@ -26,7 +26,10 @@ WHAT THIS PINS DOWN
         only mentions the site; install adds it beside an existing
         pre-commit hook, --remove takes both, --status calls a repo without
         it STALE, and a symlinked commit-msg hook is refused before anything
-        is written.
+        is written;
+      - a commit in a worktree of the JP_TOOLS repository the hook runs from
+        is linted by that worktree's own check.py, and the hook says so; the
+        main checkout and any other repository, by TOOLS_DIR's.
 
 Skips rather than fails when the environment cannot support it:
   - no git         -> skip
@@ -553,6 +556,51 @@ def _shim_refusals(tmp: Path, env: dict[str, str], repo: Path) -> None:
           r.returncode == 0 and "(not a git checkout)" in out, out)
 
 
+# A branch's check.py, told from master's by what it prints: it has the flags
+# the hook asks for, and fails every file it is handed, naming itself.
+BRANCH_CHECK_PY = (
+    "import sys\n"
+    "\n"
+    "if '--help' in sys.argv:\n"
+    "    print('usage: check.py [--skip-unsupported] [--baseline FILE] [--touched] target')\n"
+    "    sys.exit(0)\n"
+    "print('the branch check.py ran')\n"
+    "sys.exit(1)\n"
+)
+
+
+def own_worktree_cases(tmp: Path) -> None:
+    """A commit in JP_TOOLS itself, from a worktree on a branch, is linted by
+    that worktree's own check.py; one in another repository, by TOOLS_DIR's."""
+    print("\nA commit in a JP_TOOLS worktree:")
+    tree = fake_jp_tools(tmp / "JP_TOOLS")
+    env = dict(os.environ, JP_TOOLS_DIR=str(tree), HOME=str(tmp))
+    install = run_installer(tree)
+    check("CONTROL: the hook installs into the fake JP_TOOLS", install.returncode == 0,
+          install.stdout + install.stderr)
+    wt = tmp / "JP_TOOLS.worktrees" / "branch"
+    git(tree, "worktree", "add", "-q", "-b", "branch", str(wt))
+    (wt / "check.py").write_text(BRANCH_CHECK_PY, encoding="utf-8")
+    git(wt, "add", "check.py")
+    r = commit_with_env(wt, "w.py", CLEAN_PY, env)
+    out = r.stdout + r.stderr
+    check("the worktree's own check.py lints it, and the hook says which",
+          r.returncode != 0 and "the branch check.py ran" in out
+          and f"linting with this worktree's check.py ({wt.resolve()})" in out, out)
+    git(wt, "reset", "-q", "--hard", "HEAD")
+    r = commit_with_env(tree, "m.py", CLEAN_PY, env)
+    out = r.stdout + r.stderr
+    check("CONTROL: the main checkout keeps TOOLS_DIR's check.py, and passes",
+          _ran(r) and "the branch check.py ran" not in out, out)
+    repo, _ = build_repo(tmp)
+    (repo / "check.py").write_text(BRANCH_CHECK_PY, encoding="utf-8")  # a check.py, but not JP_TOOLS'
+    git(repo, "add", "check.py")
+    r = commit_with_env(repo, "o.py", CLEAN_PY, env)
+    out = r.stdout + r.stderr
+    check("another repository is linted by TOOLS_DIR's check.py, saying nothing of a worktree",
+          _ran(r) and "linting with this worktree" not in out, out)
+
+
 def commit_files(repo: Path, files: dict[str, str]) -> str:
     """Write and stage FILES, commit them, and return the hook's verdict line."""
     for name, body in files.items():
@@ -836,6 +884,8 @@ def main() -> int:
         incapable_tools_cases(Path(td))
     with tempfile.TemporaryDirectory() as td:
         shim_cases(Path(td))
+    with tempfile.TemporaryDirectory() as td:
+        own_worktree_cases(Path(td))
 
     print(f"\n{checks - fails}/{checks} passed")
     return 1 if fails else 0

@@ -1,0 +1,20 @@
+{
+  "about": "A commit in a worktree of the JP_TOOLS repository the hook runs from is linted by that worktree's own check.py, and the hook says so; any other repository by TOOLS_DIR's. Run: mutate-on-target.py TREE hooks/pre-commit.sh tests/test_install_hooks.py tests/mutants/jpt-own-worktree-on-hook.json",
+  "mutants": [
+    {
+      "name": "TOOLS_DIR's check.py always, as before #236",
+      "edits": [["    CHECK_PY=\"$top/check.py\"\n", "    :\n"]],
+      "target": "the worktree's own check.py lints it, and the hook says which"
+    },
+    {
+      "name": "any repository holding a check.py is linted by its own",
+      "edits": [["    [ \"$ours\" = \"$theirs\" ] || return 0\n", ""]],
+      "target": "another repository is linted by TOOLS_DIR's check.py, saying nothing of a worktree"
+    },
+    {
+      "name": "the choice is never made, so no check.py is named",
+      "edits": [["choose_check_py\nDEBT_FILE=", "DEBT_FILE="]],
+      "target": "CONTROL: the main checkout keeps TOOLS_DIR's check.py, and passes"
+    }
+  ]
+}
