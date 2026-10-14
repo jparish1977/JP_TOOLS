@@ -25,6 +25,7 @@ checkout already imported in mutmut's process would be the one they got.
 """
 
 import os
+import resource
 import sys
 from collections.abc import Iterable
 from typing import Any
@@ -34,6 +35,8 @@ from mutmut.utils.file_utils import change_cwd
 from mutmut.workers.isolation import ForkRunner
 
 WORKERS = "MUTMUT_CLEAN_WORKERS"
+# The core file size limit for mutmut and its workers, in bytes (see main).
+CORE_LIMIT = 1
 _serial = ForkRunner.run_clean_tests
 
 
@@ -56,6 +59,12 @@ def run_clean_tests(self: ForkRunner, tests: Iterable[str]) -> int:
 
 
 def main() -> None:
+    # mutmut stops a mutant that runs too long with SIGXCPU, which dumps core,
+    # and a core_pattern that pipes to a handler (apport, a WSL crash catcher)
+    # ignores a limit of 0: one such run wrote 31 GB of cores in 13 minutes.
+    # A 1-byte limit is the one such a handler takes as "no dump"; the mutant
+    # still exits as a timeout. Every worker mutmut forks inherits it.
+    resource.setrlimit(resource.RLIMIT_CORE, (CORE_LIMIT, CORE_LIMIT))
     # mypy sees a method assigned when mutmut's types are installed, and nothing when they are not.
     ForkRunner.run_clean_tests = run_clean_tests  # type: ignore[method-assign, unused-ignore]  # reason: the one phase replaced
     sys.exit(mutmut_main.cli())
