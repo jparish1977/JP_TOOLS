@@ -4,11 +4,12 @@ JP_TOOLS/tests/test_pr_mutmut_state.py
 ci-image/pr-mutmut-state.sh, run from throwaway checkouts into a throwaway
 PR directory: a pull request's own mutmut state, kept between its pushes.
 
-    - save keeps the run's mutants/ as the branch's entry for the state
-      version fetch copied; restore in a later checkout puts it in place of
-      the state's copy, keeping the state's baseline.
-    - An entry for another state version is never restored, and is removed
-      by a save once three hours old; one for this version stays.
+    - save keeps the run's mutants/ as the branch's entry; restore in a
+      later checkout puts it in place of the state's copy, keeping the
+      state's baseline and version.
+    - After the nightly publishes a new state version, the branch's entry is
+      still restored, under the new baseline.
+    - A save removes entries no push has saved for 14 days; newer ones stay.
     - No PR directory, nothing kept, a PR directory that cannot be written:
       said, exit 0, the checkout's state copy untouched.
     - No state copied, or a usage error: exit 2.
@@ -71,14 +72,14 @@ def test_a_saved_state_is_restored_by_the_next_push() -> None:
         first = _checkout(Path(td) / "push1", "judged by push 1")
         p = _pr("save", first, pr)
         check("save: exit 0, saying so", (p.returncode, p.stdout),
-              (0, "pr-mutmut-state: kept feat/x y's state against v-1 for its next push\n"))
-        check("  as the branch's entry for the state version, its unsafe characters as _ and its name's hash",
-              sorted(e.name for e in pr.iterdir()), [f"{FEAT}@v-1"])
+              (0, "pr-mutmut-state: kept feat/x y's state for its next push\n"))
+        check("  as the branch's entry, its unsafe characters as _ and its name's hash",
+              sorted(e.name for e in pr.iterdir()), [FEAT])
         check_true("  and no baseline.json left in the checkout", not (first / "baseline.json").exists())
         second = _checkout(Path(td) / "push2", "the state's own", baseline="STATE")
         p = _pr("restore", second, pr)
         check("restore: exit 0, saying so", (p.returncode, p.stdout),
-              (0, ("pr-mutmut-state: restored feat/x y's own state against v-1: "
+              (0, ("pr-mutmut-state: restored feat/x y's own state, baseline from the state v-1: "
                    "only what changed since its last run is judged\n")))
         check("  the kept mutants/ in place of the state's", _meta(second), "judged by push 1")
         check("  the state's baseline and version kept",
@@ -88,26 +89,35 @@ def test_a_saved_state_is_restored_by_the_next_push() -> None:
               ["mutants", "mutmut-baseline.json", "mutmut-state-version"])
 
 
-def test_another_state_version_starts_from_the_state() -> None:
+def test_a_new_state_version_still_restores_the_branch_s_own() -> None:
     if not shutil.which("git") or not shutil.which("flock"):
         print("SKIP: git or flock not found")
         return
     with tempfile.TemporaryDirectory() as td:
         pr = Path(td) / "pr"
         pr.mkdir()
-        _pr("save", _checkout(Path(td) / "old", "judged against v-1"), pr)
-        after_nightly = _checkout(Path(td) / "new", "the new state's", version="v-2")
+        _pr("save", _checkout(Path(td) / "old", "judged under v-1"), pr)
+        after_nightly = _checkout(Path(td) / "new", "the new state's", version="v-2", baseline="NEW")
         p = _pr("restore", after_nightly, pr)
-        check("an entry for the state before: not restored, saying so", (p.returncode, p.stdout, _meta(after_nightly)),
-              (0, "pr-mutmut-state: nothing kept for feat/x y against state v-2: this push starts from the state\n",
-               "the new state's"))
-        _pr("save", _checkout(Path(td) / "other", "x", version="v-1"), pr, branch="other")
-        stale = pr / f"{FEAT}@v-1"
-        old = time.time() - 181 * 60
-        os.utime(stale, (old, old))
-        p = _pr("save", after_nightly, pr)
-        check("a save against v-2: the v-1 entry three hours old goes, the fresh one stays, its own is made",
-              (p.returncode, sorted(e.name for e in pr.iterdir())), (0, [f"{FEAT}@v-2", "other@v-1"]))
+        check("after the nightly: the branch's own verdicts, saying so",
+              (p.returncode, p.stdout, _meta(after_nightly)),
+              (0, ("pr-mutmut-state: restored feat/x y's own state, baseline from the state v-2: "
+                   "only what changed since its last run is judged\n"), "judged under v-1"))
+        check("  the new state's baseline and version kept",
+              ((after_nightly / "mutmut-baseline.json").read_text(encoding="utf-8"),
+               (after_nightly / "mutmut-state-version").read_text(encoding="utf-8")), ("NEW", "v-2\n"))
+        _pr("save", _checkout(Path(td) / "other", "x"), pr, branch="other")
+        _pr("save", _checkout(Path(td) / "gone", "x"), pr, branch="gone")
+        for name, days in (("other", 13), ("gone", 15)):
+            old = time.time() - days * 86400
+            os.utime(pr / name, (old, old))
+        p = _pr("save", _checkout(Path(td) / "run2", "judged under v-2", version="v-2"), pr)
+        check("a save: the entry 15 days unsaved goes, the one 13 days stays, its own is kept",
+              (p.returncode, p.stdout, sorted(e.name for e in pr.iterdir())),
+              (0, "pr-mutmut-state: kept feat/x y's state for its next push\n", [FEAT, "other"]))
+        again = _checkout(Path(td) / "again", "the state's", version="v-2")
+        _pr("restore", again, pr)
+        check("  and what it kept is this run's", _meta(again), "judged under v-2")
 
 
 def test_branches_the_flattening_makes_alike_keep_apart() -> None:
@@ -121,7 +131,7 @@ def test_branches_the_flattening_makes_alike_keep_apart() -> None:
         _pr("save", _checkout(Path(td) / "under", "a_b's"), pr, branch="a_b")
         check("a/b and a_b: two entries, the flattened one with its name's hash",
               sorted(e.name for e in pr.iterdir()),
-              sorted(["a_b@v-1", "a_b-" + hashlib.sha256(b"a/b").hexdigest()[:12] + "@v-1"]))
+              sorted(["a_b", "a_b-" + hashlib.sha256(b"a/b").hexdigest()[:12]]))
         back = _checkout(Path(td) / "back", "the state's")
         _pr("restore", back, pr, branch="a/b")
         check("  and each restores its own", _meta(back), "a/b's")
@@ -135,7 +145,7 @@ def test_a_kept_state_that_cannot_be_read_leaves_the_state_s() -> None:
         pr = Path(td) / "pr"
         pr.mkdir()
         _pr("save", _checkout(Path(td) / "push1", "judged by push 1"), pr)
-        current = (pr / f"{FEAT}@v-1" / "current").resolve()
+        current = (pr / FEAT / "current").resolve()
         shutil.rmtree(current / "mutants")  # an entry broken after it was kept
         second = _checkout(Path(td) / "push2", "the state's own")
         p = _pr("restore", second, pr)
