@@ -283,21 +283,28 @@ def run_relayed(cmd: list[str], cwd: Path, env: dict[str, str], relay: _Fed) -> 
     out = proc.stdout
     assert isinstance(out, io.BufferedReader)  # reason: stdout=PIPE, unbuffered=-1, opens one; it has read1
     chunks: queue.Queue[bytes] = queue.Queue()
-    threading.Thread(target=_drain, args=(out, chunks)).start()
+    # A daemon: a process CMD started may keep the pipe open after CMD ends,
+    # and the reader blocked on it must not hold this process open at exit.
+    threading.Thread(target=_drain, args=(out, chunks), daemon=True).start()
     try:
-        _relay_until_done(chunks, relay)
+        _relay_until_done(chunks, relay, lambda: proc.poll() is not None)
     except BaseException:
         _stop(proc)
         raise
     return proc.wait()
 
 
-def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed) -> None:
+def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed, ended: Callable[[], bool]) -> None:
+    """Feed RELAY each piece until the pipe's end, or until CMD has ENDED and
+    TICK seconds pass with nothing: what still holds the pipe then is a
+    process CMD left behind, not CMD."""
     decoder = utf_8.IncrementalDecoder("replace")
     while True:
         try:
             chunk = chunks.get(timeout=TICK)
         except queue.Empty:
+            if ended():
+                break
             relay.tick()
             continue
         if not chunk:

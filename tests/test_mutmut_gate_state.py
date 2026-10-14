@@ -184,6 +184,15 @@ def test_a_run_whose_only_change_edits_a_test_runs_once() -> None:
             gate.run(root, False, 2)
         check("run again with nothing changed since it judged: the verdict kept, nothing cleared",
               calls, [({"a.x_f__mutmut_1": 1}, {})])
+        (mutants / gate.JUDGED).unlink()
+        (root / "a.py").write_text("x = 2\n", encoding="utf-8")  # a change not committed
+        out = io.StringIO()
+        with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), \
+                mock.patch.object(time, "gmtime", return_value=time.gmtime(0)), contextlib.redirect_stdout(out):
+            gate.run(root, False, 2)
+        check("a tree with changes not committed: no judged commit recorded, and it says so",
+              ((mutants / gate.JUDGED).exists(), out.getvalue().splitlines()[-1]),
+              (False, "mutmut-gate 00:00:00Z: the tree holds changes not committed: no judged commit recorded"))
 
 
 def test_the_codes_are_every_meta_s() -> None:

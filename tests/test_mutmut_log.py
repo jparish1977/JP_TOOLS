@@ -28,6 +28,7 @@ import contextlib
 import io
 import os
 import queue
+import subprocess
 import sys
 import tempfile
 import time
@@ -35,7 +36,7 @@ from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
-from _harness import check, check_true, run
+from _harness import ROOT, check, check_true, run
 from jpcheck import mutmut_log as ml
 
 _EPOCH = time.gmtime(0)
@@ -462,6 +463,35 @@ def test_relayed_output_reaches_the_relay_as_it_comes() -> None:
     check("a child that never goes quiet: ticked after each piece all the same",
           [e for e in rec.events if e != ("feed", "")],
           [("feed", "x"), ("tick", ""), ("feed", "y"), ("tick", ""), ("feed", "z"), ("tick", ""), ("close", "")])
+
+
+# A child that leaves a process of its own holding the pipe, for 5 s, and ends.
+_ORPHANING = ("import subprocess, sys\n"
+              "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(5)'])\n"
+              "print('the child is done', flush=True)\n")
+
+
+def test_a_child_that_leaves_the_pipe_held_does_not_hold_the_run() -> None:
+    rec = _Rec()
+    began = time.monotonic()
+    with mock.patch.object(ml, "TICK", 0.05):
+        rc = ml.run_relayed([sys.executable, "-c", _ORPHANING], Path.cwd(), dict(os.environ), rec)
+    check("the child's exit and output, long before what it left behind ends",
+          (rc, "".join(text for what, text in rec.events if what == "feed"), time.monotonic() - began < 3),
+          (0, "the child is done\n", True))
+    check("  and closed, last", rec.events[-1], ("close", ""))
+    # In a process of its own: the reader still blocked on the held pipe must
+    # not keep that process from exiting.
+    script = (f"import sys; sys.path.insert(0, {str(ROOT)!r})\n"
+              "from jpcheck import mutmut_log as ml\n"
+              "ml.TICK = 0.05\n"
+              "class R:\n    def feed(self, t): pass\n    def tick(self): pass\n    def close(self): pass\n"
+              f"sys.exit(ml.run_relayed([sys.executable, '-c', {_ORPHANING!r}], __import__('pathlib').Path.cwd(),"
+              " dict(__import__('os').environ), R()))\n")
+    began = time.monotonic()
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False, timeout=30)
+    check("  a process running it exits then too", (done.returncode, done.stderr, time.monotonic() - began < 3),
+          (0, "", True))
 
 
 class _Broken(_Rec):

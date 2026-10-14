@@ -42,18 +42,20 @@ def is_suite(path: str) -> bool:
 def readers(path: str, tests: dict[str, bytes]) -> set[str] | None:
     """The suites, among TESTS (each test file's text by its path), whose
     reach a change to the shared file PATH can move: a Python helper is read
-    by the files that import it, a data file by those that name it (by its
-    file name). None when the change can move any test's reach: a conftest.py
-    or a configuration file, a file nothing names, or one a file that is not
-    a suite names (a helper, so whoever imports that reads it too). Matched as
-    bytes: a test file that is not valid UTF-8 is still searched."""
+    by the files with a line that says import and names its module as a word
+    (every form of import, importlib's too; one that only looks like one
+    counts as well, and costs only a re-trace), a data file by those that
+    name it (by its file name). None when the change can move any test's
+    reach: a conftest.py or a configuration file, a file nothing names, or
+    one a file that is not a suite names (a helper, so whoever imports that
+    reads it too). Matched as bytes: a test file that is not valid UTF-8 is
+    still searched."""
     name = path.rpartition("/")[2]
     if name == "conftest.py" or path in CONFIG_FILES:
         return None
     if name.endswith(".py"):
-        stem = re.escape(name.removesuffix(".py"))
-        reads = re.compile(rb"(?m)^\s*(?:from\s+" + stem.encode() + rb"\s+import\b|import\s+" + stem.encode()
-                           + rb"\b)")
+        stem = re.escape(name.removesuffix(".py")).encode()
+        reads = re.compile(rb"(?m)^(?=.*import).*\b" + stem + rb"\b")
         naming = {p for p, text in tests.items() if reads.search(text)}
     else:
         naming = {p for p, text in tests.items() if name.encode() in text}
