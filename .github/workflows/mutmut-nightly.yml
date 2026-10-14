@@ -34,6 +34,8 @@ jobs:
     name: mutmut, every mutant, into mutmut-state
     runs-on: fleet-ci
     timeout-minutes: 90
+    env:
+      PYTHONUNBUFFERED: '1'  # each line in the log when printed, as check.yml's mutation jobs
     container:
       image: fleet-ci:current
       options: --cpus 8 --memory 8g -v mutmut-state:/mutmut-state

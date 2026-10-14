@@ -26,10 +26,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest import mock
 
 from _harness import check, check_true, load_script, run
+from jpcheck import mutmut_log
 
 gate = load_script("mutmut-gate.py")
 
@@ -449,11 +451,11 @@ def _run_mutmut(root: Path, full: bool, rc: int = 0,
     exiting RC; git runs for real. ENV replaces os.environ for the run."""
     asked: list[dict[str, object]] = []
 
-    def fake(cmd: list[str], **kw: object) -> int:
-        asked.append({"cmd": cmd, **kw})
+    def fake(cmd: list[str], cwd: Path, env: dict[str, str], relay: object) -> int:
+        asked.append({"cmd": cmd, "cwd": cwd, "env": env})
         return rc
 
-    with mock.patch.object(gate.subprocess, "call", side_effect=fake), \
+    with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), \
             mock.patch.dict(gate.os.environ, env or {}, clear=env is not None):
         gate.run(root, full, 2)
     return asked
@@ -488,10 +490,12 @@ def test_verdicts_of_moved_reach_are_cleared() -> None:
         before = {"pkg.m.x_lost": frozenset({"t1"}), "pkg.m.x_same": frozenset({"t1"}),
                   "pkg.m.x_edited": frozenset({"t1"})}
         _stats(mutants, {"pkg.m.x_new": ["t1"], "pkg.m.x_same": ["t1"], "pkg.m.x_edited": ["t2"]})
+        why: dict[str, str] = {}
         said = gate.reset_moved_verdicts(mutants, before, {**{f"pkg.m.{k}": v for k, v in hashes.items()},
-                                                           "pkg.m.x_edited": "old"}, frozenset())
+                                                           "pkg.m.x_edited": "old"}, frozenset(), why)
         check("newly reached (no tests) and no longer reached (killed): cleared, 3 verdicts of 2 functions",
               said, (3, 2))
+        check("  and why, for each", why, {"pkg.m.x_new": "test reach moved", "pkg.m.x_lost": "test reach moved"})
         check("  each one", _codes(meta), {
             "pkg.m.x_new__mutmut_1": None, "pkg.m.x_new__mutmut_2": None, "pkg.m.x_lost__mutmut_1": None,
             "pkg.m.x_same__mutmut_1": 0, "pkg.m.x_edited__mutmut_1": 0, "pkg.m.x_lost__mutmut_2": None})
@@ -523,15 +527,20 @@ def test_verdicts_reached_by_an_edited_test_are_cleared() -> None:
         meta = _plant(mutants, "pkg/m.py", hashes, verdicts)
         _stats(mutants, {k: sorted(v) for k, v in same.items()})
         full = {f"pkg.m.{k}": v for k, v in hashes.items()}
-        check("tests/test_e.py edited: the two functions it reaches are cleared, the other kept",
-              (gate.reset_moved_verdicts(mutants, same, full, frozenset({"tests/test_e.py"})), _codes(meta)),
+        why: dict[str, str] = {}
+        check("tests/test_e.py edited: the two functions it reaches are cleared, the other kept, saying why",
+              (gate.reset_moved_verdicts(mutants, same, full, frozenset({"tests/test_e.py"}), why), _codes(meta),
+               why),
               ((2, 2), {"pkg.m.x_by_edited__mutmut_1": None, "pkg.m.x_by_other__mutmut_1": 0,
-                        "pkg.m.x_by_both__mutmut_1": None}))
+                        "pkg.m.x_by_both__mutmut_1": None},
+               {"pkg.m.x_by_edited": "tests edited", "pkg.m.x_by_both": "tests edited"}))
         meta = _plant(mutants, "pkg/m.py", hashes, verdicts)
         check("nothing edited: nothing cleared",
               gate.reset_moved_verdicts(mutants, same, full, frozenset()), (0, 0))
-        check("every test edited (None): all cleared",
-              gate.reset_moved_verdicts(mutants, same, full, None), (3, 3))
+        why = {}
+        check("every test edited (None): all cleared, saying so",
+              (gate.reset_moved_verdicts(mutants, same, full, None, why), why),
+              ((3, 3), dict.fromkeys(full, "every test counts as edited")))
 
 
 def test_edited_tests_names_the_changed_suites_and_fixture_readers() -> None:
@@ -643,10 +652,14 @@ def test_run_tests_moved_reach_again() -> None:
         meta = _plant(mutants, "a.py", {"x_f": "1"}, {"a.x_f__mutmut_1": 33})
         calls: list[dict[str, int | None]] = []
         asked: list[tuple[object, object]] = []
+        plans: list[tuple[list[str], str, str, dict[str, str]]] = []
 
-        def fake(cmd: list[str], **kw: object) -> int:
+        def fake(cmd: list[str], cwd: Path, env: dict[str, str], relay: mutmut_log.Relay) -> int:
             calls.append(_codes(meta))
-            asked.append((cmd, kw["cwd"]))
+            asked.append((cmd, cwd))
+            p = relay.plan
+            assert isinstance(p, mutmut_log.Plan)
+            plans.append((p.names, p.traced, p.sources, p.why()))
             if len(calls) == 1:  # mutmut's trace: tests/t.py::t now reaches a.x_f
                 (mutants / gate.STATS).write_text(json.dumps(
                     {**kept, "tests_by_mangled_function_name": {"a.x_f": ["tests/t.py::t"]}}),
@@ -656,18 +669,28 @@ def test_run_tests_moved_reach_again() -> None:
             return 0
 
         out = io.StringIO()
-        with mock.patch.object(gate.subprocess, "call", side_effect=fake), contextlib.redirect_stdout(out):
+        with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), \
+                mock.patch.object(time, "gmtime", return_value=time.gmtime(0)), \
+                contextlib.redirect_stdout(out):
             gate.run(root, False, 2)
         check("a test newly reached a function: mutmut ran again, with its verdict cleared",
               calls, [{"a.x_f__mutmut_1": 33}, {"a.x_f__mutmut_1": None}])
         first = [sys.executable, "-m", "mutmut", "run", "--max-children", "2"]
         check("  the first run names nothing, the second exactly the cleared mutant, from the same place",
               asked, [(first, root), ([*first, "a.x_f__mutmut_1"], root)])
-        check_true("  and says so",
-                   "test reach moved or tests edited for 1 function(s): their 1 verdict(s) tested again"
-                   " (by name, 1 mutant(s))" in out.getvalue())
+        check("  each run's plan: what it names, traces and rebuilds, and why each function is tested",
+              plans, [([], "0 file(s) changed since the traced commit: 0 test(s) traced again",
+                       "1 source files kept, 0 changed since the state", {}),
+                      (["a.x_f__mutmut_1"], "the first run traced it", "none changed since the first run",
+                       {"a.x_f": "test reach moved"})])
+        check("  and says so, each line stamped",
+              out.getvalue().splitlines(),
+              ["mutmut-gate 00:00:00Z: 0 file(s) changed since the traced commit: 0 test(s) traced again",
+               ("mutmut-gate 00:00:00Z: test reach moved or tests edited for 1 function(s): their 1 verdict(s)"
+                " tested again (by name, 1 mutant(s))")])
         calls.clear()
-        with mock.patch.object(gate.subprocess, "call", side_effect=fake):
+        with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), \
+                contextlib.redirect_stdout(io.StringIO()):
             gate.run(root, False, 2)
         check("reach unchanged since: mutmut runs once, the new verdict kept", calls, [{"a.x_f__mutmut_1": 1}])
 
@@ -687,7 +710,7 @@ def test_run_goes_unnamed_when_the_names_do_not_fit() -> None:
         _plant(mutants, "a.py", {"x_f": "1"}, {"a.x_f__mutmut_1": 33})
         asked: list[list[str]] = []
 
-        def fake(cmd: list[str], **kw: object) -> int:
+        def fake(cmd: list[str], cwd: Path, env: dict[str, str], relay: object) -> int:
             asked.append(cmd)
             if len(asked) == 1:  # mutmut's trace: tests/t.py::t now reaches a.x_f
                 (mutants / gate.STATS).write_text(json.dumps(
@@ -696,16 +719,17 @@ def test_run_goes_unnamed_when_the_names_do_not_fit() -> None:
             return 0
 
         out = io.StringIO()
-        with mock.patch.object(gate.subprocess, "call", side_effect=fake), \
+        with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), \
                 mock.patch.object(gate, "NAMES_MAX_BYTES", len("a.x_f__mutmut_1")), \
+                mock.patch.object(time, "gmtime", return_value=time.gmtime(0)), \
                 contextlib.redirect_stdout(out):
             gate.run(root, False, 2)
         first = [sys.executable, "-m", "mutmut", "run", "--max-children", "2"]
         check("one byte too many for the name: both runs name nothing", asked, [first, first])
         check("  and the second says why, the whole line",
               out.getvalue().splitlines()[-1],
-              "mutmut-gate: test reach moved or tests edited for 1 function(s): their 1 verdict(s) tested again"
-              " (unnamed: too many names for one command line)")
+              "mutmut-gate 00:00:00Z: test reach moved or tests edited for 1 function(s): their 1 verdict(s)"
+              " tested again (unnamed: too many names for one command line)")
 
 
 def test_run_puts_its_python_first_on_path() -> None:
@@ -722,7 +746,8 @@ def test_run_puts_its_python_first_on_path() -> None:
         assert isinstance(seen, dict)
         check("PATH is mutmut's python's directory, then the PATH it had",
               seen["PATH"], os.pathsep.join([here, git]))
-        check("  and the rest of the environment is kept", seen.get("KEEP"), "1")
+        check("  and the rest of the environment is kept, Python told not to buffer its output",
+              {k: v for k, v in seen.items() if k != "PATH"}, {"HOME": td, "KEEP": "1", "PYTHONUNBUFFERED": "1"})
         [bare] = _run_mutmut(root, full=False, env={"HOME": td})
         seen = bare["env"]
         assert isinstance(seen, dict)
@@ -762,6 +787,54 @@ def test_run_says_how_mutmut_failed() -> None:
         except gate.GateError as e:
             said = str(e)
     check("mutmut exiting 3 is a GateError naming the code", said, "mutmut run exited 3")
+
+
+def test_the_codes_are_every_meta_s() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        mutants = Path(td)
+        _plant(mutants, "a.py", {}, {"a.x_f__mutmut_1": None, "a.x_f__mutmut_2": 1})
+        _plant(mutants, "p/b.py", {}, {"p.b.x_g__mutmut_1": 0})
+        (mutants / "c.py.meta").write_text(json.dumps({"hash_by_function_name": {}}), encoding="utf-8")
+        check("every mutant's code, across the .meta files, one with none adding nothing", gate._codes(mutants),
+              {"a.x_f__mutmut_1": None, "a.x_f__mutmut_2": 1, "p.b.x_g__mutmut_1": 0})
+
+
+def test_the_first_run_says_why_its_functions_are_tested() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        mutants = Path(td)
+        _plant(mutants, "a.py", {"x_f": "1", "x_g": "3", "x_h": "4"}, {})
+        check("by mutmut's hashes, before and now: new, changed; the same, none",
+              gate._code_reasons(mutants, {"a.x_f": "1", "a.x_g": "2", "a.x_gone": "5"}),
+              {"a.x_g": "code changed", "a.x_h": "new"})
+
+
+def test_the_sources_line_names_what_changed() -> None:
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        mutants = gate.prepare(root)
+        check("no state: the kept files, and that nothing says which changed", gate._sources(root, mutants),
+              "0 source files kept, no state commit to say which changed")
+        (mutants / gate.STATS).write_text("{ not json", encoding="utf-8")
+        check("  an unreadable one the same", gate._sources(root, mutants),
+              "0 source files kept, no state commit to say which changed")
+        (mutants / gate.STATS).write_text(json.dumps({"git_commit": "0" * 40}), encoding="utf-8")
+        check("  and a commit this clone does not have", gate._sources(root, mutants),
+              "0 source files kept, no state commit to say which changed")
+        (mutants / gate.STATS).write_text(json.dumps({"git_commit": _head(root)}), encoding="utf-8")
+        _plant(mutants, "a.py", {}, {})
+        check("nothing changed since", gate._sources(root, mutants), "1 source files kept, 0 changed since the state")
+        _commit(root, {"p/b.py": "", "c.py": "", "README.md": "", "tests/test_x.py": ""}, "two sources")
+        check("the changed Python sources named, not the tests or the rest", gate._sources(root, mutants),
+              "1 source files kept, 2 changed since the state (c.py, p/b.py)")
+        _commit(root, {f"m{n}.py": "" for n in range(3)}, "three more")
+        check("  five: all five", gate._sources(root, mutants),
+              "1 source files kept, 5 changed since the state (c.py, m0.py, m1.py, m2.py, p/b.py)")
+        _commit(root, {f"m{n}.py": "" for n in range(3, 5)}, "two more")
+        check("  past five, the first five and an ellipsis", gate._sources(root, mutants),
+              "1 source files kept, 7 changed since the state (c.py, m0.py, m1.py, m2.py, m3.py, ...)")
 
 
 def _worktrees(root: Path) -> str:
