@@ -251,9 +251,13 @@ jobs:
     name: Mutation (mutmut, changed functions)
     if: github.event_name == 'pull_request'  # a push to master moves the state instead (mutation-state)
     runs-on: fleet-ci
+    # --cpus caps the job, mutmut's workers and every child their tests start
+    # (check.py, mypy), at MUTMUT_WORKERS cores: uncapped, 24 workers and their
+    # children held the whole box (load 65 on 32, 2026-10-13). Container
+    # options cannot read env, so keep it equal to MUTMUT_WORKERS by hand.
     container:
       image: fleet-ci:current
-      options: -v mutmut-state:/mutmut-state:ro
+      options: --cpus 24 -v mutmut-state:/mutmut-state:ro
     steps:
       - name: CI does not run as root
         run: |
@@ -294,7 +298,7 @@ jobs:
     runs-on: fleet-ci
     container:
       image: fleet-ci:current
-      options: -v mutmut-state:/mutmut-state
+      options: --cpus 24 -v mutmut-state:/mutmut-state  # MUTMUT_WORKERS cores, as the mutation job
     steps:
       - name: CI does not run as root
         run: |
