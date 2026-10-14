@@ -271,6 +271,23 @@ def test_the_plan_lists_ten_functions_at_most() -> None:
           + ", ".join(f"1 in c.x_{n:02d} (no verdict kept)" for n in range(8)) + ", and 3 more")
 
 
+def test_the_first_run_says_why_its_functions_are_tested() -> None:
+    check("by mutmut's hashes, before and now: new, changed; the same, none",
+          ml.code_reasons({"a.x_f": "1", "a.x_g": "2", "a.x_gone": "5"}, {"a.x_f": "1", "a.x_g": "3", "a.x_h": "4"}),
+          {"a.x_g": "code changed", "a.x_h": "new"})
+
+
+def test_the_sources_line() -> None:
+    check("no commit, none changed, two, five, seven",
+          [ml.sources_line(3, None), ml.sources_line(3, []), ml.sources_line(3, ["a.py", "b.py"]),
+           ml.sources_line(3, [f"m{n}.py" for n in range(5)]), ml.sources_line(3, [f"m{n}.py" for n in range(7)])],
+          ["3 source files kept, no state commit to say which changed",
+           "3 source files kept, 0 changed since the state",
+           "3 source files kept, 2 changed since the state (a.py, b.py)",
+           "3 source files kept, 5 changed since the state (m0.py, m1.py, m2.py, m3.py, m4.py)",
+           "3 source files kept, 7 changed since the state (m0.py, m1.py, m2.py, m3.py, m4.py, ...)"])
+
+
 class _Rec:
     """A relay that records what it is given."""
 

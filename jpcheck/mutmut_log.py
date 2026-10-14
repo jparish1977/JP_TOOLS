@@ -56,6 +56,23 @@ def say(message: str) -> None:
     print(f"mutmut-gate {time.strftime('%H:%M:%SZ', time.gmtime())}: {message}", flush=True)
 
 
+def sources_line(kept: int, changed: list[str] | None) -> str:
+    """What mutmut will rebuild mutants for: the KEPT source files' count,
+    and those CHANGED since the state was judged, the first five named; None:
+    there is no commit to say which (mutmut then decides by file times)."""
+    if changed is None:
+        return f"{kept} source files kept, no state commit to say which changed"
+    named = f" ({', '.join(changed[:5])}{', ...' if len(changed) > 5 else ''})" if changed else ""
+    return f"{kept} source files kept, {len(changed)} changed since the state{named}"
+
+
+def code_reasons(before: dict[str, str], now: dict[str, str]) -> dict[str, str]:
+    """Why each function's mutants are tested in the first run, by mutmut's
+    code hashes BEFORE it and NOW: its code is new, or changed; a function
+    tested then for neither had no verdict kept."""
+    return {fn: "new" if fn not in before else "code changed" for fn, h in now.items() if before.get(fn) != h}
+
+
 class Plan:
     """What one mutmut run works on and why, so each phase line can say it.
     CODES reads every mutant's exit code as mutmut keeps it now (None: no

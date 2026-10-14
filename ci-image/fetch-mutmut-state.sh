@@ -1,6 +1,7 @@
 #!/bin/bash
 # ci-image/fetch-mutmut-state.sh -- copy the runner volume's current mutmut
-# state into this checkout: ./mutants and ./mutmut-baseline.json.
+# state into this checkout: ./mutants and ./mutmut-baseline.json, and the
+# version copied (its directory's name) into ./mutmut-state-version.
 #
 #   bash ci-image/fetch-mutmut-state.sh STATE_DIR       (from the checkout)
 #
@@ -30,4 +31,5 @@ if [ -z "$src" ] || [ ! -d "$src/mutants" ] || [ ! -f "$src/baseline.json" ]; th
 fi
 cp -a "$src/mutants" ./mutants
 cp "$src/baseline.json" ./mutmut-baseline.json
+basename "$src" > ./mutmut-state-version
 echo "fetch-mutmut-state: state $(basename "$src") from $state"

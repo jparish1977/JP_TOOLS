@@ -10,7 +10,8 @@ keep, with jobs running side by side:
     - A publisher waits for another holding STATE/.lock: two never interleave.
     - mutants/'s .git link and anything a mutant wrote that git does not
       track stay out, whatever its name (spaces, brackets); mutmut's own
-      .meta, .spans and mutmut-stats.json go in.
+      .meta, .spans and mutmut-stats.json go in, and so does mutmut-gate's
+      mutmut-gate.json. fetch says which version it copied.
     - Nothing in a published version is group- or world-writable.
     - A current left as a plain directory (the layout before versions) is
       moved aside and replaced.
@@ -47,7 +48,7 @@ def _checkout(where: Path, baseline: str = "1") -> Path:
     subprocess.run(["git", "-C", str(mutants), "init", "-q"], check=True, env=_ENV)
     (mutants / "a.py").write_text("x = 1\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(mutants), "add", "a.py"], check=True, env=_ENV)
-    for name in ("a.py.meta", "a.py.spans", "mutmut-stats.json", *STRAYS):
+    for name in ("a.py.meta", "a.py.spans", "mutmut-stats.json", "mutmut-gate.json", *STRAYS):
         (mutants / name).write_text("{}", encoding="utf-8")
     (where / "baseline.json").write_text(baseline, encoding="utf-8")
     os.chmod(mutants / "a.py", 0o666)
@@ -80,9 +81,10 @@ def test_publishes_a_version_and_points_current_at_it() -> None:
         current = state / "current"
         check_true("current is a symlink to the version", current.is_symlink()
                    and os.readlink(current) == _versions(state)[0])
-        check("it holds mutmut's files and the baseline, no stray, no .git", _files(current.resolve()),
+        check("it holds mutmut's files, the gate's and the baseline, no stray, no .git",
+              _files(current.resolve()),
               ["baseline.json", "mutants/a.py", "mutants/a.py.meta", "mutants/a.py.spans",
-               "mutants/mutmut-stats.json"])
+               "mutants/mutmut-gate.json", "mutants/mutmut-stats.json"])
         check_true("  nothing in it group- or world-writable",
                    all(not (q.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH))
                        for q in current.resolve().rglob("*")))
@@ -198,6 +200,8 @@ def test_fetch_copies_the_current_version() -> None:
         check("  the baseline, as mutmut-baseline.json",
               (out / "mutmut-baseline.json").read_text(encoding="utf-8"), "7")
         check_true("  and mutants/", (out / "mutants" / "a.py.meta").is_file())
+        check("  and which version it copied", (out / "mutmut-state-version").read_text(encoding="utf-8"),
+              _versions(state)[0] + "\n")
 
 
 if __name__ == "__main__":
