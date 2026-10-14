@@ -806,6 +806,7 @@ def test_the_judged_commit_is_the_one_to_diff_against() -> None:
         mutants = Path(td) / "m"
         mutants.mkdir()
         doc: dict[str, object] = {"git_commit": old}
+        check("the record's name, as publish-mutmut-state.sh keeps it", gate.JUDGED, "mutmut-gate.json")
         check("no record: mutmut's", gate._since(root, mutants, doc), old)
         (mutants / gate.JUDGED).write_text(json.dumps({"commit": new}), encoding="utf-8")
         check("a record this clone has: it", gate._since(root, mutants, doc), new)
