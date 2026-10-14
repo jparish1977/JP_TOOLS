@@ -34,6 +34,9 @@ from _harness import check, check_true, load_script, run
 from jpcheck import mutmut_log
 
 gate = load_script("mutmut-gate.py")
+# How the gate runs mutmut: through mutmut-clean.py beside it, its clean run across the children.
+_MUTMUT = [sys.executable, str(Path(gate.__file__ or "").resolve().parent / "mutmut-clean.py"), "run",
+           "--max-children", "2"]
 
 RESULTS = """\
     pkg.mod.x_alpha__mutmut_1: killed
@@ -236,7 +239,7 @@ def test_run_traces_reach_afresh_and_keeps_results() -> None:
         asked = _run_mutmut(root, full=False)
         check("mutmut was run as a module of this python, with the children asked for",
               [c["cmd"] for c in asked],
-              [[sys.executable, "-m", "mutmut", "run", "--max-children", "2"]])
+              [_MUTMUT])
         check("  from the checkout", [c["cwd"] for c in asked], [root])
         check_true("  after the kept test reach was dropped", not (mutants / gate.STATS).exists())
         check_true("  and with the kept mutant results left in place", (mutants / "a.py.meta").exists())
@@ -677,7 +680,7 @@ def test_run_tests_moved_reach_again() -> None:
             gate.run(root, False, 2)
         check("a test newly reached a function: mutmut ran again, with its verdict cleared",
               calls, [{"a.x_f__mutmut_1": 33}, {"a.x_f__mutmut_1": None}])
-        first = [sys.executable, "-m", "mutmut", "run", "--max-children", "2"]
+        first = _MUTMUT
         check("  the first run names nothing, the second exactly the cleared mutant, from the same place",
               asked, [(first, root), ([*first, "a.x_f__mutmut_1"], root)])
         check("  each run's plan: what it names, traces and rebuilds, and why each function is tested",
@@ -728,8 +731,7 @@ def test_run_goes_unnamed_when_the_names_do_not_fit() -> None:
                 mock.patch.object(time, "gmtime", return_value=time.gmtime(0)), \
                 contextlib.redirect_stdout(out):
             gate.run(root, False, 2)
-        first = [sys.executable, "-m", "mutmut", "run", "--max-children", "2"]
-        check("one byte too many for the name: both runs name nothing", asked, [first, first])
+        check("one byte too many for the name: both runs name nothing", asked, [_MUTMUT, _MUTMUT])
         check("  and the second says why, the whole line",
               out.getvalue().splitlines()[-1],
               "mutmut-gate 00:00:00Z: test reach moved for 1 function(s): their 1 verdict(s)"
@@ -750,8 +752,9 @@ def test_run_puts_its_python_first_on_path() -> None:
         assert isinstance(seen, dict)
         check("PATH is mutmut's python's directory, then the PATH it had",
               seen["PATH"], os.pathsep.join([here, git]))
-        check("  and the rest of the environment is kept, Python told not to buffer its output",
-              {k: v for k, v in seen.items() if k != "PATH"}, {"HOME": td, "KEEP": "1", "PYTHONUNBUFFERED": "1"})
+        check("  and the rest of the environment is kept, Python told not to buffer its output, the clean run"
+              " given the children", {k: v for k, v in seen.items() if k != "PATH"},
+              {"HOME": td, "KEEP": "1", "PYTHONUNBUFFERED": "1", "MUTMUT_CLEAN_WORKERS": "2"})
         [bare] = _run_mutmut(root, full=False, env={"HOME": td})
         seen = bare["env"]
         assert isinstance(seen, dict)

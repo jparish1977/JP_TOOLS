@@ -385,13 +385,15 @@ def _mutmut_run(root: Path, children: int, plan: mutmut_log.Plan) -> None:
     """mutmut run, its Python first on PATH: the git hooks start `python3`,
     and in mutants/ every script imports mutmut. The plan's NAMES, when
     given, are the only mutants it runs, and its clean run then covers only
-    the tests that reach them instead of the whole suite in one process. Its
-    output goes through mutmut_log's relay (THE LOG), unbuffered, so
-    mutmut's own lines reach it as they are printed."""
-    env = dict(os.environ, PYTHONUNBUFFERED="1", PATH=os.pathsep.join(
+    the tests that reach them instead of the whole suite. Its clean run runs
+    across CHILDREN workers (mutmut-clean.py). Its output goes through
+    mutmut_log's relay (THE LOG), unbuffered, so mutmut's own lines reach it
+    as they are printed."""
+    env = dict(os.environ, PYTHONUNBUFFERED="1", MUTMUT_CLEAN_WORKERS=str(children), PATH=os.pathsep.join(
         [str(Path(sys.executable).parent), os.environ.get("PATH", "")]))
     rc = mutmut_log.run_relayed(
-        [sys.executable, "-m", "mutmut", "run", "--max-children", str(children), *plan.names],
+        [sys.executable, str(Path(__file__).resolve().parent / "mutmut-clean.py"), "run",
+         "--max-children", str(children), *plan.names],
         root, env, mutmut_log.Relay(plan))
     if rc != 0:
         raise GateError(f"mutmut run exited {rc}")
