@@ -8,7 +8,8 @@
 # requirements-system.txt (JP_TOOLS' gate tools and PHP extensions, pwsh and
 # PSScriptAnalyzer at their pins, through install-pwsh.sh and its sha256
 # check), plus the tools other repositories' CI installed on every run
-# (ripgrep, poppler-utils, iproute2, pandoc, dvipng, opensp, sgml-data).
+# (ripgrep, poppler-utils, iproute2, pandoc, dvipng, opensp, sgml-data,
+# ffmpeg, imagemagick).
 # Python's packages stay with each job (requirements-dev.txt through the
 # runner's shared pip cache).
 #
@@ -34,7 +35,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 # --no-install-recommends gave a dvipng with no TeX fonts (kpsewhich
 # cmr10.tfm found nothing, measured in fleet-ci:b48264a), which reads every
 # DVI's font as missing. build.sh checks onsgmls by parsing a valid one-line
-# document: `onsgmls -v` alone parses an empty one and exits 1.
+# document: `onsgmls -v` alone parses an empty one and exits 1. ffmpeg and
+# imagemagick (convert, identify) are dynatext-tools' server's movie and
+# raster tools, declared in its requirements-system.txt: without them its
+# movie and raster checks print SKIP in CI.
 RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
     && apt-get update -q \
     && apt-get install -y -q --no-install-recommends \
@@ -43,6 +47,7 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
         ripgrep poppler-utils iproute2 \
         mame-tools testdisk gddrescue ntfs-3g \
         pandoc dvipng texlive-base opensp sgml-data \
+        ffmpeg imagemagick \
     && rm -rf /var/lib/apt/lists/*
 
 # Jobs run as fleet-ci, never root. The base image's user is root, so every

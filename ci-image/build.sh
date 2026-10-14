@@ -38,7 +38,8 @@
 # fleet-ci's uid, not root, and cannot sudo; then every pinned tool
 # (check-pins.py's powershell arm, the PHP extensions, composer, shellcheck,
 # cppcheck, rg, pdftotext, ss, pandoc, dvipng with the TeX font a DVI names,
-# onsgmls and the ISO entity catalog). Each tool's exit code is checked, its
+# onsgmls and the ISO entity catalog, ffmpeg drawing a frame and ImageMagick
+# writing a PNG that identify reads back). Each tool's exit code is checked, its
 # output captured whole first (see `ver` below). Exit 0 only when every step
 # passes; 2 when the daemon could not be asked whether it remaps users, so
 # nothing was built.
@@ -100,7 +101,11 @@ tar -C "$here" -cf - check-pins.py requirements-system.txt requirements-dev.txt 
         ver 1 sgml_probe
         test -f /usr/share/sgml/entities/sgml-iso-entities-8879.1986/catalog \
             || { echo "FAIL: sgml-data ISO entity catalog missing" >&2; exit 1; }
-        echo "sgml-data: ISO entity catalog present"'
+        echo "sgml-data: ISO entity catalog present"
+        ver 1 ffmpeg -v error -f lavfi -i color=c=black:s=16x16:d=0.1 -frames:v 1 -f null -
+        ver 1 ffmpeg -version
+        ver 1 convert -size 8x8 xc:white /tmp/r/probe.png
+        ver 1 identify /tmp/r/probe.png'
 
 echo "ci-image: the runner's cache volumes, owned by fleet-ci"
 for vol in pip-cache npm-cache composer-cache toolcache; do
