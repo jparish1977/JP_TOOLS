@@ -823,6 +823,7 @@ def test_a_pull_request_is_held_for_what_it_judged() -> None:
         record = mutants / gate.JUDGED
         check("no record: none, nothing so far", (mutmut_own.read(record), mutmut_own.so_far(record)), (None, set()))
         for doc, want in (({"commit": "c"}, None), ({"commit": "c", "own": []}, set()),
+                          (["not", "an", "object"], None),
                           ({"commit": "c", "own": ["a.x_f"]}, {"a.x_f"})):
             record.write_text(json.dumps(doc), encoding="utf-8")
             check(f"a record {doc}: {want}", mutmut_own.read(record), want)
@@ -847,6 +848,34 @@ def test_a_pull_request_is_held_for_what_it_judged() -> None:
               f"--pr: {gate.JUDGED} holds no record of what this pull request judged "
               "(run --pr writes it on a tree with nothing uncommitted)")
     check("hold, not a PR's run: everything, nothing said", _held_said(later, BASE, None), (BASE, []))
+    check("a mutant's function is the name before its LAST __mutmut_, as by_function splits it",
+          (mutmut_own.functions(["m.x_a__mutmut_b__mutmut_3", "m.x_c__mutmut_1"]),
+           set(gate.by_function("    m.x_a__mutmut_b__mutmut_3: killed\n"))),
+          ({"m.x_a__mutmut_b", "m.x_c"}, {"m.x_a__mutmut_b"}))
+
+
+def _help(*argv: str) -> str:
+    """mutmut-gate's --help for ARGV, its whitespace folded as argparse wraps it."""
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = gate.main([*argv, "--help"])
+    return f"rc={rc} " + " ".join(out.getvalue().split())
+
+
+def test_run_and_gate_take_pr() -> None:
+    """main hands run its --pr, and each subcommand's help says what --pr does."""
+    for argv, pr in ((["run", "--pr", "--max-children", "3"], True), (["run", "--max-children", "3"], False)):
+        with mock.patch.object(gate, "run") as ran, mock.patch("pathlib.Path.cwd", return_value=Path("/r")):
+            rc = gate.main(argv)
+        check(f"{' '.join(argv)}: run gets the checkout, --full, the children and --pr={pr}",
+              (rc, ran.call_args_list), (0, [mock.call(Path("/r"), False, 3, pr)]))
+    run_help, gate_help = _help("run"), _help("gate")
+    check_true("run --help says what --pr does",
+               run_help.startswith("rc=0 ")
+               and "--pr a pull request's run: add what it judges to the record gate --pr holds" in run_help)
+    check_true("gate --help says what --pr does",
+               gate_help.startswith("rc=0 ")
+               and "--pr hold only the functions the pull request's runs judged (run --pr)" in gate_help)
 
 
 if __name__ == "__main__":

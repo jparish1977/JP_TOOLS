@@ -193,6 +193,13 @@ def test_a_run_whose_only_change_edits_a_test_runs_once() -> None:
         check("a tree with changes not committed: the earlier record removed, none written, and it says so",
               ((mutants / gate.JUDGED).exists(), out.getvalue().splitlines()[-1]),
               (False, "mutmut-gate 00:00:00Z: the tree holds changes not committed: no judged commit recorded"))
+        out = io.StringIO()
+        with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), \
+                mock.patch.object(time, "gmtime", return_value=time.gmtime(0)), contextlib.redirect_stdout(out):
+            gate.run(root, False, 2)
+        check("  and again with no record there to remove: no error, the same line",
+              ((mutants / gate.JUDGED).exists(), out.getvalue().splitlines()[-1]),
+              (False, "mutmut-gate 00:00:00Z: the tree holds changes not committed: no judged commit recorded"))
 
 
 def test_a_pull_requests_run_records_what_it_judged() -> None:

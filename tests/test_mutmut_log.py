@@ -415,6 +415,25 @@ class _Rec:
         self.events.append(("close", ""))
 
 
+def test_the_relay_ends_one_tick_after_the_run() -> None:
+    """After the run has ended, pieces still coming are relayed until a TICK
+    has passed since the end, and not one past it: a clock the test sets, the
+    end seen at 10.0, then 10.5 and 11.0."""
+    chunks: queue.Queue[bytes] = queue.Queue()
+    for piece in (b"a", b"b", b"c", b"d"):
+        chunks.put(piece)
+    rec = _Rec()
+    clock = iter([10.0, 10.0, 10.5, 11.0, 11.5, 12.0, 12.5])
+    # mutmut_log reads time.monotonic off the time module at each call;
+    # queue and threading bound their own copy at import, so their waits keep
+    # the real clock.
+    with mock.patch.object(ml, "TICK", 1.0), mock.patch.object(time, "monotonic", lambda: next(clock)):
+        ml._relay_until_done(chunks, rec, lambda: True)
+    check("relayed until exactly a TICK after the end: a, b, c, not d",
+          "".join(text for what, text in rec.events if what == "feed"), "abc")
+    check("  and d left unread", chunks.get_nowait(), b"d")
+
+
 def test_drain_passes_each_piece_then_the_end() -> None:
     chunks: queue.Queue[bytes] = queue.Queue()
     read, write = os.pipe()
