@@ -24,10 +24,13 @@ import path so the tests import the mutated code, and a package of this
 checkout already imported in mutmut's process would be the one they got.
 """
 
+import contextlib
 import os
 import resource
+import shutil
 import sys
-from collections.abc import Iterable
+import tempfile
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 from mutmut import __main__ as mutmut_main
@@ -67,7 +70,30 @@ def main() -> None:
     resource.setrlimit(resource.RLIMIT_CORE, (CORE_LIMIT, CORE_LIMIT))
     # mypy sees a method assigned when mutmut's types are installed, and nothing when they are not.
     ForkRunner.run_clean_tests = run_clean_tests  # type: ignore[method-assign, unused-ignore]  # reason: the one phase replaced
-    sys.exit(mutmut_main.cli())
+    with _own_tmpdir():
+        sys.exit(mutmut_main.cli())
+
+
+@contextlib.contextmanager
+def _own_tmpdir() -> Iterator[str]:
+    """A temporary directory of the run's own, removed when it ends, however
+    it ends; TMPDIR and tempfile's cached choice, which forks inherit, name it
+    meanwhile and are put back after.
+
+    A mutant stopped at its timeout dies before its tests tidy up, so what
+    they made in the temporary directory stays: here it goes with the run."""
+    saved_env, saved_cached = os.environ.get("TMPDIR"), tempfile.tempdir
+    run_tmp = tempfile.mkdtemp(prefix="mutmut-run-")
+    os.environ["TMPDIR"] = tempfile.tempdir = run_tmp
+    try:
+        yield run_tmp
+    finally:
+        shutil.rmtree(run_tmp, ignore_errors=True)
+        tempfile.tempdir = saved_cached
+        if saved_env is None:
+            os.environ.pop("TMPDIR", None)
+        else:
+            os.environ["TMPDIR"] = saved_env
 
 
 if __name__ == "__main__":
