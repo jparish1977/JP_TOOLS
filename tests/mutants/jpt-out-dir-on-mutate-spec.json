@@ -1,0 +1,25 @@
+{
+  "about": "mutate-spec with no MUTATE_OUT_DIR writes nothing where it ran, prints the output of a spec not all killed and only that, and removes its own output directory. Run: mutate-on-target.py TREE mutate-spec.py tests/test_mutate_on_target.py tests/mutants/jpt-out-dir-on-mutate-spec.json",
+  "mutants": [
+    {
+      "name": "outputs where it ran, as before",
+      "edits": [["    outdir = kept or tempfile.mkdtemp(prefix=\"mutate-spec-\")", "    outdir = kept or \".\""]],
+      "target": "no MUTATE_OUT_DIR: exit 1 for the spec not all killed, nothing left where it ran"
+    },
+    {
+      "name": "a failing spec's output not printed",
+      "edits": [["                if rc != 0 and not kept and os.path.exists(out):", "                if False:"]],
+      "target": "  the spec not all killed has its output printed under its name"
+    },
+    {
+      "name": "every spec's output printed",
+      "edits": [["                if rc != 0 and not kept and os.path.exists(out):", "                if not kept and os.path.exists(out):"]],
+      "target": "  the spec all killed does not"
+    },
+    {
+      "name": "its own output directory left behind",
+      "edits": [["        if not kept:\n            shutil.rmtree(outdir, ignore_errors=True)", "        if False:\n            shutil.rmtree(outdir, ignore_errors=True)"]],
+      "target": "  and its own output directory, made in TMPDIR, is gone"
+    }
+  ]
+}

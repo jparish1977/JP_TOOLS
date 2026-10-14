@@ -22,8 +22,10 @@ line:
 
     python3 mutate-spec.py ROOT tests/mutants/*.json
 
-ROOT is left untouched. Point `$MUTATE_OUT_DIR` at a scratch directory; the
-runner's full output for each spec is written there.
+ROOT is left untouched, and so is the directory it runs from. The runner's
+full output for each spec goes to `$MUTATE_OUT_DIR` when it is set, and is
+kept there; without it, to a directory of the run's own that is removed at
+exit, and the output of a spec not all killed is printed instead.
 
 When code moves or changes, a spec's `edits` stop matching and the runner
 refuses to start. Re-anchor the mutant to the new code with the SAME mutation;

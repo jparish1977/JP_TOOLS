@@ -649,6 +649,34 @@ def test_spec_a_name_twice_is_one_run() -> None:
           mutant_lines(), (0, ["control", "twin", "twin"]))
 
 
+def test_spec_with_no_out_dir_leaves_nothing_where_it_ran() -> None:
+    """With no MUTATE_OUT_DIR, nothing is written where mutate-spec ran; a
+    spec not all killed has its output printed after its line, one all killed
+    does not."""
+    tree, _spec, env = fixture("no-out-dir")
+    about = "Run: mutate-on-target.py TREE t.py test.py SPEC."
+    specs = {}
+    for name, new in (("killed", "VALUE = 2"), ("survives", "VALUE = 1  # the same value")):
+        specs[name] = os.path.join(TMP, f"no-out-dir-{name}.json")
+        with open(specs[name], "w", encoding="utf-8") as fh:
+            json.dump({"about": about, "mutants": [{"name": "value", "edits": [["VALUE = 1", new]],
+                                                    "target": "value is one"}]}, fh)
+    here, tmp = os.path.join(TMP, "no-out-dir-cwd"), os.path.join(TMP, "no-out-dir-tmp")
+    os.makedirs(here)
+    os.makedirs(tmp)
+    with open(os.path.join(here, "mine.txt"), "w", encoding="utf-8") as fh:
+        fh.write("the caller's own file\n")
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(RUNNER), "mutate-spec.py"),
+                        tree, specs["killed"], specs["survives"]], cwd=here, capture_output=True,
+                       text=True, env=dict(env, TMPDIR=tmp), check=False, timeout=120)
+    check("no MUTATE_OUT_DIR: exit 1 for the spec not all killed, nothing left where it ran",
+          (r.returncode, os.listdir(here)), (1, ["mine.txt"]))
+    check_true("  the spec not all killed has its output printed under its name",
+               "--- no-out-dir-survives.mutate.out ---" in r.stdout and "SURVIVED" in r.stdout)
+    check_true("  the spec all killed does not", "--- no-out-dir-killed.mutate.out ---" not in r.stdout)
+    check("  and its own output directory, made in TMPDIR, is gone", os.listdir(tmp), [])
+
+
 if __name__ == "__main__":
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:

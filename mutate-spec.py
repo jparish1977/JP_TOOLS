@@ -13,8 +13,11 @@ A spec's `about` carries its own run line (`mutate-on-target.py TREE TARGET
 TEST SPEC`), so the caller does not restate it and get it wrong. Prints one
 line per spec as it finishes, the runner's verdict and exit code, and exits 1
 if any spec is not all killed on target. The runner's full output goes to
-<stem>.mutate.out in $MUTATE_OUT_DIR (default the current directory), where
-the stem is the spec's path under the directory all the given specs share,
+<stem>.mutate.out in $MUTATE_OUT_DIR, kept there. With no $MUTATE_OUT_DIR it
+goes to a directory of the run's own, removed at exit, so nothing is left in
+the directory it was run from, and a spec not all killed has its whole
+output printed after its line instead. The stem is the spec's path under
+the directory all the given specs share,
 '/' as '__' (pb/books/code.json is pb__books__code); specs in one directory
 keep their file names.
 
@@ -276,17 +279,28 @@ def main(argv: list[str]) -> int:
                 print(f"{spec_stem(sp, base)}: {name}\t-> {target}")
         return 0
     runs = chosen(specs, args.only)
-    outdir = os.environ.get("MUTATE_OUT_DIR", ".")
+    # With no MUTATE_OUT_DIR the outputs go to a directory of this run's own,
+    # removed at exit, never into the directory it was run from; a spec not
+    # all killed has its output printed after its line, since its file goes.
+    kept = os.environ.get("MUTATE_OUT_DIR")
+    outdir = kept or tempfile.mkdtemp(prefix="mutate-spec-")
     bad = 0
-    # Each spec is a waiting thread of its own; only POOL's runs count against --jobs.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool, \
-            concurrent.futures.ThreadPoolExecutor(max_workers=len(runs)) as specs_at_once:
-        futures = [specs_at_once.submit(run_spec, root, sp, outdir, base, only, pool)
-                   for sp, only in runs.items()]
-        for fut in concurrent.futures.as_completed(futures):
-            stem, rc, last = fut.result()
-            print(f"{stem}: rc={rc} {last[:140]}", flush=True)
-            bad += rc != 0
+    try:
+        # Each spec is a waiting thread of its own; only POOL's runs count against --jobs.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool, \
+                concurrent.futures.ThreadPoolExecutor(max_workers=len(runs)) as specs_at_once:
+            futures = [specs_at_once.submit(run_spec, root, sp, outdir, base, only, pool)
+                       for sp, only in runs.items()]
+            for fut in concurrent.futures.as_completed(futures):
+                stem, rc, last = fut.result()
+                print(f"{stem}: rc={rc} {last[:140]}", flush=True)
+                out = os.path.join(outdir, stem + ".mutate.out")
+                if rc != 0 and not kept and os.path.exists(out):
+                    print(f"--- {stem}.mutate.out ---\n{Path(out).read_text(encoding='utf-8')}", flush=True)
+                bad += rc != 0
+    finally:
+        if not kept:
+            shutil.rmtree(outdir, ignore_errors=True)
     return 1 if bad else 0
 
 
