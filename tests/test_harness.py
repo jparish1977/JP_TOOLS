@@ -69,6 +69,31 @@ def test_a_crash_is_one_failure_and_the_run_goes_on() -> None:
     check("a crashing test: its traceback is on stderr", "RuntimeError: boom" in r.stderr, True)
 
 
+def test_a_long_mismatch_says_what_differs() -> None:
+    """Two copies of a long output on one line hide the line that changed: a
+    long mismatch is a diff of the lines that differ, short ones stay whole."""
+    from _harness import mismatch
+    check("short values: both, whole", mismatch(2, 1), "expected 2, got 1")
+    help_was = [f"  --flag{n}    what flag {n} does, said at length so the help is long" for n in range(8)]
+    help_now = [*help_was[:3], "  --flag3    what flag 3 does, said differently now", *help_was[4:]]
+    check("long lists of lines: only the changed line and one line each side",
+          mismatch(help_was, help_now),
+          "differs (- expected, + got):\n@@ -3,3 +3,3 @@\n"
+          f" {help_was[2]!r}\n-{help_was[3]!r}\n+{help_now[3]!r}\n {help_was[4]!r}")
+    text_was, text_now = "\n".join(help_was) + "\n", "\n".join(help_was)
+    check("long text: a trailing newline lost is shown, each line as its repr",
+          mismatch(text_was, text_now),
+          "differs (- expected, + got):\n@@ -7,2 +7,2 @@\n"
+          f" {help_was[6] + chr(10)!r}\n-{help_was[7] + chr(10)!r}\n+{help_was[7]!r}")
+    check("a long tuple: each differing item by index, the same way",
+          mismatch((0, help_was), (1, help_now)),
+          "[0] expected 0, got 1\n[1] " + mismatch(help_was, help_now))
+    check("long text against its own lines as a list: both whole, since no line differs",
+          mismatch(text_was, text_was.splitlines(keepends=True)).startswith("expected "), True)
+    check("long values of other kinds: both whole",
+          mismatch({"k": "v" * 300}, {"k": "w" * 300}), f"expected {{'k': {'v' * 300!r}}}, got {{'k': {'w' * 300!r}}}")
+
+
 def test_all_passing_exits_zero() -> None:
     r = run_probe(PASSING)
     check("control, every check passes: exit 0 and says so",
