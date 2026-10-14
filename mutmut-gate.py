@@ -88,6 +88,7 @@ pass, per mutant as much as per run.
 """
 
 import argparse
+import functools
 import json
 import os
 import shutil
@@ -107,6 +108,9 @@ from jpcheck.mutmut_paths import is_suite as _is_suite
 from jpcheck.mutmut_paths import module as _module
 from jpcheck.mutmut_paths import readers as _readers
 from jpcheck.mutmut_paths import shared_by_tests as _shared_by_tests
+from jpcheck.mutmut_paths import sweep as _sweep
+from jpcheck.mutmut_recheck import RECHECK
+from jpcheck.mutmut_recheck import recheck as _recheck
 from platformtools.procname import name_process
 
 LINKED = ("node_modules", "vendor")
@@ -143,22 +147,12 @@ def _is_worktree_of(mutants: Path, root: Path) -> bool:
     return Path(mine).resolve() == Path(theirs).resolve()
 
 
-def _litter(mutants: Path) -> list[str]:
-    """The top-level entries of MUTANTS that a mutant wrote: neither a file or
-    directory git tracks, nor mutmut's own (a .meta or .spans, its stats, the
-    judged commit), nor a linked install. A mutant that turned an output path
-    into None or a flag left None/, None.tmp or --max-children there, and a
-    kept mutants/ (a run resumed, a state restored) would keep them for good.
-    Only top-level entries: one inside a tracked directory is not this."""
-    out = _git("-C", str(mutants), "ls-files", "-z", "--others", "--directory")
-    kept = {*LINKED, STATS, JUDGED}
-    names = [p.rstrip("/") for p in out.split("\0") if p and "/" not in p.rstrip("/")]
-    return sorted(n for n in names if n not in kept and not n.endswith((".meta", ".spans")))
-
-
 def prepare(root: Path) -> Path:
     """mutants/ as an index-only worktree at ROOT's HEAD, installs linked in,
-    and nothing at its top that a mutant wrote (_litter)."""
+    and nothing at its top that a mutant wrote: a mutant that turned an output
+    path into None or a flag left None/, None.tmp or --max-children there, and
+    a kept mutants/ (a run resumed, a state restored) would keep them for good
+    (jpcheck.mutmut_paths.litter says which)."""
     mutants = root / "mutants"
     mutants.mkdir(exist_ok=True)
     if not _is_worktree_of(mutants, root):
@@ -173,12 +167,8 @@ def prepare(root: Path) -> Path:
     head = _git("-C", str(root), "rev-parse", "HEAD")
     _git("-C", str(mutants), "update-ref", "--no-deref", "HEAD", head)
     _git("-C", str(mutants), "reset", "-q")
-    for name in _litter(mutants):
-        path = mutants / name
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
-        else:
-            path.unlink()
+    _sweep(mutants, _git("-C", str(mutants), "ls-files", "-z", "--others", "--directory"),
+           {*LINKED, STATS, JUDGED, RECHECK})
     for name in LINKED:
         link = mutants / name
         if (root / name).is_dir() and not link.exists() and not link.is_symlink():
@@ -466,6 +456,19 @@ def run(root: Path, full: bool, children: int) -> None:
     (mutants / JUDGED).write_bytes(json.dumps({"commit": _git("-C", str(root), "rev-parse", "HEAD")}).encode())
 
 
+def recheck(root: Path, children: int, chunk: int) -> int:
+    """Prepare, then jpcheck.mutmut_recheck: every mutant not settled tested
+    again by name, CHUNK at a time, resumably. Returns how many it tested."""
+    mutants = prepare(root)
+
+    def run_names(names: list[str]) -> None:
+        _mutmut_run(root, children, mutmut_log.Plan(functools.partial(_codes, mutants), names,
+                                                    "none: a recheck traces nothing again",
+                                                    "none: a recheck rebuilds nothing", dict))
+
+    return _recheck(mutants, functools.partial(results_text, root, None), run_names, chunk)
+
+
 def _sources(root: Path, mutants: Path) -> str:
     """What mutmut will rebuild mutants for: the source files it keeps, and
     those changed since the state's commit, named. Read before
@@ -590,6 +593,9 @@ def _parser() -> _Parser:
     r = sub.add_parser("run", help="prepare, then mutmut run")
     r.add_argument("--full", action="store_true", help="start from nothing, not the kept state")
     r.add_argument("--max-children", type=int, default=os.cpu_count() or 1)
+    c = sub.add_parser("recheck", help="test every mutant not killed again, by name, resumably")
+    c.add_argument("--max-children", type=int, default=os.cpu_count() or 1)
+    c.add_argument("--chunk", type=int, default=500, help="mutants per mutmut run (default 500)")
     for name, what in (("record", "write per-function counts to OUT"),
                        ("gate", "fail on a function that breaks the rule")):
         c = sub.add_parser(name, help=what)
@@ -610,6 +616,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"mutmut-gate: {prepare(root)} ready")
         elif args.cmd == "run":
             run(root, args.full, args.max_children)
+        elif args.cmd == "recheck":
+            print(f"mutmut-gate: {recheck(root, args.max_children, max(1, args.chunk))} mutant(s) tested again")
         elif args.cmd == "record":
             counts = by_function(results_text(root, args.results))
             Path(args.file).write_text(json.dumps(counts, indent=1, sort_keys=True) + "\n",

@@ -1,10 +1,12 @@
 """What a changed file's path tells mutmut-gate.py: the module mutmut keys its
 functions by, whether tests other than its own read it, and whether it is a
-suite, and which suites read it. Paths are as git names them, from the
-checkout's root.
+suite, and which suites read it; and which entries at the top of mutants/ a
+mutant left. Paths are as git names them, from the checkout's root.
 """
 
 import re
+import shutil
+from pathlib import Path
 
 # The files at the root pytest reads its configuration from: testpaths and
 # python_functions decide what it collects at all.
@@ -37,6 +39,28 @@ def is_suite(path: str) -> bool:
     """A test_*.py file under tests/, at any depth."""
     name = path.rpartition("/")[2]
     return path.startswith("tests/") and name.startswith("test_") and name.endswith(".py")
+
+
+def litter(untracked: str, kept: set[str]) -> list[str]:
+    """The top-level entries of mutants/ that a mutant wrote, from UNTRACKED
+    (`git ls-files -z --others --directory` there): none of KEPT (mutmut's
+    and the gate's own records, the linked installs), nor a mutmut .meta or
+    .spans. Only top-level entries: one inside a tracked directory is not this."""
+    names = [p.rstrip("/") for p in untracked.split("\0") if p and "/" not in p.rstrip("/")]
+    return sorted(n for n in names if n not in kept and not n.endswith((".meta", ".spans")))
+
+
+def sweep(mutants: Path, untracked: str, kept: set[str]) -> list[str]:
+    """Remove from MUTANTS each entry litter() names (a directory whole, a
+    link or file itself, never what a link points at); the names removed."""
+    gone = litter(untracked, kept)
+    for name in gone:
+        path = mutants / name
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    return gone
 
 
 def readers(path: str, tests: dict[str, bytes]) -> set[str] | None:

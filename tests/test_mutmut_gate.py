@@ -180,12 +180,83 @@ def test_prepare() -> None:
         # What mutants wrote at the top of mutmut's copy, beside mutmut's own.
         (mutants / "None").mkdir()
         (mutants / "None" / "out.txt").write_text("x\n", encoding="utf-8")
-        for name in ("None.tmp", "--max-children", "a.py.meta", "b.py.spans", gate.STATS, gate.JUDGED):
+        for name in ("None.tmp", "--max-children", "a.py.meta", "b.py.spans", gate.STATS, gate.JUDGED,
+                     gate.RECHECK):
             (mutants / name).write_text("x\n", encoding="utf-8")
         gate.prepare(root)
-        check("what mutants left at the top is gone; mutmut's own, the links and the tracked file stay",
+        check("what mutants left at the top is gone; mutmut's own, the gate's, the links and the tracked file stay",
               sorted(p.name for p in mutants.iterdir() if p.name != ".git"),
-              sorted(["a.py", "a.py.meta", "b.py.spans", gate.STATS, gate.JUDGED, "node_modules", "vendor"]))
+              sorted(["a.py", "a.py.meta", "b.py.spans", gate.STATS, gate.JUDGED, gate.RECHECK,
+                      "node_modules", "vendor"]))
+
+
+def test_recheck_tests_what_is_not_settled_again_by_name_in_chunks() -> None:
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    statuses = ["killed", "survived", "timeout", "suspicious", "no tests", "skipped", "caught by type check"]
+    # A line mutmut prints that is not a mutant's, and one with no status: neither is a name.
+    results = ("m.x_f: 7 mutants\n    m.x_f__mutmut_0\n"
+               + "\n".join(f"    m.x_f__mutmut_{i}: {s}" for i, s in enumerate(statuses, 1)) + "\n")
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        runs: list[list[str]] = []
+        records: list[object] = []
+
+        def fake_run(_root: Path, children: int, plan: mutmut_log.Plan) -> None:
+            runs.append([*plan.names])
+            records.append((children, json.loads((root / "mutants" / gate.RECHECK).read_bytes())["done"]))
+
+        with mock.patch.object(gate, "results_text", lambda *_: results), \
+                mock.patch.object(gate, "_mutmut_run", fake_run):
+            n = gate.recheck(root, 4, 2)
+        names = [f"m.x_f__mutmut_{i}" for i in (2, 3, 4, 5)]
+        check("every mutant not settled, by name, two at a time; killed, skipped and type-caught left alone",
+              (n, runs), (4, [names[:2], names[2:]]))
+        check("  the record of what is done written as each chunk ends, with the workers asked for",
+              records, [(4, []), (4, names[:2])])
+        check_true("  and gone when the recheck ends", not (root / "mutants" / gate.RECHECK).exists())
+
+        (root / "mutants" / gate.RECHECK).write_text(json.dumps({"names": names, "done": names[:1]}),
+                                                     encoding="utf-8")
+        runs.clear()
+
+        def no_results(*_: object) -> str:
+            raise AssertionError("a resumed recheck reads its record, not mutmut's results")
+
+        with mock.patch.object(gate, "results_text", no_results), mock.patch.object(gate, "_mutmut_run", fake_run):
+            n = gate.recheck(root, 4, 10)
+        check("a stopped recheck resumes with the names it had not done, its record's, not mutmut's",
+              (n, runs), (3, [names[1:]]))
+
+        def dies_on_the_second(_root: Path, children: int, plan: mutmut_log.Plan) -> None:
+            if runs:
+                raise gate.GateError("mutmut run exited 1")
+            runs.append([*plan.names])
+
+        runs.clear()
+        with mock.patch.object(gate, "results_text", lambda *_: results), \
+                mock.patch.object(gate, "_mutmut_run", dies_on_the_second), \
+                contextlib.suppress(gate.GateError):  # reason: the run is made to die; what is checked is the record it left
+            gate.recheck(root, 4, 2)
+        check("a recheck stopped part way keeps its record: the chunk it finished is done",
+              json.loads((root / "mutants" / gate.RECHECK).read_bytes()), {"names": names, "done": names[:2]})
+
+
+def test_recheck_from_the_command_line() -> None:
+    asked: list[tuple[object, ...]] = []
+
+    def fake(root: Path, children: int, chunk: int) -> int:
+        asked.append((root, children, chunk))
+        return 7
+
+    out = io.StringIO()
+    with mock.patch.object(gate, "recheck", fake), contextlib.redirect_stdout(out):
+        rc = gate.main(["recheck", "--max-children", "3", "--chunk", "0"])
+        default = gate.main(["recheck"])
+    check("recheck: its workers, its chunk at least one, how many it tested said, exit 0",
+          (rc, asked[0], out.getvalue().splitlines()[0]), (0, (Path.cwd(), 3, 1), "mutmut-gate: 7 mutant(s) tested again"))
+    check("  by default the box's cores and 500 a chunk", (default, asked[1]), (0, (Path.cwd(), os.cpu_count() or 1, 500)))
 
 
 def test_a_failed_git_is_named_with_its_error() -> None:
