@@ -219,14 +219,14 @@ def test_the_relay_says_progress_each_tenth_and_each_minute() -> None:
         relay.feed(_frame(0, 2000, 0, 0, 0, 0, 0, 0, 0))
         relay.feed(_frame(2000, 2000, 1500, 0, 0, 1000, 0, 0, 0))
     relay, _ = _relay(clock)
-    glued = io.StringIO()
+    glued = _Flushes()
     with mock.patch.object(time, "gmtime", return_value=_EPOCH), contextlib.redirect_stdout(glued):
         relay.feed(_frame(0, 10, 0, 0, 0, 0, 0, 0, 0))
         relay.feed(_frame(1, 10, 1, 0, 0, 0, 0, 0, 0) + "Traceback (most recent call last):\n")
-    check("a child's line on the end of a frame: the frame counted, the line passed through",
-          glued.getvalue().splitlines(),
-          ["Traceback (most recent call last):",
-           "mutmut-gate 00:00:00Z: 1 / 10 judged: 1 killed, 0 no tests, 0 timeout, 0 survived; OPEN"])
+    check("a child's line on the end of a frame: the frame counted, the line passed through, each flushed",
+          (glued.getvalue().splitlines(), glued.flushes),
+          (["Traceback (most recent call last):",
+            "mutmut-gate 00:00:00Z: 1 / 10 judged: 1 killed, 0 no tests, 0 timeout, 0 survived; OPEN"], 2))
     check("counts past a thousand grouped", out.getvalue().splitlines(),
           [("mutmut-gate 00:00:00Z: 2,000 / 2,000 judged: 1,500 killed, 0 no tests, 0 timeout, 1,000 suspicious,"
             " 0 survived; OPEN")])
@@ -387,13 +387,14 @@ def test_the_first_run_says_why_its_functions_are_tested() -> None:
 
 
 def test_the_sources_line() -> None:
-    check("no commit, none changed, two, five, seven",
+    check("no commit, none changed, two, five, six, seven",
           [ml.sources_line(3, None), ml.sources_line(3, []), ml.sources_line(3, ["a.py", "b.py"]),
-           ml.sources_line(3, [f"m{n}.py" for n in range(5)]), ml.sources_line(3, [f"m{n}.py" for n in range(7)])],
+           *(ml.sources_line(3, [f"m{n}.py" for n in range(count)]) for count in (5, 6, 7))],
           ["3 source files kept, no state commit to say which changed",
            "3 source files kept, 0 changed since the state",
            "3 source files kept, 2 changed since the state (a.py, b.py)",
            "3 source files kept, 5 changed since the state (m0.py, m1.py, m2.py, m3.py, m4.py)",
+           "3 source files kept, 6 changed since the state (m0.py, m1.py, m2.py, m3.py, m4.py, ...)",
            "3 source files kept, 7 changed since the state (m0.py, m1.py, m2.py, m3.py, m4.py, ...)"])
 
 
