@@ -457,13 +457,18 @@ def run(root: Path, full: bool, children: int) -> None:
 
 
 def recheck(root: Path, children: int, chunk: int) -> int:
-    """Prepare, then jpcheck.mutmut_recheck: every mutant not settled tested
-    again by name, CHUNK at a time, resumably. Returns how many it tested."""
+    """Prepare, re-trace the tests whose files changed since the trace
+    (forget_moved_reach, as run does: a check added to an existing suite
+    otherwise never runs against the mutants of a function whose own code did
+    not change, and they read as survivors), then jpcheck.mutmut_recheck:
+    every mutant not settled tested again by name, CHUNK at a time,
+    resumably. Returns how many it tested."""
     mutants = prepare(root)
+    traced = forget_moved_reach(root, mutants / STATS)
+    mutmut_log.say(traced)
 
     def run_names(names: list[str]) -> None:
-        _mutmut_run(root, children, mutmut_log.Plan(functools.partial(_codes, mutants), names,
-                                                    "none: a recheck traces nothing again",
+        _mutmut_run(root, children, mutmut_log.Plan(functools.partial(_codes, mutants), names, traced,
                                                     "none: a recheck rebuilds nothing", dict))
 
     return _recheck(mutants, functools.partial(results_text, root, None), run_names, chunk)

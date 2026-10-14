@@ -203,13 +203,25 @@ def test_recheck_tests_what_is_not_settled_again_by_name_in_chunks() -> None:
         runs: list[list[str]] = []
         records: list[object] = []
 
+        traced_for: list[Path] = []
+        planned: list[str] = []
+
         def fake_run(_root: Path, children: int, plan: mutmut_log.Plan) -> None:
             runs.append([*plan.names])
+            planned.append(plan.traced)
             records.append((children, json.loads((root / "mutants" / gate.RECHECK).read_bytes())["done"]))
 
+        def fake_forget(_root: Path, stats: Path) -> str:
+            traced_for.append(stats)
+            return "1 file(s) changed since the traced commit: 2 test(s) traced again"
+
         with mock.patch.object(gate, "results_text", lambda *_: results), \
-                mock.patch.object(gate, "_mutmut_run", fake_run):
+                mock.patch.object(gate, "_mutmut_run", fake_run), \
+                mock.patch.object(gate, "forget_moved_reach", fake_forget):
             n = gate.recheck(root, 4, 2)
+        check("the tests whose files changed traced again first, as a run does, and every chunk says so",
+              (traced_for, planned),
+              ([root / "mutants" / gate.STATS], ["1 file(s) changed since the traced commit: 2 test(s) traced again"] * 2))
         names = [f"m.x_f__mutmut_{i}" for i in (2, 3, 4, 5)]
         check("every mutant not settled, by name, two at a time; killed, skipped and type-caught left alone",
               (n, runs), (4, [names[:2], names[2:]]))
