@@ -135,6 +135,27 @@ def git_test_the_three_acceptance_cases() -> None:
         check_true("the gain is reported, not silently accepted", "-3" in p.stdout)
 
 
+def git_test_warnings_that_rise_fail() -> None:
+    """A shell file's shellcheck warnings going 1 -> 3 is worse, as errors are."""
+    if not shutil.which("shellcheck"):
+        print("SKIP: shellcheck not found")
+        return
+    with repo() as r:
+        one = "#!/bin/sh\necho $1\n"  # SC2086, shellcheck's "info": a warning here
+        (r / "a.sh").write_text(one, encoding="utf-8")
+        base = str(r / "base.json")
+        check_py(".", "--record-baseline", base, cwd=r)
+        check("CONTROL: recorded with one shellcheck warning and no error",
+              json.loads(Path(base).read_text(encoding="utf-8"))["files"]["a.sh"]["shellcheck"]
+              | {"fixable": 0, "fixable_unsafe": 0}, {"errors": 0, "warnings": 1, "fixable": 0, "fixable_unsafe": 0})
+        (r / "a.sh").write_text(one + "echo $2\necho $3\n", encoding="utf-8")
+        p = check_py("a.sh", "--baseline", base, cwd=r)
+        check_true("warnings 1 -> 3: exit 1, the count named on stderr",
+                   p.returncode == 1 and "a.sh  shellcheck  warnings  1 -> 3" in p.stderr)
+        (r / "a.sh").write_text(one, encoding="utf-8")
+        check("  and back at one: exit 0", check_py("a.sh", "--baseline", base, cwd=r).returncode, 0)
+
+
 def git_test_a_per_file_run_compares_only_what_it_measured() -> None:
     """The hook checks one staged file per run; every other baselined file must
     be counted, never compared as if it had improved to zero."""
@@ -170,7 +191,7 @@ def git_test_a_directory_against_a_baseline_is_measured_per_file() -> None:
         (r / "dirty.py").write_text(WORSE, encoding="utf-8")
         p = check_py(".", "--baseline", str(base), cwd=r)
         check_true("a file that got worse fails the directory run, named",
-                   p.returncode == 1 and "dirty.py  ruff  3 -> 4" in p.stderr)
+                   p.returncode == 1 and "dirty.py  ruff  errors  3 -> 4" in p.stderr)
         p = check_py(".", "--lang", "js", "--baseline", str(base), cwd=r)
         check("--lang keeps only that language's files: none here, so nothing worse", p.returncode, 0)
         p = check_py(".", "--tools", "ruff,smells", "--baseline", str(base), cwd=r)
@@ -218,7 +239,7 @@ def git_test_counts_with_their_keys_missing() -> None:
         base.write_text(json.dumps({"baseline_version": 2, "mode": "per-file"}), encoding="utf-8")
         p = check_py("dirty.py", "--baseline", str(base), cwd=r)
         check_true("one with no files and no tools: every finding is new, so worse",
-                   p.returncode == 1 and "dirty.py  ruff  0 -> 3" in p.stderr)
+                   p.returncode == 1 and "dirty.py  ruff  errors  0 -> 3" in p.stderr)
         base.write_text("{ not json", encoding="utf-8")
         p = check_py("dirty.py", "--baseline", str(base), cwd=r)
         check_true("  and a baseline that is not JSON is named on stderr, not stdout",
@@ -401,7 +422,7 @@ def git_test_touched_never_counts_cross_file_tools() -> None:
     rose = {"a.py": {"mypy": {"errors": 5, "warnings": 0}, "ruff": {"errors": 0, "warnings": 0}}}
     worse, _ = baseline._deltas({"a.py"}, rose, was, set())
     check("but a mypy count that RISES is worse, as any tool's is",
-          worse, [("a.py", "mypy", 4, 5)])
+          worse, [("a.py", "mypy", "errors", 4, 5)])
     helptext = " ".join(check_py("--help", cwd=ROOT).stdout.split())
     check_true("--help says both halves: every tool counts against worse",
                "Every tool counts against getting worse" in helptext)
@@ -524,7 +545,7 @@ def git_test_a_lang_run_compares_only_that_language() -> None:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             bl.compare_baseline([], str(r), str(base), "per-file")
         check_true("compare_baseline with no lang is every language: the python file is compared",
-                   "dirty.py  ruff  3 -> 0" in out.getvalue() and "not measured" not in out.getvalue())
+                   "dirty.py  ruff  errors  3 -> 0" in out.getvalue() and "not measured" not in out.getvalue())
 
 
 def git_test_audits_are_reported_and_never_baselined() -> None:

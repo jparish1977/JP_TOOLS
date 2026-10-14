@@ -21,11 +21,13 @@ From `jpexit`:
 | 3 | `NOT_LOWERED` | `--baseline --touched` only: no worse, but the file had recorded findings and fixed none |
 
 Findings win over not-run: a run with an error AND a check that did not run
-exits 1, and the check that did not run is still named on stderr. Warnings
-never change the exit code.
+exits 1, and the check that did not run is still named on stderr. Without
+`--baseline`, warnings never change the exit code.
 
-With `--baseline FILE` the same JSON is printed, and the exit code compares its
-error counts with the baseline instead: 0 no worse, 1 worse, 2 the baseline
+With `--baseline FILE` the same JSON is printed, and the exit code compares
+each file's counts with the baseline instead, tool by tool: its errors and its
+warnings, each on its own, so a warning fixed does not pay for an error added.
+0 no worse, 1 worse (each count that rose named on stderr), 2 the baseline
 could not be used (unreadable, recorded in another mode, or another
 `baseline_version`, which names the command that re-records it). A check whose
 status is not a verdict, `skip` included, or whose tool version changed since
@@ -114,7 +116,7 @@ Each entry in a check's `issues`:
 | field | |
 |---|---|
 | `file`, `line`, `col` | where |
-| `severity` | `error` or `warning`; only `error` counts toward exit 1 |
+| `severity` | `error` or `warning`; only `error` counts toward exit 1, except with `--baseline`, where a rise in either is exit 1 |
 | `rule`, `message` | the tool's rule id and text |
 | `fixable`, `fixable_unsafe` | whether `fix.py`, or `fix.py --unsafe`, would change it; read a missing one as false |
 | `exempt` | only on a finding in a lab file under its METHODOLOGY 2.9 header: the reason it is listed but not counted |
