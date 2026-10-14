@@ -420,7 +420,9 @@ def test_the_relay_ends_one_tick_after_the_run() -> None:
     has passed since the end, and not one past it: a clock the test sets, the
     end seen at 10.0, then 10.5 and 11.0."""
     chunks: queue.Queue[bytes] = queue.Queue()
-    for piece in (b"a", b"b", b"c", b"d"):
+    # c ends with half of a two-byte character: what the decoder holds at the
+    # end is flushed, as the replacement character, before the relay closes.
+    for piece in (b"a", b"b", b"c\xc3", b"d"):
         chunks.put(piece)
     rec = _Rec()
     clock = iter([10.0, 10.0, 10.5, 11.0, 11.5, 12.0, 12.5])
@@ -429,8 +431,9 @@ def test_the_relay_ends_one_tick_after_the_run() -> None:
     # the real clock.
     with mock.patch.object(ml, "TICK", 1.0), mock.patch.object(time, "monotonic", lambda: next(clock)):
         ml._relay_until_done(chunks, rec, lambda: True)
-    check("relayed until exactly a TICK after the end: a, b, c, not d",
-          "".join(text for what, text in rec.events if what == "feed"), "abc")
+    check("relayed until exactly a TICK after the end: a, b, c, not d; the held byte flushed",
+          "".join(text for what, text in rec.events if what == "feed"), "abc�")
+    check("  and the relay closed, last", rec.events[-1], ("close", ""))
     check("  and d left unread", chunks.get_nowait(), b"d")
 
 
