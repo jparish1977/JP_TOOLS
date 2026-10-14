@@ -217,11 +217,15 @@ class Relay:
             print(line, flush=True)
 
     def _frame(self, text: str) -> None:
-        counter = COUNTER.fullmatch(text)
+        counter = COUNTER.match(text)
         if not counter:
             if text != self.phase:
                 self._phase(text)
             return
+        # A child writing straight to the terminal lands on the end of the
+        # frame mutmut drew last: that is the child's line, passed through.
+        if rest := text[counter.end():]:
+            print(rest, flush=True)
         self.now = [int(n) for n in counter.groups()]
         if self.start is None:
             self.start = self.now

@@ -54,7 +54,14 @@ class _Fork:
 def _clean(rc: int, tests: list[str], workers: str | None) -> tuple[int, list[tuple[list[str], str]]]:
     fork = _Fork(rc)
     env = {} if workers is None else {clean.WORKERS: workers}
-    with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, env, clear=True):
+
+    def serial(self: object, tests: list[str]) -> int:
+        # Under mutmut, ForkRunner's own clean run may already be this script's,
+        # so a run sent to it would look the same: it must not be sent at all.
+        raise AssertionError("the serial clean run was used")
+
+    with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, env, clear=True), \
+            mock.patch.object(clean, "_serial", serial):
         (Path(td) / "mutants").mkdir()
         here = os.getcwd()
         os.chdir(td)
