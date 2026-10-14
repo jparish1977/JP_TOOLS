@@ -10,9 +10,12 @@
 # fetch-mutmut-state.sh reads it, holding the run's mutants/. The verdicts in
 # it are for the PR's own code at the commit its last run judged
 # (mutmut-gate.json), so they stand whatever state version the nightly has
-# published since: a newer state changes the baseline, which is always the
-# state's, not those verdicts. Code master changed reaches the PR only through
-# a rebase or merge, and is then in the diff from that commit like any other.
+# published since. The baseline is always the newest state's, and a function
+# the PR's runs never judged carries the verdicts of the state its entry began
+# from, which that baseline may not describe; so `mutmut-gate.py run --pr`
+# lists what it judged in the record ("own"), and `gate --pr` holds only those
+# to the baseline. Code master changed reaches the PR only through a rebase or
+# merge, and is then in the diff from that commit like any other, so judged.
 #
 # restore: when this branch has an entry, its mutants/ replaces the state's
 # copy; mutmut-gate then judges only what changed since the commit that run

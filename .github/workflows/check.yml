@@ -311,10 +311,10 @@ jobs:
         run: |
           bash ci-image/fetch-mutmut-state.sh /mutmut-state
           bash ci-image/pr-mutmut-state.sh restore /mutmut-pr "$PR_BRANCH"
-          python mutmut-gate.py run --max-children "$MUTMUT_WORKERS"
+          python mutmut-gate.py run --pr --max-children "$MUTMUT_WORKERS"
           bash ci-image/pr-mutmut-state.sh save /mutmut-pr "$PR_BRANCH"
           python -m mutmut results --all true > mutmut-results.txt
-          python mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt
+          python mutmut-gate.py gate mutmut-baseline.json --results mutmut-results.txt --pr
 
   # After each merge: the state moves to master. Only the functions the merge
   # changed are re-tested, from the state the volume holds; the result is

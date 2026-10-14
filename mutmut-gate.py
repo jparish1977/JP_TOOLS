@@ -102,7 +102,7 @@ from typing import NoReturn
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import jpexit
-from jpcheck import mutmut_log, pyproject_moves
+from jpcheck import mutmut_log, mutmut_own, pyproject_moves
 from jpcheck.mutmut_paths import is_suite as _is_suite
 from jpcheck.mutmut_paths import module as _module
 from jpcheck.mutmut_paths import readers as _readers
@@ -402,10 +402,17 @@ def _named(names: list[str]) -> list[str]:
     return names if sum(len(n) + 1 for n in names) <= NAMES_MAX_BYTES else []
 
 
-def run(root: Path, full: bool, children: int) -> None:
+def run(root: Path, full: bool, children: int, pr: bool = False) -> None:
     """Prepare, clear the verdicts edited tests reach (clear_edited_reach),
     then mutmut run; then, if any function's test reach moved, clear its
-    verdicts and run again (reset_moved_verdicts)."""
+    verdicts and run again (reset_moved_verdicts).
+
+    PR: the run is a pull request's, on its own kept state. Every function
+    it judges (code new or changed, verdicts cleared, any mutant with no
+    verdict) is added to the record's "own", which `gate --pr` holds to the
+    baseline. The rest carry the verdicts of the state the PR's state began
+    from, for code the PR has not changed; a newer state's baseline does not
+    describe them."""
     if full:
         if (root / "mutants").exists():
             shutil.rmtree(root / "mutants")
@@ -424,11 +431,14 @@ def run(root: Path, full: bool, children: int) -> None:
     def codes() -> dict[str, int | None]:
         return _codes(mutants)
 
+    judged = set(retested) | mutmut_own.functions(k for k, code in codes().items() if code is None)
     _mutmut_run(root, children, mutmut_log.Plan(codes, [], traced, sources,
                                                  lambda: {**retested, **mutmut_log.code_reasons(hashes_before,
                                                                                                  _hashes(mutants))}))
+    judged |= mutmut_log.code_reasons(hashes_before, _hashes(mutants)).keys()
     why: dict[str, str] = {}
     verdicts, functions = reset_moved_verdicts(mutants, before, hashes_before, frozenset(), why, retested.keys())
+    judged |= why.keys()
     if verdicts:
         names = _named(_cleared(mutants))
         how = f"by name, {len(names)} mutant(s)" if names else "unnamed: too many names for one command line"
@@ -439,11 +449,17 @@ def run(root: Path, full: bool, children: int) -> None:
     # Every verdict and every test's reach now stand for what was tested. When
     # that is HEAD, say so: the next run here, or from a copy of this state,
     # judges only what changed since. A tree with changes not committed was
-    # not HEAD, so nothing is recorded and the next run diffs from mutmut's.
+    # not HEAD, so an earlier record goes and the next run diffs from
+    # mutmut's; a PR's "own" with it, so `gate --pr` cannot hold an
+    # out-of-date list of what was judged: it says it could not look.
     if _git("-C", str(root), "status", "--porcelain", "--untracked-files=no"):
+        (mutants / JUDGED).unlink(missing_ok=True)
         mutmut_log.say("the tree holds changes not committed: no judged commit recorded")
         return
-    (mutants / JUDGED).write_bytes(json.dumps({"commit": _git("-C", str(root), "rev-parse", "HEAD")}).encode())
+    record: dict[str, object] = {"commit": _git("-C", str(root), "rev-parse", "HEAD")}
+    if pr:  # what earlier runs judged, from the record this one replaces
+        record["own"] = sorted(mutmut_own.so_far(mutants / JUDGED) | judged)
+    (mutants / JUDGED).write_bytes(json.dumps(record).encode())
 
 
 def _sources(root: Path, mutants: Path) -> str:
@@ -537,8 +553,11 @@ def _load(path: str) -> dict[str, dict[str, int]]:
     return doc
 
 
-def _gate(baseline: dict[str, dict[str, int]], current: dict[str, dict[str, int]]) -> int:
-    """Print each finding and each mutant with no verdict; a finding wins."""
+def _gate(baseline: dict[str, dict[str, int]], current: dict[str, dict[str, int]],
+          own: set[str] | None = None) -> int:
+    """Print each finding and each mutant with no verdict; a finding wins.
+    OWN: a pull request's run, held only for what it judged (mutmut_own.hold)."""
+    current = mutmut_own.hold(baseline, current, own)
     found, unjudged = violations(baseline, current), no_verdicts(baseline, current)
     for line in found:
         print(f"FAIL {line}")
@@ -570,11 +589,16 @@ def _parser() -> _Parser:
     r = sub.add_parser("run", help="prepare, then mutmut run")
     r.add_argument("--full", action="store_true", help="start from nothing, not the kept state")
     r.add_argument("--max-children", type=int, default=os.cpu_count() or 1)
+    r.add_argument("--pr", action="store_true",
+                   help="a pull request's run: add what it judges to the record gate --pr holds")
     for name, what in (("record", "write per-function counts to OUT"),
                        ("gate", "fail on a function that breaks the rule")):
         c = sub.add_parser(name, help=what)
         c.add_argument("file", metavar="OUT" if name == "record" else "BASELINE")
         c.add_argument("--results", metavar="FILE", help="read mutmut results from FILE")
+    g = sub.choices["gate"]
+    g.add_argument("--pr", action="store_true",
+                   help="hold only the functions the pull request's runs judged (run --pr)")
     return p
 
 
@@ -589,15 +613,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "prepare":
             print(f"mutmut-gate: {prepare(root)} ready")
         elif args.cmd == "run":
-            run(root, args.full, args.max_children)
+            run(root, args.full, args.max_children, args.pr)
         elif args.cmd == "record":
             counts = by_function(results_text(root, args.results))
             Path(args.file).write_text(json.dumps(counts, indent=1, sort_keys=True) + "\n",
                                        encoding="utf-8")
             print(f"mutmut-gate: {len(counts)} function(s) recorded to {args.file}")
         else:
-            return _gate(_load(args.file), by_function(results_text(root, args.results)))
-    except GateError as e:
+            own = mutmut_own.required(root / "mutants" / JUDGED) if args.pr else None
+            return _gate(_load(args.file), by_function(results_text(root, args.results)), own)
+    except (GateError, mutmut_own.RecordError) as e:
         print(f"mutmut-gate: {e}", file=sys.stderr)
         return jpexit.NOT_RUN
     return jpexit.OK

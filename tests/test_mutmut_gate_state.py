@@ -184,15 +184,62 @@ def test_a_run_whose_only_change_edits_a_test_runs_once() -> None:
             gate.run(root, False, 2)
         check("run again with nothing changed since it judged: the verdict kept, nothing cleared",
               calls, [({"a.x_f__mutmut_1": 1}, {})])
-        (mutants / gate.JUDGED).unlink()
+        check("CONTROL: the record from the run before is there", (mutants / gate.JUDGED).exists(), True)
         (root / "a.py").write_text("x = 2\n", encoding="utf-8")  # a change not committed
         out = io.StringIO()
         with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), \
                 mock.patch.object(time, "gmtime", return_value=time.gmtime(0)), contextlib.redirect_stdout(out):
             gate.run(root, False, 2)
-        check("a tree with changes not committed: no judged commit recorded, and it says so",
+        check("a tree with changes not committed: the earlier record removed, none written, and it says so",
               ((mutants / gate.JUDGED).exists(), out.getvalue().splitlines()[-1]),
               (False, "mutmut-gate 00:00:00Z: the tree holds changes not committed: no judged commit recorded"))
+
+
+def test_a_pull_requests_run_records_what_it_judged() -> None:
+    """run --pr adds each function it judges to the record's "own": verdicts
+    cleared for an edited test, code changed or new, any mutant with no
+    verdict. A run without it records none, and a dirty tree drops a PR's."""
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        traced = _commit(root, {"tests/test_t.py": "t = 1\n"}, "the suite")
+        _commit(root, {"tests/test_t.py": "t = 2\n"}, "the suite, edited")
+        mutants = gate.prepare(root)
+        kept = {"git_commit": traced, "tests_by_mangled_function_name": {"a.x_f": ["tests/test_t.py::t"]},
+                "duration_by_test": {"tests/test_t.py::t": 1.0}}
+        (mutants / gate.STATS).write_text(json.dumps(kept), encoding="utf-8")
+        _plant(mutants, "a.py", {"x_f": "1", "x_g": "2", "x_p": "3", "x_k": "4"},
+               {"a.x_f__mutmut_1": 0, "a.x_g__mutmut_1": 1, "a.x_p__mutmut_1": None, "a.x_k__mutmut_1": 1})
+
+        def fake(cmd: list[str], cwd: Path, env: dict[str, str], relay: object) -> int:
+            # x_g's code changed and x_n is new: mutmut rebuilds them
+            _plant(mutants, "a.py", {"x_f": "1", "x_g": "9", "x_p": "3", "x_k": "4", "x_n": "5"},
+                   {"a.x_f__mutmut_1": 1, "a.x_g__mutmut_1": 1, "a.x_p__mutmut_1": 1, "a.x_k__mutmut_1": 1,
+                    "a.x_n__mutmut_1": 1})
+            return 0
+
+        with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            gate.run(root, False, 2, True)
+        check("the tests-edited, changed, new and verdictless functions, not the untouched one",
+              json.loads((mutants / gate.JUDGED).read_text(encoding="utf-8")),
+              {"commit": _head(root), "own": ["a.x_f", "a.x_g", "a.x_n", "a.x_p"]})
+        (mutants / gate.JUDGED).write_text(json.dumps({"commit": _head(root), "own": ["a.x_old"]}), encoding="utf-8")
+        with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            gate.run(root, False, 2, True)
+        check("  what its earlier runs judged is kept, a run that judged nothing adding nothing",
+              json.loads((mutants / gate.JUDGED).read_text(encoding="utf-8"))["own"], ["a.x_old"])
+        with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            gate.run(root, False, 2)
+        check("a run that is not a PR's records no \"own\"",
+              json.loads((mutants / gate.JUDGED).read_text(encoding="utf-8")), {"commit": _head(root)})
+        (mutants / gate.JUDGED).write_text(json.dumps({"commit": _head(root), "own": ["a.x_f"]}), encoding="utf-8")
+        (root / "a.py").write_text("x = 2\n", encoding="utf-8")  # a change not committed
+        with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            gate.run(root, False, 2, True)
+        check("a PR's run on a tree with changes not committed: its record removed",
+              (mutants / gate.JUDGED).exists(), False)
 
 
 def test_the_codes_are_every_meta_s() -> None:

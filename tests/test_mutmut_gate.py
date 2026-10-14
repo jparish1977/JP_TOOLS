@@ -31,7 +31,7 @@ from pathlib import Path
 from unittest import mock
 
 from _harness import check, check_true, run
-from jpcheck import mutmut_log
+from jpcheck import mutmut_log, mutmut_own
 from mutmut_gate_support import ENV as _ENV
 from mutmut_gate_support import MUTMUT as _MUTMUT
 from mutmut_gate_support import codes as _codes
@@ -780,6 +780,73 @@ def test_the_command_line() -> None:
         check("missing results: NOT_RUN (2)",
               gate.main(["gate", str(base), "--results", str(tmp / "nope.txt")]), 2)
         check("a usage error: NOT_RUN (2)", gate.main(["gate"]), 2)
+        (tmp / "mutants").mkdir()
+        with mock.patch("pathlib.Path.cwd", return_value=tmp):
+            check("--pr with no record of what the PR judged: NOT_RUN (2)",
+                  gate.main(["gate", str(base), "--results", str(worse), "--pr"]), 2)
+            (tmp / "mutants" / gate.JUDGED).write_text(json.dumps({"commit": "c", "own": ["script.x_main"]}),
+                                                       encoding="utf-8")
+            check("--pr, the worse function not the PR's: OK",
+                  gate.main(["gate", str(base), "--results", str(worse), "--pr"]), 0)
+            (tmp / "mutants" / gate.JUDGED).write_text(json.dumps({"commit": "c", "own": ["pkg.mod.x_alpha"]}),
+                                                       encoding="utf-8")
+            check("--pr, the worse function the PR's: FINDINGS (1)",
+                  gate.main(["gate", str(base), "--results", str(worse), "--pr"]), 1)
+
+
+def _held_said(baseline: dict[str, dict[str, int]], current: dict[str, dict[str, int]],
+               own: set[str] | None) -> tuple[dict[str, dict[str, int]], list[str]]:
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        kept = mutmut_own.hold(baseline, current, own)
+    return kept, out.getvalue().splitlines()
+
+
+def test_a_pull_request_is_held_for_what_it_judged() -> None:
+    """A newer state's baseline describes the state's code: a function the
+    PR's runs never judged carries older verdicts and is not compared."""
+    later = {"m.x_f": {"killed": 3}, "m.x_g": {"killed": 3}}  # master killed m.x_g's survivor
+    kept = {**BASE, "m.x_new": {"survived": 1}}
+    check("held: what the PR judged, and what the baseline lacks",
+          mutmut_own.held(later, kept, {"m.x_f"}), {"m.x_f": {"killed": 3}, "m.x_new": {"survived": 1}})
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = gate._gate(later, BASE, {"m.x_f"})
+    said = ("mutmut-gate: 1 function(s) this pull request judged, held to the baseline; "
+            "1 carry its state's verdicts for code it did not change, not compared")
+    check("a survivor the PR never judged, killed on master since: not compared, and said",
+          (rc, out.getvalue().splitlines()), (0, [said, "mutmut-gate: PASS"]))
+    check("CONTROL: held for every function, it fails", _printed(later, BASE)[0], 1)
+    check("  and so does the PR when it judged it", gate._gate(later, BASE, {"m.x_g"}), 1)
+    with tempfile.TemporaryDirectory() as td:
+        mutants = Path(td)
+        record = mutants / gate.JUDGED
+        check("no record: none, nothing so far", (mutmut_own.read(record), mutmut_own.so_far(record)), (None, set()))
+        for doc, want in (({"commit": "c"}, None), ({"commit": "c", "own": []}, set()),
+                          ({"commit": "c", "own": ["a.x_f"]}, {"a.x_f"})):
+            record.write_text(json.dumps(doc), encoding="utf-8")
+            check(f"a record {doc}: {want}", mutmut_own.read(record), want)
+        check("  and so far, the last one's", mutmut_own.so_far(record), {"a.x_f"})
+        for bad in ("{ not json", json.dumps({"own": "a.x_f"}), json.dumps({"own": [1]})):
+            record.write_text(bad, encoding="utf-8")
+            try:
+                mutmut_own.read(record)
+                said = "nothing raised"
+            except mutmut_own.RecordError as e:
+                said = str(e).split(":")[0]
+            check(f"an unreadable record ({bad[:16]}): a RecordError naming it", said,
+                  f"cannot read {gate.JUDGED}" if bad.startswith("{ ")
+                  else f"{gate.JUDGED}'s \"own\" is not a list of function names")
+        record.write_text(json.dumps({"commit": "c"}), encoding="utf-8")
+        try:
+            mutmut_own.required(record)
+            said = "nothing raised"
+        except mutmut_own.RecordError as e:
+            said = str(e)
+        check("required, a record with no \"own\": a RecordError saying what writes it", said,
+              f"--pr: {gate.JUDGED} holds no record of what this pull request judged "
+              "(run --pr writes it on a tree with nothing uncommitted)")
+    check("hold, not a PR's run: everything, nothing said", _held_said(later, BASE, None), (BASE, []))
 
 
 if __name__ == "__main__":
