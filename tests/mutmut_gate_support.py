@@ -61,11 +61,14 @@ def commit(root: Path, files: dict[str, str], message: str) -> str:
 def run_mutmut(root: Path, full: bool, rc: int = 0,
                env: dict[str, str] | None = None) -> list[dict[str, object]]:
     """Each mutmut invocation gate.run makes, mutmut itself stood in for and
-    exiting RC; git runs for real. ENV replaces os.environ for the run."""
+    exiting RC; git runs for real. ENV replaces os.environ for the run.
+    "cache_is_dir": whether its MYPY_CACHE_DIR was a directory while it ran."""
     asked: list[dict[str, object]] = []
 
     def fake(cmd: list[str], cwd: Path, env: dict[str, str], relay: object) -> int:
-        asked.append({"cmd": cmd, "cwd": cwd, "env": env})
+        cache = env.get("MYPY_CACHE_DIR")
+        asked.append({"cmd": cmd, "cwd": cwd, "env": env,
+                      "cache_is_dir": cache is not None and Path(cache).is_dir()})
         return rc
 
     with mock.patch.object(mutmut_log, "run_relayed", side_effect=fake), \

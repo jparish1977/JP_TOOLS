@@ -709,8 +709,11 @@ def test_run_puts_its_python_first_on_path() -> None:
         check("PATH is mutmut's python's directory, then the PATH it had",
               seen["PATH"], os.pathsep.join([here, git]))
         check("  and the rest of the environment is kept, Python told not to buffer its output, the clean run"
-              " given the children", {k: v for k, v in seen.items() if k != "PATH"},
+              " given the children", {k: v for k, v in seen.items() if k not in ("PATH", "MYPY_CACHE_DIR")},
               {"HOME": td, "KEEP": "1", "PYTHONUNBUFFERED": "1", "MUTMUT_CLEAN_WORKERS": "2"})
+        cache = Path(str(seen["MYPY_CACHE_DIR"]))
+        check("  and one mypy cache for every worker, a directory while mutmut runs", call["cache_is_dir"], True)
+        check_true("  made for the run, removed after it", not cache.exists())
         [bare] = _run_mutmut(root, full=False, env={"HOME": td})
         seen = bare["env"]
         assert isinstance(seen, dict)
