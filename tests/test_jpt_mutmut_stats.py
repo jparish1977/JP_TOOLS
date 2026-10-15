@@ -87,8 +87,9 @@ def test_a_worker_writes_what_it_recorded() -> None:
             mock.patch.object(plugin, "state", lambda: s):
         plugin.pytest_sessionfinish(SimpleNamespace(config=SimpleNamespace(workerinput={"workerid": "gw3"})))
         written = sorted(p.name for p in Path(td).iterdir())
-        record = json.loads((Path(td) / "gw3.json").read_text(encoding="utf-8"))
         check("a worker: one file, named for it", written, ["gw3.json"])
+        named = Path(td) / "gw3.json"
+        record = json.loads(named.read_text(encoding="utf-8")) if named.is_file() else None
         check("  its reach, times and callers, the sets as sorted lists", record,
               {"tests_by_mangled_function_name": {"a.x_f": ["tests/a.py::t", "tests/b.py::t"]},
                "duration_by_test": {"tests/a.py::t": 0.5},
