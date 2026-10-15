@@ -20,7 +20,7 @@ import pathlib
 import sys
 import tempfile
 
-from _harness import ROOT, check, run
+from _harness import CHECKOUT, check, run
 from jpcheck.suppressions import run_suppress_reason
 
 
@@ -151,8 +151,8 @@ def test_unparseable_source_is_left_to_ruff() -> None:
 
 
 def test_check_py_passes_its_own_rule() -> None:
-    issues = (run_suppress_reason(str(ROOT / "check.py"))["issues"]
-              + run_suppress_reason(str(ROOT / "jpcheck"))["issues"])
+    issues = (run_suppress_reason(str(CHECKOUT / "check.py"))["issues"]
+              + run_suppress_reason(str(CHECKOUT / "jpcheck"))["issues"])
     check("check.py and jpcheck/ state a reason on every silent catch",
           [f"{i['file']}:{i['line']}" for i in issues], [])
 

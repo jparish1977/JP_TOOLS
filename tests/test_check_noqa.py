@@ -29,7 +29,7 @@ import sys
 import tempfile
 from typing import Any
 
-from _harness import ROOT, check, run
+from _harness import CHECKOUT, check, run
 from jpcheck.suppressions import run_noqa, run_suppress_reason
 
 
@@ -157,8 +157,8 @@ def test_an_unparseable_file_yields_nothing_from_this_check() -> None:
 
 
 def test_check_py_passes_its_own_rule() -> None:
-    issues = (run_noqa(str(ROOT / "check.py"))["issues"]
-              + run_noqa(str(ROOT / "jpcheck"))["issues"])
+    issues = (run_noqa(str(CHECKOUT / "check.py"))["issues"]
+              + run_noqa(str(CHECKOUT / "jpcheck"))["issues"])
     check("check.py and jpcheck/ state a reason on every marker they carry",
           [f"{i['file']}:{i['line']}:{i['rule']}" for i in issues if i["severity"] == "error"], [])
 

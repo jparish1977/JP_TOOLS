@@ -35,7 +35,7 @@ from _lab_edge_cases import PY_EDGES, SH_EDGES
 from _lab_python_cases import PY_CASES
 from _lab_shell_cases import SH_CASES
 
-from _harness import ROOT, check, check_true, run
+from _harness import CHECKOUT, check, check_true, run
 from jpcheck.lab_use import lab_runs, python_runs, shell_runs
 
 
@@ -118,7 +118,7 @@ FORWARDER_TESTS = {"tests/test_prove_head.py", "tests/test_run_suites.py"}
 
 
 def test_this_repo_runs_no_lab_file() -> None:
-    files = {rel for rel, _ in lab_runs(ROOT)}
+    files = {rel for rel, _ in lab_runs(CHECKOUT)}
     check("only the forwarder tests run a lab path", sorted(files), sorted(FORWARDER_TESTS))
 
 

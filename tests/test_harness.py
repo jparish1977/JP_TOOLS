@@ -14,6 +14,9 @@ WHAT IS CHECKED
     unchanged; without the import (the control) it is made bare and given the
     suite's commit. Every suite imports the harness.
 
+    CHECKOUT, what a whole-repo self-check reads: under mutmut, in its
+    mutants/ copy, the checkout that copy was made from; otherwise ROOT.
+
     python3 tests/test_harness.py
 """
 
@@ -25,7 +28,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from _harness import ROOT, check, check_true, run
+from _harness import CHECKOUT, ROOT, check, check_true, checkout_of, run
 
 PROBE = """\
 import sys
@@ -149,6 +152,19 @@ def test_a_suite_cannot_reach_the_repo_git_points_at() -> None:
         after = _scratch_git_under(real, "")
         check_true("CONTROL, without it: the suite's git acted on the real repo (made bare, given its commit)",
                    after[0].strip() == "true" and after[3] != before[3])
+
+
+def test_a_self_check_reads_the_checkout_not_mutmuts_copy() -> None:
+    base = Path("/repo")
+    mutants = base / "mutants"
+    check("under mutmut, in its copy: the checkout it was made from",
+          checkout_of(mutants, {"MUTANT_UNDER_TEST": "x.y__mutmut_1"}), base)
+    check("mutmut's clean run sets it empty: still the checkout",
+          checkout_of(mutants, {"MUTANT_UNDER_TEST": ""}), base)
+    check("CONTROL, a dir named mutants with mutmut not running: itself",
+          checkout_of(mutants, {}), mutants)
+    check("CONTROL, mutmut running elsewhere: itself", checkout_of(base, {"MUTANT_UNDER_TEST": "stats"}), base)
+    check("CHECKOUT is this run's own answer", CHECKOUT, checkout_of(ROOT, os.environ))
 
 
 def test_every_suite_imports_the_harness() -> None:

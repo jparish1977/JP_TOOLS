@@ -29,11 +29,28 @@ import shutil
 import subprocess
 import sys
 import traceback
+from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# The checkout whose files a whole-repo self-check reads as DATA ("this repo
+# runs no lab file", "check.py passes its own noqa rule"). It is ROOT, except
+# under mutmut: there ROOT is its copy, CHECKOUT/mutants, whose sources hold
+# every mutant of every function beside the original, about 18 times the
+# text. Code still runs from ROOT, so the mutant under test is the one judged;
+# only the files it reads are the checkout's own, the files the check is about.
+def checkout_of(root: Path, environ: Mapping[str, str]) -> Path:
+    """ROOT's parent when ROOT is mutmut's mutants/ copy and mutmut is running
+    (it sets MUTANT_UNDER_TEST in every pass, empty or not), else ROOT."""
+    if "MUTANT_UNDER_TEST" in environ and root.name == "mutants":
+        return root.parent
+    return root
+
+
+CHECKOUT = checkout_of(ROOT, os.environ)
 
 
 def clear_git_repo_env() -> list[str]:
