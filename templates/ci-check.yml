@@ -31,8 +31,13 @@
 #     variable unset, the tests job fails: a test that did not run is not a
 #     pass.
 #   - an executable tests/mutation-setup that installs everything the run
-#     needs (mutmut and pytest at the repo's pins, and whatever its tests
-#     import), as tests/run owns the test run's dependencies.
+#     needs (mutmut, pytest and pytest-xdist at the repo's pins, and whatever
+#     its tests import), as tests/run owns the test run's dependencies.
+#     pytest-xdist because the clean run is spread over workers with -n.
+#     It installs into a venv of the image's own python3, the interpreter the
+#     tests job runs tests/run with, so a test pinned to the interpreter's
+#     output (argparse's wording moves between 3.12 patches) passes or fails
+#     the same in both.
 #   - one nightly run, by hand (workflow_dispatch) the first time: until a
 #     state exists, the mutation job fails as could-not-look rather than pass.
 # MUTMUT_WORKERS (default 8) is how many mutants run at once.
@@ -483,12 +488,15 @@ jobs:
       options: -v ${{ vars.MUTMUT_STATE_VOLUME }}:/mutmut-state:ro
     env:
       MUTMUT_WORKERS: ${{ vars.MUTMUT_WORKERS || '8' }}
-    # The check job's layout: this repo at project/, JP_TOOLS beside it.
+    # The check job's layout: this repo at project/, JP_TOOLS beside it. A step
+    # before the checkout runs in the workspace itself: project/ does not exist
+    # yet, and a step whose directory is missing fails before its first line.
     defaults:
       run:
         working-directory: project
     steps:
       - name: CI does not run as root
+        working-directory: .
         run: |
           echo "user: $(id -un) uid $(id -u)"
           if [ "$(id -u)" = 0 ]; then echo "CI is running as root: use the fleet-ci label" >&2; exit 1; fi
@@ -498,9 +506,12 @@ jobs:
         with:
           fetch-depth: 0
           path: project
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
+      # Not actions/setup-python: see "--- Mutation testing ---" at the top.
+      - name: The tests job's python3, in a venv
+        run: |
+          python3 -m venv "$RUNNER_TEMP/mutmut-venv"
+          echo "$RUNNER_TEMP/mutmut-venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/mutmut-venv/bin/python" --version
       - name: JP_TOOLS_REPOSITORY is set, off GitHub
         if: ${{ !vars.JP_TOOLS_REPOSITORY && github.server_url != 'https://github.com' }}
         run: |
@@ -518,7 +529,7 @@ jobs:
         run: |
           if [ ! -x tests/mutation-setup ]; then
             echo "No executable tests/mutation-setup: add one that installs what a mutmut run needs" >&2
-            echo "(mutmut and pytest at this repo's pins, and whatever its tests import)." >&2
+            echo "(mutmut, pytest and pytest-xdist at this repo's pins, and whatever its tests import)." >&2
             exit 1
           fi
           ./tests/mutation-setup
@@ -549,6 +560,7 @@ jobs:
         working-directory: project
     steps:
       - name: CI does not run as root
+        working-directory: .  # before the checkout: project/ does not exist yet
         run: |
           echo "user: $(id -un) uid $(id -u)"
           if [ "$(id -u)" = 0 ]; then echo "CI is running as root: use the fleet-ci label" >&2; exit 1; fi
@@ -556,9 +568,12 @@ jobs:
         with:
           fetch-depth: 0
           path: project
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
+      # Not actions/setup-python: see "--- Mutation testing ---" at the top.
+      - name: The tests job's python3, in a venv
+        run: |
+          python3 -m venv "$RUNNER_TEMP/mutmut-venv"
+          echo "$RUNNER_TEMP/mutmut-venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/mutmut-venv/bin/python" --version
       - name: JP_TOOLS_REPOSITORY is set, off GitHub
         if: ${{ !vars.JP_TOOLS_REPOSITORY && github.server_url != 'https://github.com' }}
         run: |
@@ -576,7 +591,7 @@ jobs:
         run: |
           if [ ! -x tests/mutation-setup ]; then
             echo "No executable tests/mutation-setup: add one that installs what a mutmut run needs" >&2
-            echo "(mutmut and pytest at this repo's pins, and whatever its tests import)." >&2
+            echo "(mutmut, pytest and pytest-xdist at this repo's pins, and whatever its tests import)." >&2
             exit 1
           fi
           ./tests/mutation-setup
