@@ -170,6 +170,10 @@ def test_the_stats_pass_goes_across_the_workers() -> None:
     check("the plugin, a directory beside this script that mutmut does not mutate",
           (clean.PLUGIN_DIR.name, clean.PLUGIN, (clean.PLUGIN_DIR / f"{clean.PLUGIN}.py").is_file()),
           ("mutmut-plugin", "jpt_mutmut_stats", True))
+    plugin_text = (clean.PLUGIN_DIR / f"{clean.PLUGIN}.py").read_text(encoding="utf-8")
+    check("  the workers write where this reads: one variable, named the same on both sides",
+          (clean.STATS_DIR, f'STATS_DIR = "{clean.STATS_DIR}"' in plugin_text),
+          ("JPT_MUTMUT_STATS_DIR", True))
     got, runner, after = _stats(0, ["tests/test_a.py::t1"], "4", {"gw0": W0, "gw1": W1}, env={"PYTHONPATH": "/kept"})
     check("named tests: across the workers by file, the plugin loaded in each, in mutants/",
           (got, runner.ran), (0, [([*REGULAR, "tests/test_a.py::t1", *PLUGIN_ARGS], "mutants")]))

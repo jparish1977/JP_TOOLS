@@ -1,0 +1,45 @@
+{
+  "about": "mutmut-plugin/jpt_mutmut_stats.py records mutmut's stats pass in each worker, so mutmut cannot mutate it: a mutated recorder would record its own trampolines. Run: mutate-on-target.py TREE mutmut-plugin/jpt_mutmut_stats.py tests/test_jpt_mutmut_stats.py tests/mutants/jpt-recorder-on-jpt-mutmut-stats.json",
+  "mutants": [
+    {
+      "name": "the worker marked as something other than the stats pass",
+      "edits": [["STATS = \"stats\"", "STATS = \"stat\""]],
+      "target": "the worker is marked as mutmut's stats pass, process-locally"
+    },
+    {
+      "name": "a test's time not reset at its start",
+      "edits": [["state().duration_by_test[nodeid] = 0", "state().duration_by_test[nodeid] += 0"]],
+      "target": "its start sets its time to 0"
+    },
+    {
+      "name": "setup's duration counted instead of the call's",
+      "edits": [["if call.when == \"call\":", "if call.when == \"setup\":"]],
+      "target": "only its calls' durations are added"
+    },
+    {
+      "name": "the test filed under mutmut's copy's path",
+      "edits": [["strip_prefix(item._nodeid, prefix=\"mutants/\")", "item._nodeid"]],
+      "target": "its teardown files every function it reached under its id, mutants/ off the front"
+    },
+    {
+      "name": "what one test reached carried into the next",
+      "edits": [["    state()._stats.clear()\n", "    pass\n"]],
+      "target": "  and starts the next test with nothing reached"
+    },
+    {
+      "name": "every worker writing one file name, so they overwrite each other",
+      "edits": [["f\"{worker['workerid']}.json\"", "\"worker.json\""]],
+      "target": "a worker: one file, named for it"
+    },
+    {
+      "name": "the callers left out of what a worker writes",
+      "edits": [["\"function_dependencies\": {k: sorted(v) for k, v in s.function_dependencies.items()},", "\"function_dependencies\": {},"]],
+      "target": "  its reach, times and callers, the sets as sorted lists"
+    },
+    {
+      "name": "the controlling process writing too",
+      "edits": [["    if worker is None:\n        return\n", "    if worker is None:\n        worker = {\"workerid\": \"controller\"}\n"]],
+      "target": "the controlling process writes nothing"
+    }
+  ]
+}

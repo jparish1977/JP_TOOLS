@@ -1,0 +1,20 @@
+{
+  "about": "mutmut-clean.py's stats-pass constants are module level, so mutmut does not mutate them. Run: mutate-on-target.py TREE mutmut-clean.py tests/test_mutmut_clean.py tests/mutants/jpt-stats-pass-on-mutmut-clean.json",
+  "mutants": [
+    {
+      "name": "the plugin's directory misnamed, so no worker can load it",
+      "edits": [["Path(__file__).resolve().parent / \"mutmut-plugin\"", "Path(__file__).resolve().parent / \"mutmut-plugins\""]],
+      "target": "the plugin, a directory beside this script that mutmut does not mutate"
+    },
+    {
+      "name": "the plugin's module misnamed, so pytest -p cannot import it",
+      "edits": [["PLUGIN = \"jpt_mutmut_stats\"", "PLUGIN = \"jpt_mutmut_stat\""]],
+      "target": "the plugin, a directory beside this script that mutmut does not mutate"
+    },
+    {
+      "name": "the parent reads a different variable from the one the workers write to",
+      "edits": [["STATS_DIR = \"JPT_MUTMUT_STATS_DIR\"", "STATS_DIR = \"JPT_STATS_DIR\""]],
+      "target": "  the workers write where this reads: one variable, named the same on both sides"
+    }
+  ]
+}
