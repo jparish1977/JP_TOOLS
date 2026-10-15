@@ -17,6 +17,9 @@
 #   prints goes to LOG (default ~/.cache/jp-tools-ci-repro-<head>.log) and to
 #   stdout. Exit: the job's.
 #
+#   The image runs as fleet-ci, which cannot make /workspace (the runner
+#   mounts it for a job), so /workspace is a tmpfs owned by that user here.
+#
 #   It never runs pr-mutmut-state.sh save, so the PR's kept state is read and
 #   left as it was. The PR volume is mounted read-write only because
 #   fetch-mutmut-state.sh takes its lock file for writing.
@@ -64,6 +67,7 @@ echo "ci-mutation-repro: $head ($branch) into $log"
 sudo -n docker exec -i "$dind" docker run -i --rm --cpus 24 \
     -v mutmut-state:/mutmut-state:ro -v jp-tools-mutmut-pr:/mutmut-pr \
     -v toolcache:/opt/hostedtoolcache:ro -v pip-cache:/pip-cache -e PIP_CACHE_DIR=/pip-cache \
+    --tmpfs "/workspace:rw,exec,size=8g,uid=$(sudo -n docker exec "$dind" docker run --rm --entrypoint id fleet-ci:current -u)" \
     --entrypoint bash fleet-ci:current \
     -c "mkdir -p /tmp/in && tar -C /tmp/in -xf - && bash /tmp/in/job.sh $head $branch" \
     < "$stage/in.tar" 2>&1 | tee "$log"
