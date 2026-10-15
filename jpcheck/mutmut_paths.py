@@ -14,7 +14,7 @@ import fnmatch
 import re
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # The files pytest reads its configuration from, in the order it looks, each
 # with the section that holds it; pyproject.toml's is a TOML table.
@@ -56,7 +56,8 @@ def pytest_options(root: Path) -> dict[str, list[str]]:
             table: object = tomllib.loads(path.read_text(encoding=_UTF8))
             for key in section.split("."):
                 table = table.get(key) if isinstance(table, dict) else None
-            if not isinstance(table, dict) or not table:
+            # pytest takes a pyproject.toml that has the table at all, an empty one too.
+            if not isinstance(table, dict):
                 continue
             return {k: _words(table[k]) for k in _OPTIONS if k in table}
         ini = configparser.ConfigParser(interpolation=None)
@@ -73,7 +74,8 @@ def suite_layout(root: Path, tracked: list[str]) -> SuiteLayout:
     file's own directory) and every directory holding one of TRACKED's suites."""
     options = pytest_options(root)
     patterns = tuple(options.get("python_files", DEFAULT_PYTHON_FILES))
-    dirs = {p.rstrip("/") if (root / p).is_dir() else p.rpartition("/")[0] for p in options.get("testpaths", [])}
+    dirs = {str(PurePosixPath(p)) if (root / p).is_dir() else p.rpartition("/")[0]
+            for p in options.get("testpaths", [])}
     dirs |= {p.rpartition("/")[0] for p in tracked if _named_as_suite(p, patterns)}
     return SuiteLayout(patterns, frozenset(dirs))
 

@@ -80,6 +80,9 @@ def test_the_suite_layout_is_read_from_pytests_configuration() -> None:
     check("a pyproject.toml's testpaths: a directory holding no suite is a test directory still",
           _layout({"pyproject.toml": "[tool.pytest.ini_options]\ntestpaths = [\"checks\"]\n", "checks/helper.py": ""}),
           mp.SuiteLayout(DEFAULT, frozenset({"checks"})))
+    check("a pyproject.toml with an empty pytest table is the configuration, as pytest takes it",
+          _layout({"pyproject.toml": "[tool.pytest.ini_options]\n", "setup.cfg": "[tool:pytest]\npython_files = c_*.py\n"}),
+          mp.SuiteLayout(DEFAULT, frozenset()))
     check("a pyproject.toml whose tool.pytest is not a table is passed over",
           _layout({"pyproject.toml": "[tool]\npytest = \"x\"\n", "setup.cfg": "[tool:pytest]\npython_files = c_*.py\n"}),
           mp.SuiteLayout(("c_*.py",), frozenset()))
