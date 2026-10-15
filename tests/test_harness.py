@@ -167,6 +167,17 @@ def test_a_self_check_reads_the_checkout_not_mutmuts_copy() -> None:
     check("CHECKOUT is this run's own answer", CHECKOUT, checkout_of(ROOT, os.environ))
 
 
+def test_under_mutmut_the_self_checks_read_the_checkout() -> None:
+    """checkout_of knows mutmut's copy by its name, mutants/. If mutmut ever
+    put its copy elsewhere, CHECKOUT would quietly be the copy again and the
+    self-checks slow again; under mutmut this says so instead. Outside
+    mutmut there is nothing to hold: the test above covers that case."""
+    if "MUTANT_UNDER_TEST" not in os.environ:
+        return
+    check("under mutmut, ROOT is mutmut's copy, named mutants", ROOT.name, "mutants")
+    check("  and CHECKOUT the checkout it was made from", CHECKOUT, ROOT.parent)
+
+
 def test_every_suite_imports_the_harness() -> None:
     missing = [p.name for p in sorted((ROOT / "tests").glob("test_*.py"))
                if not any(isinstance(n, ast.ImportFrom) and n.module == "_harness"
