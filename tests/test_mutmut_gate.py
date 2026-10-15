@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 from unittest import mock
 
-from _harness import check, check_true, run
+from _harness import ROOT, check, check_true, run
 from jpcheck import mutmut_log, mutmut_own
 from mutmut_gate_support import ENV as _ENV
 from mutmut_gate_support import MUTMUT as _MUTMUT
@@ -281,8 +281,9 @@ def test_only_the_reach_a_change_can_move_is_traced_again() -> None:
 
 
 def test_a_file_tests_share_has_all_reach_traced() -> None:
-    check("which files the tests share",
-          {p: gate._shared_by_tests(p) for p in (
+    layout = gate.suite_layout(gate.Path(ROOT), ["tests/test_a.py"])
+    check("which files the tests share, under JP_TOOLS' own layout",
+          {p: gate._shared_by_tests(p, layout) for p in (
               "tests/conftest.py", "conftest.py", "tests/_harness.py", "tests/fixtures/a.json",
               "tests/_lab_python_cases.py", "tests/test_x.py", "tests/mutants/spec.json",
               "jpcheck/lab_use.py", "README.md", "pyproject.toml", "pytest.ini", "setup.cfg",
@@ -298,7 +299,8 @@ def test_a_file_tests_share_has_all_reach_traced() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = _repo(Path(td))
         stats = Path(td) / "stats.json"
-        stats.write_text(json.dumps({"git_commit": _head(root), "duration_by_test": {"tests/t.py::t": 1.0}}),
+        _commit(root, {"tests/test_t.py": "def test_t(): pass\n"}, "a suite beside the helper")
+        stats.write_text(json.dumps({"git_commit": _head(root), "duration_by_test": {"tests/test_t.py::test_t": 1.0}}),
                          encoding="utf-8")
         _commit(root, {"tests/_harness.py": "# changed\n"}, "a helper")
         check("a helper changed: all reach traced, naming it", gate.forget_moved_reach(root, stats),
@@ -330,21 +332,24 @@ def test_a_fixture_only_suites_name_moves_only_their_tests() -> None:
                                 "tests/fixtures/shared.txt": "1\n", "tests/fixtures/orphan.txt": "1\n",
                                 "tests/fixtures/sample.py": "x = 1\n"},
                         "traced")
-        check("help.txt: named by test_a.py alone (a file outside tests/ is not a reader)",
-              gate._suites_naming(root, "tests/fixtures/help.txt"), {"tests/test_a.py"})
-        check("shared.txt: named by a helper, so any test", gate._suites_naming(root, "tests/fixtures/shared.txt"),
-              None)
-        check("orphan.txt: named by no suite, so any test", gate._suites_naming(root, "tests/fixtures/orphan.txt"),
-              None)
+        layout = gate.suite_layout(root, gate._git("-C", str(root), "ls-files").splitlines())
+        check("no pytest configuration: pytest's file names, the tracked suites' directory",
+              layout, gate.SuiteLayout(("test_*.py", "*_test.py"), frozenset({"tests"})))
+        check("help.txt: named by test_a.py alone (a file outside the test directories is not a reader)",
+              gate._suites_naming(root, "tests/fixtures/help.txt", layout), {"tests/test_a.py"})
+        check("shared.txt: named by a helper, so any test",
+              gate._suites_naming(root, "tests/fixtures/shared.txt", layout), None)
+        check("orphan.txt: named by no suite, so any test",
+              gate._suites_naming(root, "tests/fixtures/orphan.txt", layout), None)
         check("a Python file, a conftest.py and the configuration: any test, even when a suite names them",
-              [gate._suites_naming(root, p) for p in ("tests/fixtures/sample.py", "tests/_helper.py",
-                                                       "tests/conftest.py", "pyproject.toml", "pytest.ini",
-                                                       "setup.cfg", "tox.ini")],
+              [gate._suites_naming(root, p, layout) for p in ("tests/fixtures/sample.py", "tests/_helper.py",
+                                                               "tests/conftest.py", "pyproject.toml", "pytest.ini",
+                                                               "setup.cfg", "tox.ini")],
               [None] * 7)
-        check("a suite is test_*.py under tests/, at any depth",
-              [gate._is_suite(p) for p in ("tests/test_x.py", "tests/sub/test_x.py", "tests/x_test.py",
-                                           "lib/test_x.py", "tests/test_x.txt", "tests/sub/x.py")],
-              [True, True, False, False, False, False])
+        check("a suite is a file python_files names in a test directory, at any depth",
+              [gate._is_suite(p, layout) for p in ("tests/test_x.py", "tests/sub/test_x.py", "tests/x_test.py",
+                                                   "lib/test_x.py", "tests/test_x.txt", "tests/sub/x.py")],
+              [True, True, True, False, False, False])
         stats = Path(td) / "stats.json"
         durations = dict.fromkeys(("tests/test_a.py::t1", "tests/test_b.py::t2", "tests/test_c.py::t3"), 1.0)
         reach = {"a.x_f": ["tests/test_a.py::t1", "tests/test_b.py::t2", "tests/test_c.py::t3"]}

@@ -37,8 +37,11 @@ for a test it has. So before mutmut runs, the tests in any file changed since
 the state was judged, and the tests recorded as reaching a
 function in any changed source file, are taken out of the stats; mutmut then
 counts them as new and traces just those. A change to a file the tests share
-(a conftest.py; a helper, case table or fixture under tests/) can move a
-test's reach without touching its file. A data file that only suites name,
+(a conftest.py; a helper, case table or fixture beside the suites) can move a
+test's reach without touching its file. Which files are suites, and where they
+live, is read from the checkout's own pytest configuration (python_files,
+testpaths), so a repo whose suites are dtchecks/*_test.py is judged by its
+layout, not this one's. A data file that only suites name,
 by its file name, or a Python helper that only suites import, moves only
 those suites' tests, so just they are traced again; anything else shared (a
 conftest.py, the configuration, a file nothing names or a helper reads), and
@@ -104,6 +107,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import jpexit
 from jpcheck import mutmut_log, mutmut_own, pyproject_moves
+from jpcheck.mutmut_paths import SuiteLayout, files_in_test_dirs, suite_layout
 from jpcheck.mutmut_paths import is_suite as _is_suite
 from jpcheck.mutmut_paths import module as _module
 from jpcheck.mutmut_paths import readers as _readers
@@ -167,12 +171,12 @@ def prepare(root: Path) -> Path:
     return mutants
 
 
-def _suites_naming(root: Path, path: str) -> set[str] | None:
+def _suites_naming(root: Path, path: str, layout: SuiteLayout) -> set[str] | None:
     """The suites whose reach a change to the shared file PATH can move, read
-    from the checkout's test files (jpcheck.mutmut_paths.readers); None when
-    it can move any test's."""
-    tests = [p for p in _git("-C", str(root), "ls-files", "tests").splitlines() if p.endswith(".py")]
-    return _readers(path, {p: (root / p).read_bytes() for p in tests})
+    from the Python files in LAYOUT's test directories
+    (jpcheck.mutmut_paths.readers); None when it can move any test's."""
+    tests = files_in_test_dirs(_git("-C", str(root), "ls-files").splitlines(), layout)
+    return _readers(path, {p: (root / p).read_bytes() for p in tests}, layout)
 
 
 def _since(root: Path, mutants: Path, doc: dict[str, object]) -> object:
@@ -223,8 +227,9 @@ def forget_moved_reach(root: Path, stats: Path) -> str:
     # A shared file that only some suites name moves only their tests; one that
     # any test can read moves them all.
     readers: set[str] = set()
-    for p in sorted(p for p in changed if _shared_by_tests(p)):
-        naming = _suites_naming(root, p)
+    layout = suite_layout(root, _git("-C", str(root), "ls-files").splitlines())
+    for p in sorted(p for p in changed if _shared_by_tests(p, layout)):
+        naming = _suites_naming(root, p, layout)
         if naming is None:
             stats.unlink()
             return f"{p} changed, which tests share: all test reach traced"
@@ -255,10 +260,11 @@ def edited_tests(root: Path, stats: Path) -> frozenset[str] | None:
         changed = _changed(root, _since(root, stats.parent, json.loads(stats.read_bytes())))
     except (FileNotFoundError, ValueError, GateError):  # reason: nothing to diff against, so every test counts as edited
         return None
-    edited = {p for p in changed if _is_suite(p)}
+    layout = suite_layout(root, _git("-C", str(root), "ls-files").splitlines())
+    edited = {p for p in changed if _is_suite(p, layout)}
     for p in changed:
-        if _shared_by_tests(p):
-            naming = _suites_naming(root, p)
+        if _shared_by_tests(p, layout):
+            naming = _suites_naming(root, p, layout)
             if naming is None:
                 return None
             edited |= naming
