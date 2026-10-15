@@ -88,17 +88,19 @@ def test_an_existing_workflow_is_left_alone_and_the_rest_installed() -> None:
         wf.mkdir(parents=True)
         (wf / "check.yml").write_text("mine\n", encoding="utf-8")
         code, out = init(str(r))
-        check("check.yml there: exit 1, it is left alone, the nightly installed",
+        check("check.yml there: exit 1, it is left alone, the nightly installed, then what was left alone",
               (code, out), (1, f"Workflow already exists at {wf / 'check.yml'}: left alone (--force overwrites it)\n"
-                               f"Installed CI workflow at {wf / 'mutmut-nightly.yml'}\n" + activate()))
+                               f"Installed CI workflow at {wf / 'mutmut-nightly.yml'}\n" + activate()
+                               + "Left alone: check.yml\n"))
         check("  check.yml is unchanged", (wf / "check.yml").read_text(encoding="utf-8"), "mine\n")
         check_true("  the nightly is its template",
                    (wf / "mutmut-nightly.yml").read_bytes() == (TEMPLATES / "mutmut-nightly.yml").read_bytes())
         code, out = init(str(r))
-        check("both there: exit 1, nothing installed, no activate lines",
+        check("both there: exit 1, nothing installed, no activate lines, both named as left alone",
               (code, out), (1, (f"Workflow already exists at {wf / 'check.yml'}: left alone (--force overwrites it)\n"
                                 f"Workflow already exists at {wf / 'mutmut-nightly.yml'}: left alone"
-                                " (--force overwrites it)\n")))
+                                " (--force overwrites it)\n"
+                                "Left alone: check.yml, mutmut-nightly.yml\n")))
         code, out = init(str(r), "--force")
         check("--force: exit 0, both replaced",
               (code, out), (0, f"Installed CI workflow at {wf / 'check.yml'}\n"
@@ -135,9 +137,10 @@ def test_a_missing_template() -> None:
 def test_the_help_says_what_it_does() -> None:
     code, out = init("--help")
     check("--help exits 0", code, 0)
+    said = " " + " ".join(out.split()) + " "
     for text in ("Install JP_TOOLS CI workflows into a repo",
                  "Path to git repository (default: cwd)", "Overwrite existing workflow files"):
-        check_true(f"--help says {text!r}", text in " ".join(out.split()))
+        check_true(f"--help says {text!r}, as it is, not inside other words", f" {text} " in said)
 
 
 if __name__ == "__main__":

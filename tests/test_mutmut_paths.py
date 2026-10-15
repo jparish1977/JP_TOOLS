@@ -25,9 +25,11 @@ WHAT IS CHECKED
     python3 tests/test_mutmut_paths.py
 """
 
+import io
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 from _harness import ROOT, check, run
 from jpcheck import mutmut_paths as mp
@@ -75,6 +77,38 @@ def test_the_suite_layout_is_read_from_pytests_configuration() -> None:
           ("r_*.py", "s_*.py"))
     check("every file pytest reads its configuration from counts as configuration", mp.CONFIG_FILES,
           ("pytest.ini", ".pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg"))
+    check("a pyproject.toml's testpaths: a directory holding no suite is a test directory still",
+          _layout({"pyproject.toml": "[tool.pytest.ini_options]\ntestpaths = [\"checks\"]\n", "checks/helper.py": ""}),
+          mp.SuiteLayout(DEFAULT, frozenset({"checks"})))
+    check("a pyproject.toml whose tool.pytest is not a table is passed over",
+          _layout({"pyproject.toml": "[tool]\npytest = \"x\"\n", "setup.cfg": "[tool:pytest]\npython_files = c_*.py\n"}),
+          mp.SuiteLayout(("c_*.py",), frozenset()))
+    check("a tox.ini with no [pytest] is passed over to the setup.cfg after it, not the end of the search",
+          _layout({"tox.ini": "[tox]\nenvlist = py\n", "setup.cfg": "[tool:pytest]\npython_files = c_*.py\n"}),
+          mp.SuiteLayout(("c_*.py",), frozenset()))
+    check("a testpaths directory named with its slash is that directory",
+          _layout({"setup.cfg": "[tool:pytest]\ntestpaths = t/\n", "t/x.py": ""}),
+          mp.SuiteLayout(DEFAULT, frozenset({"t"})))
+    check("a testpaths file deep in the tree: its own directory, not the top one",
+          _layout({"setup.cfg": "[tool:pytest]\npython_files = c_*.py\ntestpaths = a/b/c.py\n", "a/b/c.py": ""}),
+          mp.SuiteLayout(("c_*.py",), frozenset({"a/b"})))
+    check("a suite deep in the tree: its own directory, not the top one",
+          _layout({"x/y/test_a.py": ""}), mp.SuiteLayout(DEFAULT, frozenset({"x/y"})))
+
+
+def test_the_configuration_is_read_as_utf8_whatever_the_locale() -> None:
+    """Patching io.text_encoding, which pathlib and configparser ask for the
+    codec when none is given, makes a read that names none cp1252."""
+    with mock.patch.object(io, "text_encoding", lambda encoding, stacklevel=2: encoding or "cp1252"):
+        with tempfile.TemporaryDirectory() as td:
+            probe = Path(td) / "probe"
+            probe.write_bytes("é".encode())
+            check("control: a read naming no codec now decodes as cp1252", probe.read_text(), "Ã©")
+        check("pyproject.toml: read as UTF-8",
+              _layout({"pyproject.toml": "[tool.pytest.ini_options]\npython_files = [\"é_*.py\"]\n"}).python_files,
+              ("é_*.py",))
+        check("setup.cfg: read as UTF-8",
+              _layout({"setup.cfg": "[tool:pytest]\npython_files = é_*.py\n"}).python_files, ("é_*.py",))
 
 
 def test_a_repos_own_helpers_are_shared() -> None:
@@ -84,9 +118,9 @@ def test_a_repos_own_helpers_are_shared() -> None:
     check("dt's layout",
           {p: mp.shared_by_tests(p, layout) for p in (
               "dtchecks/gate_verdict.py", "dtchecks/data/case.json", "dtchecks/a_test.py",
-              "dtchecks/conftest.py", "tests/_harness.py", "dt/x.py", "dtchecksx/y.py")},
+              "dtchecks/conftest.py", "dt/conftest.py", "tests/_harness.py", "dt/x.py", "dtchecksx/y.py")},
           {"dtchecks/gate_verdict.py": True, "dtchecks/data/case.json": True, "dtchecks/a_test.py": False,
-           "dtchecks/conftest.py": True, "tests/_harness.py": False, "dt/x.py": False,
+           "dtchecks/conftest.py": True, "dt/conftest.py": True, "tests/_harness.py": False, "dt/x.py": False,
            "dtchecksx/y.py": False})
     check("  its test files: the Python files in its test directories",
           mp.files_in_test_dirs(["dtchecks/a_test.py", "dtchecks/helper.py", "dtchecks/data/case.json", "dt/x.py",

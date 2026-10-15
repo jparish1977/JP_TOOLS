@@ -26,6 +26,10 @@ PYTEST_CONFIGS = (("pytest.ini", "pytest"), (".pytest.ini", "pytest"),
 CONFIG_FILES = tuple(name for name, _ in PYTEST_CONFIGS)
 # pytest's own python_files, for a checkout that sets none.
 DEFAULT_PYTHON_FILES = ("test_*.py", "*_test.py")
+# The options read from that configuration.
+_OPTIONS = ("python_files", "testpaths")
+# Every configuration file is read as UTF-8, whatever the locale.
+_UTF8 = "utf-8"
 
 
 @dataclass(frozen=True)
@@ -49,17 +53,17 @@ def pytest_options(root: Path) -> dict[str, list[str]]:
         if not path.is_file():
             continue
         if name == "pyproject.toml":
-            table: object = tomllib.loads(path.read_text(encoding="utf-8"))
+            table: object = tomllib.loads(path.read_text(encoding=_UTF8))
             for key in section.split("."):
-                table = table.get(key, {}) if isinstance(table, dict) else {}
+                table = table.get(key) if isinstance(table, dict) else None
             if not isinstance(table, dict) or not table:
                 continue
-            return {k: _words(table[k]) for k in ("python_files", "testpaths") if k in table}
+            return {k: _words(table[k]) for k in _OPTIONS if k in table}
         ini = configparser.ConfigParser(interpolation=None)
-        ini.read(path, encoding="utf-8")
+        ini.read(path, encoding=_UTF8)
         if not ini.has_section(section):
             continue
-        return {k: ini.get(section, k).split() for k in ("python_files", "testpaths") if ini.has_option(section, k)}
+        return {k: ini.get(section, k).split() for k in _OPTIONS if ini.has_option(section, k)}
     return {}
 
 

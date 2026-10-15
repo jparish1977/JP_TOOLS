@@ -10,8 +10,9 @@ Usage:
     python init-ci.py [path-to-repo]    # defaults to cwd
 
 A workflow already there is left alone without --force, and the others are
-still installed, so re-running it on an adopted repo adds what is new. Exit 1
-when any was left alone or the path is not a repository.
+still installed, so re-running it on an adopted repo adds what is new. Exit 1,
+the last line naming each one left alone, when any was; exit 1 too when the
+path is not a repository.
 """
 
 import argparse
@@ -61,6 +62,7 @@ def main() -> None:
         print("This project now follows JP_TOOLS methodology.")
         print(f"Read it: {METHODOLOGY_DOC}")
     if left:
+        print(f"Left alone: {', '.join(left)}")
         sys.exit(1)
 
 
