@@ -19,8 +19,9 @@ class RecordError(Exception):
 
 def functions(keys: Iterable[str]) -> set[str]:
     """The functions mutant KEYS belong to, module.function as mutmut keys them:
-    the name before the last `__mutmut_`, as by_function splits a result."""
-    return {k.rpartition("__mutmut_")[0] for k in keys}
+    the name before the first `__mutmut_`, as mutmut splits a mutant's name
+    (mangled_name_from_mutant_name)."""
+    return {k.partition("__mutmut_")[0] for k in keys}
 
 
 def read(record: Path) -> set[str] | None:

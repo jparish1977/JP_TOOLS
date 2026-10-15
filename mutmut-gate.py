@@ -351,7 +351,7 @@ def _clear(mutants: Path, functions: Collection[str]) -> tuple[int, int]:
                if code is not None and k.partition("__mutmut_")[0] in functions]
         for k in hit:
             codes[k] = None
-            hit_functions.add(k.partition("__mutmut_")[0])
+        hit_functions |= mutmut_own.functions(hit)
         if hit:
             verdicts += len(hit)
             # As mutmut writes it: indent 4, ASCII (json's default escapes the rest).
@@ -492,13 +492,13 @@ def results_text(root: Path, source: str | None) -> str:
 def by_function(text: str) -> dict[str, dict[str, int]]:
     """{function: {status: count}} from `mutmut results --all true` lines,
     `    module.x_func__mutmut_N: status`. A function's mutants share the name
-    before `__mutmut_`."""
+    before the first `__mutmut_`, as mutmut splits it (mutmut_own.functions)."""
     out: dict[str, dict[str, int]] = {}
     for line in text.splitlines():
         name, sep, status = line.strip().rpartition(": ")
         if not sep or "__mutmut_" not in name:
             continue
-        function = name.rsplit("__mutmut_", 1)[0]
+        function = mutmut_own.functions([name]).pop()
         counts = out.setdefault(function, {})
         counts[status] = counts.get(status, 0) + 1
     if not out:

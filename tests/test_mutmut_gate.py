@@ -848,10 +848,10 @@ def test_a_pull_request_is_held_for_what_it_judged() -> None:
               f"--pr: {gate.JUDGED} holds no record of what this pull request judged "
               "(run --pr writes it on a tree with nothing uncommitted)")
     check("hold, not a PR's run: everything, nothing said", _held_said(later, BASE, None), (BASE, []))
-    check("a mutant's function is the name before its LAST __mutmut_, as by_function splits it",
+    check("a mutant's function is the name before its FIRST __mutmut_, as mutmut splits it, in both",
           (mutmut_own.functions(["m.x_a__mutmut_b__mutmut_3", "m.x_c__mutmut_1"]),
            set(gate.by_function("    m.x_a__mutmut_b__mutmut_3: killed\n"))),
-          ({"m.x_a__mutmut_b", "m.x_c"}, {"m.x_a__mutmut_b"}))
+          ({"m.x_a", "m.x_c"}, {"m.x_a"}))
 
 
 def _help(*argv: str) -> str:

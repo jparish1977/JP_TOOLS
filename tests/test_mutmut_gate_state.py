@@ -118,6 +118,12 @@ def test_edited_tests_reach_is_cleared_before_the_run() -> None:
         _plant(mutants, "a.py", {"x_f": "1"}, {"a.x_f__mutmut_1": 1})
         check("nothing edited: nothing cleared", (gate.clear_edited_reach(mutants, before, frozenset()),
                                                   _codes(meta)), ({}, {"a.x_f__mutmut_1": 1}))
+        _plant(mutants, "a.py", {"x_f__mutmut_b": "1", "x_f": "2"},
+               {"a.x_f__mutmut_b__mutmut_1": 1, "a.x_f__mutmut_1": 1})
+        check("a key holding __mutmut_ twice is the function before the FIRST, as mutmut splits it: "
+              "both cleared with a.x_f, counted as that one function",
+              (gate._clear(mutants, ["a.x_f"]), _codes(meta)),
+              ((2, 1), {"a.x_f__mutmut_b__mutmut_1": None, "a.x_f__mutmut_1": None}))
         check("a class's test is in its file, the part before the first ::",
               gate.clear_edited_reach(mutants, {"a.x_f": frozenset({"tests/test_e.py::K::t"})},
                                       frozenset({"tests/test_e.py"})), {"a.x_f": "tests edited"})
