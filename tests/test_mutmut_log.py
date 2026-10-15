@@ -533,33 +533,44 @@ def test_a_run_s_whole_output_reaches_a_slow_relay() -> None:
           (rc, len(own), own[:1], own[-1:]), (0, 100000, ["own0"], ["own99999"]))
 
 
+class _Slower(_Rec):
+    """A relay that takes 10 ms over each piece: about 0.8 MB/s in 8 KiB pieces."""
+
+    def feed(self, text: str) -> None:
+        time.sleep(0.01)
+        super().feed(text)
+
+
 # A child that prints 100,000 numbered lines and ends, leaving a process of its
-# own writing 8,000 bytes a millisecond to the pipe for 15 s: about 8 MB/s,
-# twice what _Slow takes (8 KiB pieces at 2 ms), so the queue never empties.
+# own writing 8,000 bytes every 5 ms to the pipe for 60 s: about 1.6 MB/s,
+# twice what _Slower takes, so the queue never empties.
 _TORRENT = ("import subprocess, sys\n"
             "out = sys.stdout\n"
             "for i in range(100000):\n    out.write(f'own{i}\\n')\n"
             "out.flush()\n"
             "subprocess.Popen([sys.executable, '-c', 'import sys, time\\n"
-            "end = time.monotonic() + 15\\n"
+            "end = time.monotonic() + 60\\n"
             "while time.monotonic() < end:\\n"
-            "    sys.stdout.write(\"left\\\\n\" * 1600); sys.stdout.flush(); time.sleep(0.001)'])\n")
+            "    sys.stdout.write(\"left\\\\n\" * 1600); sys.stdout.flush(); time.sleep(0.005)'])\n")
 
 
 def test_a_leftover_faster_than_the_relay_does_not_hold_the_run() -> None:
     """A leftover that writes faster than the relay reads never lets the queue
     empty, and the run still ends once its own output is fed and
     LEFTOVER_WAIT has passed: every one of its lines, long before the
-    leftover's 15 s are up."""
-    rec = _Slow()
+    leftover's 60 s are up (the relay before this waited for them, and for
+    the backlog they left, two minutes and more). PIPE_HELD is a default
+    pipe's 64 KiB here, so what is owed past the queue is paid quickly."""
+    rec = _Slower()
     began = time.monotonic()
-    with mock.patch.object(ml, "TICK", 0.2), mock.patch.object(ml, "LEFTOVER_WAIT", 0.5):
+    with mock.patch.object(ml, "TICK", 0.2), mock.patch.object(ml, "LEFTOVER_WAIT", 0.5), \
+            mock.patch.object(ml, "PIPE_HELD", 1 << 16):
         rc = ml.run_relayed([sys.executable, "-c", _TORRENT], Path.cwd(), dict(os.environ), rec)
     took = time.monotonic() - began
     own = [line for line in "".join(t for what, t in rec.events if what == "feed").splitlines()
            if line.startswith("own")]
-    check("every one of the run's lines, the last included, and back within 8 s of the leftover's 15",
-          (rc, len(own), own[-1:], took < 8), (0, 100000, ["own99999"], True))
+    check("every one of the run's lines, the last included, and back within 40 s of the leftover's 60",
+          (rc, len(own), own[-1:], took < 40), (0, 100000, ["own99999"], True))
 
 
 def test_drain_passes_each_piece_then_the_end() -> None:
