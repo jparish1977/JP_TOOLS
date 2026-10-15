@@ -4,12 +4,17 @@
     {
       "name": "the worker marked as something other than the stats pass",
       "edits": [["STATS = \"stats\"", "STATS = \"stat\""]],
-      "target": "the worker is marked as mutmut's stats pass, process-locally"
+      "target": "a stats pass's worker is marked as mutmut's stats pass, in mutmut's way"
     },
     {
-      "name": "the worker marked after a conftest has looked for the mark",
-      "edits": [["@pytest.hookimpl(tryfirst=True)\n", "@pytest.hookimpl\n"]],
-      "target": "  first, before a conftest looks for the mark"
+      "name": "every process that imports the plugin marked, not only a stats worker",
+      "edits": [["    if not environ.get(STATS_DIR):\n        return False\n", ""]],
+      "target": "anywhere else nothing is marked"
+    },
+    {
+      "name": "the worker marked only later, after a conftest has looked for the mark",
+      "edits": [["\n\nmark(os.environ)\n", "\n"]],
+      "target": "  and it is marked as the plugin is imported, before any conftest loads"
     },
     {
       "name": "a test's time not reset at its start",

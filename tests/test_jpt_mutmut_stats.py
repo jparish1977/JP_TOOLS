@@ -5,8 +5,10 @@ mutmut-plugin/jpt_mutmut_stats.py: mutmut's stats pass recorded in a
 pytest-xdist worker.
 
 WHAT IS CHECKED
-    At configure, first of any plugin or conftest, it marks the process as
-    mutmut's stats pass in mutmut's own process-local way. Each test's start sets its time to 0, its call adds its
+    Imported in a stats pass's worker (STATS_DIR in its environment), it
+    marks the process as mutmut's stats pass in mutmut's own way, before any
+    conftest loads; imported anywhere else it marks nothing. Each test's
+    start sets its time to 0, its call adds its
     duration (setup and teardown do not), and its teardown files every
     function the test reached under the test's id (mutants/ taken off the
     front) and clears them, as mutmut's own recorder does. At the end a
@@ -41,13 +43,20 @@ def _load() -> ModuleType:
 plugin = _load()
 
 
-def test_configure_marks_the_stats_pass_in_the_process() -> None:
+def test_a_stats_worker_is_marked_and_nothing_else_is() -> None:
     marked: list[str] = []
     with mock.patch.object(plugin, "set_mutant_under_test", marked.append):
-        plugin.pytest_configure(object())
-    check("the worker is marked as mutmut's stats pass, process-locally", (marked, plugin.STATS), (["stats"], "stats"))
-    check("  first, before a conftest looks for the mark",
-          getattr(plugin.pytest_configure, "pytest_impl", {}).get("tryfirst"), True)
+        got = plugin.mark({plugin.STATS_DIR: "/somewhere"})
+        check("a stats pass's worker is marked as mutmut's stats pass, in mutmut's way",
+              (got, marked, plugin.STATS), (True, ["stats"], "stats"))
+        marked.clear()
+        check("anywhere else nothing is marked",
+              [(plugin.mark(env), list(marked)) for env in ({}, {plugin.STATS_DIR: ""})], [(False, []), (False, [])])
+    marked.clear()
+    with mock.patch("mutmut.mutation.trampoline.set_mutant_under_test", marked.append), \
+            mock.patch.dict(os.environ, {plugin.STATS_DIR: "/somewhere"}):
+        _load()
+    check("  and it is marked as the plugin is imported, before any conftest loads", marked, ["stats"])
 
 
 def test_a_test_s_reach_and_time_are_recorded() -> None:

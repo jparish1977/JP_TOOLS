@@ -12,10 +12,10 @@ loaded by name (pytest -p) from this directory on the workers' PYTHONPATH.
 
 import json
 import os
+from collections.abc import MutableMapping
 from pathlib import Path
 from typing import Any
 
-import pytest
 from mutmut.mutation.trampoline import set_mutant_under_test
 from mutmut.state import state
 from mutmut.utils.format_utils import strip_prefix
@@ -24,19 +24,26 @@ STATS_DIR = "JPT_MUTMUT_STATS_DIR"
 STATS = "stats"
 
 
-@pytest.hookimpl(tryfirst=True)
-def pytest_configure(config: Any) -> None:
-    """mutmut marks its stats pass in its own process as well as in the
-    environment, so a test that clears os.environ still records; a worker
-    is a process of its own and is marked the same way.
+def mark(environ: MutableMapping[str, str]) -> bool:
+    """Mark this process as mutmut's stats pass, in mutmut's own way (in the
+    environment and process-locally, so a test that clears os.environ still
+    records), when ENVIRON names the directory mutmut-clean.py gave the
+    stats pass's workers; whether it did. Anywhere else, importing this plugin
+    marks nothing.
 
-    First, before any conftest configures: the worker is a child of mutmut's
-    process, and a conftest that starts children without the marker (as
-    JP_TOOLS' does, so a script a test runs does not try to record) started
-    this one without it too. Marked first, the worker is what mutmut's own
-    process is when that conftest looks, and its children are started
-    without the marker as they should be."""
+    At import, not at configure: pytest imports a -p plugin before any
+    conftest, and a conftest, or a module it imports, may read the mark as it
+    loads (JP_TOOLS' conftest decides then whether to start children without
+    it; its _harness decides what CHECKOUT is). The worker is a child of
+    mutmut's process, and a conftest that starts children without the mark
+    started this one without it too."""
+    if not environ.get(STATS_DIR):
+        return False
     set_mutant_under_test(STATS)
+    return True
+
+
+mark(os.environ)
 
 
 def pytest_runtest_logstart(nodeid: str, location: Any) -> None:
