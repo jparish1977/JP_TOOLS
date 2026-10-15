@@ -323,8 +323,8 @@ def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed, ended: Callable
     the relay was, CMD's last lines, the ones a reader of the log looks for,
     are fed."""
     decoder = utf_8.IncrementalDecoder("replace")
-    ended_at: float | None = None
-    owed = 0
+    end: tuple[float, int] | None = None  # when CMD's end was seen, and the bytes owed it then
+    fed = 0  # bytes fed since
     while True:
         try:
             chunk = chunks.get(timeout=TICK)
@@ -337,12 +337,12 @@ def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed, ended: Callable
             break
         relay.feed(decoder.decode(chunk))
         relay.tick()
-        if ended_at is not None:
-            owed -= len(chunk)
+        if end is not None:
+            fed += len(chunk)
         elif ended():
-            ended_at, owed = time.monotonic(), _queued(chunks) + PIPE_HELD
-        if ended_at is not None and (chunks.empty() or owed <= 0) \
-                and time.monotonic() - ended_at >= LEFTOVER_WAIT:
+            end = (time.monotonic(), _queued(chunks) + PIPE_HELD)
+        if end is not None and (chunks.empty() or fed >= end[1]) \
+                and time.monotonic() - end[0] >= LEFTOVER_WAIT:
             break
     relay.feed(decoder.decode(b"", final=True))
     relay.close()
