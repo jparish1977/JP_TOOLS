@@ -13,7 +13,7 @@
     },
     {
       "name": "a current commit this checkout does not have counts as newer, so a rewritten history freezes the state",
-      "edits": [["git merge-base --is-ancestor \"$ours\" \"$theirs\" 2>/dev/null", "! git merge-base --is-ancestor \"$theirs\" \"$ours\" 2>/dev/null"]],
+      "edits": [["git merge-base --is-ancestor \"$ours\" \"$theirs\" 2>/dev/null", "{ [ -n \"$theirs\" ] && ! git cat-file -e \"${theirs}^{commit}\" 2>/dev/null; } || git merge-base --is-ancestor \"$ours\" \"$theirs\" 2>/dev/null"]],
       "target": "current judged at a commit this checkout does not have (a rewritten history): published, even an ancestor's state, so the state is never stuck"
     },
     {
