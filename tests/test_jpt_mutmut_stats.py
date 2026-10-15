@@ -5,8 +5,8 @@ mutmut-plugin/jpt_mutmut_stats.py: mutmut's stats pass recorded in a
 pytest-xdist worker.
 
 WHAT IS CHECKED
-    At configure it marks the process as mutmut's stats pass in mutmut's own
-    process-local way. Each test's start sets its time to 0, its call adds its
+    At configure, first of any plugin or conftest, it marks the process as
+    mutmut's stats pass in mutmut's own process-local way. Each test's start sets its time to 0, its call adds its
     duration (setup and teardown do not), and its teardown files every
     function the test reached under the test's id (mutants/ taken off the
     front) and clears them, as mutmut's own recorder does. At the end a
@@ -46,6 +46,8 @@ def test_configure_marks_the_stats_pass_in_the_process() -> None:
     with mock.patch.object(plugin, "set_mutant_under_test", marked.append):
         plugin.pytest_configure(object())
     check("the worker is marked as mutmut's stats pass, process-locally", (marked, plugin.STATS), (["stats"], "stats"))
+    check("  first, before a conftest looks for the mark",
+          getattr(plugin.pytest_configure, "pytest_impl", {}).get("tryfirst"), True)
 
 
 def test_a_test_s_reach_and_time_are_recorded() -> None:

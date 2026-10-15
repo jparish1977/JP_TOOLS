@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import pytest
 from mutmut.mutation.trampoline import set_mutant_under_test
 from mutmut.state import state
 from mutmut.utils.format_utils import strip_prefix
@@ -23,10 +24,18 @@ STATS_DIR = "JPT_MUTMUT_STATS_DIR"
 STATS = "stats"
 
 
+@pytest.hookimpl(tryfirst=True)
 def pytest_configure(config: Any) -> None:
     """mutmut marks its stats pass in its own process as well as in the
     environment, so a test that clears os.environ still records; a worker
-    is a process of its own and is marked the same way."""
+    is a process of its own and is marked the same way.
+
+    First, before any conftest configures: the worker is a child of mutmut's
+    process, and a conftest that starts children without the marker (as
+    JP_TOOLS' does, so a script a test runs does not try to record) started
+    this one without it too. Marked first, the worker is what mutmut's own
+    process is when that conftest looks, and its children are started
+    without the marker as they should be."""
     set_mutant_under_test(STATS)
 
 

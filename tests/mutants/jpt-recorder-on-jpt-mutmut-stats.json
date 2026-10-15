@@ -7,6 +7,11 @@
       "target": "the worker is marked as mutmut's stats pass, process-locally"
     },
     {
+      "name": "the worker marked after a conftest has looked for the mark",
+      "edits": [["@pytest.hookimpl(tryfirst=True)\n", "@pytest.hookimpl\n"]],
+      "target": "  first, before a conftest looks for the mark"
+    },
+    {
       "name": "a test's time not reset at its start",
       "edits": [["state().duration_by_test[nodeid] = 0", "state().duration_by_test[nodeid] += 0"]],
       "target": "its start sets its time to 0"

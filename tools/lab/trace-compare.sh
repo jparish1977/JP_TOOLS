@@ -53,6 +53,11 @@ for mode in serial parallel; do
   fi
   rc=$?
   end=$(date +%s)
+  # A pattern naming no mutant ends mutmut with this assertion once the stats
+  # pass is done and saved: for this run, that is the pass succeeding.
+  if [ "$rc" = 1 ] && tail -n 3 "$out/$mode.log" | grep -q "^Filter: ('nomatch_zz.\*',)$"; then
+    rc=0
+  fi
   echo "$mode: rc=$rc, $((end - start)) s (mutant generation included)"
   echo "$rc $((end - start))" > "$out/$mode.rc"
   cp mutants/mutmut-stats.json "$out/$mode-stats.json" 2>/dev/null || echo "$mode: no mutmut-stats.json"
