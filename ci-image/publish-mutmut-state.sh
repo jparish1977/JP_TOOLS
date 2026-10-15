@@ -29,10 +29,12 @@
 #
 # Two publishes from close pushes can finish out of order. So once it holds
 # the lock, a publish compares the commit its state was judged at with the
-# current state's (each mutants/mutmut-gate.json): when current's is newer,
-# a descendant of this one or a commit this checkout does not have (pushed
-# after it), nothing is published and current stays. With either commit
-# unknown, or the same commit, it publishes.
+# current state's (each mutants/mutmut-gate.json): when current's is a known
+# descendant of this one, nothing is published and current stays. Otherwise
+# it publishes: with either commit unknown, the same commit, or a current
+# commit this checkout does not have, which after a history rewrite may never
+# come back. An out-of-order publish costs the next run work; a refusal that
+# never ends would freeze the state.
 #
 # Exit: 0 published, or a newer state is current and nothing is published
 # (it says which); 2 nothing to publish, or STATE_DIR not writable.
@@ -62,13 +64,16 @@ try:
 except (OSError, ValueError, AttributeError):
     print("")' "$1"
 }
-# True when current's commit (THEIRS) is newer than this state's (OURS): a
-# descendant of it, or one this checkout does not have. False when either is
-# unknown or they are the same.
+# True only when current's commit (THEIRS) is a known descendant of this
+# state's (OURS). False when either is unknown, when they are the same, and
+# when this checkout does not have THEIRS: after a history rewrite current's
+# commit is gone from every ref, and refusing then would leave the state
+# stuck there for good with every job green, while publishing an older state
+# costs only the next run's extra work.
 current_is_newer() {
   local ours=$1 theirs=$2
   [ -n "$ours" ] && [ -n "$theirs" ] && [ "$ours" != "$theirs" ] || return 1
-  ! git cat-file -e "${theirs}^{commit}" 2>/dev/null || git merge-base --is-ancestor "$ours" "$theirs"
+  git merge-base --is-ancestor "$ours" "$theirs" 2>/dev/null
 }
 # Ends the run, publishing nothing, when current's state is newer than this one.
 stop_if_current_is_newer() {

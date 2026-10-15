@@ -17,10 +17,10 @@ keep, with jobs running side by side:
       moved aside and replaced.
     - Nothing to publish, or a STATE that cannot be written: exit 2, the
       state untouched. fetch copies current's version whole, or exits 2.
-    - A state judged at an older commit than current's (an ancestor, or
-      current's commit not in the checkout) publishes nothing, exit 0, saying
-      so; a newer one, the same commit, or one whose commit is unknown
-      publishes.
+    - A state judged at an ancestor of current's commit publishes nothing,
+      exit 0, saying so; a newer one, the same commit, one whose commit is
+      unknown, and one whose checkout lacks current's commit (a rewritten
+      history) publish, so the state can never be stuck.
 
     python3 tests/test_publish_mutmut_state.py
 """
@@ -231,8 +231,11 @@ def test_an_older_state_never_replaces_a_newer_one() -> None:
         (state / "current" / "mutants" / "mutmut-gate.json").chmod(0o644)
         (state / "current" / "mutants" / "mutmut-gate.json").write_text(f'{{"commit": "{unknown}"}}',
                                                                        encoding="utf-8")
-        check("current judged at a commit this checkout does not have (pushed after it): nothing published",
-              (_publish(_judged(co, b, "B2"), state).returncode, len(_versions(state))), (0, 1))
+        p = _publish(_judged(co, a, "A after a rewrite"), state)
+        check("current judged at a commit this checkout does not have (a rewritten history): published, even"
+              " an ancestor's state, so the state is never stuck",
+              (p.returncode, (state / "current" / "baseline.json").read_text(encoding="utf-8")),
+              (0, "A after a rewrite"))
     with tempfile.TemporaryDirectory() as td:
         co = Path(td) / "co"
         a, b = _repo_with_two_commits(co)

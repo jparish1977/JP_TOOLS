@@ -12,9 +12,9 @@
       "target": "then one judged at A, its ancestor: exit 0, nothing published, current still B"
     },
     {
-      "name": "a current commit this checkout does not have is taken as older",
-      "edits": [["! git cat-file -e", "git cat-file -e"]],
-      "target": "current judged at a commit this checkout does not have (pushed after it): nothing published"
+      "name": "a current commit this checkout does not have counts as newer, so a rewritten history freezes the state",
+      "edits": [["git merge-base --is-ancestor \"$ours\" \"$theirs\" 2>/dev/null", "! git merge-base --is-ancestor \"$theirs\" \"$ours\" 2>/dev/null"]],
+      "target": "current judged at a commit this checkout does not have (a rewritten history): published, even an ancestor's state, so the state is never stuck"
     },
     {
       "name": "the same commit counts as newer",
