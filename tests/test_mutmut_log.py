@@ -84,7 +84,7 @@ def test_say_stamps_and_flushes() -> None:
     check("the gate's line, the UTC time first, flushed once", (out.getvalue(), out.flushes),
           ("mutmut-gate 01:02:03Z: hello\n", 1))
     check("progress each tenth and each minute, mutmut's output waited for a second at a time",
-          (ml.STEPS, ml.EVERY, ml.TICK, ml.STOP_WAIT), (10, 60.0, 1.0, 30.0))
+          (ml.STEPS, ml.EVERY, ml.TICK, ml.STOP_WAIT, ml.LEFTOVER_WAIT), (10, 60.0, 1.0, 30.0, 30.0))
 
 
 class _HalfWritten(_StubPlan):
@@ -415,26 +415,86 @@ class _Rec:
         self.events.append(("close", ""))
 
 
-def test_the_relay_ends_one_tick_after_the_run() -> None:
-    """After the run has ended, pieces still coming are relayed until a TICK
-    has passed since the end, and not one past it: a clock the test sets, the
-    end seen at 10.0, then 10.5 and 11.0."""
-    chunks: queue.Queue[bytes] = queue.Queue()
+class _Arriving(queue.Queue[bytes]):
+    """Pieces that arrive one at a time as they are asked for, none of them
+    waiting in the queue: output written after the run ended."""
+
+    def __init__(self, pieces: list[bytes]) -> None:
+        super().__init__()
+        self.pieces = pieces
+
+    def get(self, block: bool = True, timeout: float | None = None) -> bytes:
+        if self.pieces:
+            return self.pieces.pop(0)
+        raise queue.Empty
+
+
+def test_a_leftover_that_never_stops_is_read_for_leftover_wait() -> None:
+    """Pieces arriving after the run has ended, none of them waiting in the
+    queue, are relayed until LEFTOVER_WAIT has passed since the end, and not
+    one past it: a clock the test sets, at 10.0 when the end is seen, then
+    10.5 and 11.0. Then the held byte is flushed and the relay closed."""
     # c ends with half of a two-byte character: what the decoder holds at the
     # end is flushed, as the replacement character, before the relay closes.
-    for piece in (b"a", b"b", b"c\xc3", b"d"):
-        chunks.put(piece)
+    chunks = _Arriving([b"a", b"b", b"c\xc3", b"d"])
     rec = _Rec()
     clock = iter([10.0, 10.0, 10.5, 11.0, 11.5, 12.0, 12.5])
     # mutmut_log reads time.monotonic off the time module at each call;
     # queue and threading bound their own copy at import, so their waits keep
     # the real clock.
-    with mock.patch.object(ml, "TICK", 1.0), mock.patch.object(time, "monotonic", lambda: next(clock)):
+    with mock.patch.object(ml, "LEFTOVER_WAIT", 1.0), mock.patch.object(time, "monotonic", lambda: next(clock)):
         ml._relay_until_done(chunks, rec, lambda: True)
-    check("relayed until exactly a TICK after the end: a, b, c, not d; the held byte flushed",
+    check("relayed until exactly LEFTOVER_WAIT after the end: a, b, c, not d; the held byte flushed",
           "".join(text for what, text in rec.events if what == "feed"), "abc�")
     check("  and the relay closed, last", rec.events[-1], ("close", ""))
-    check("  and d left unread", chunks.get_nowait(), b"d")
+    check("  and d left unread", chunks.pieces, [b"d"])
+
+
+def test_what_the_run_wrote_is_all_fed_however_long_it_takes() -> None:
+    """What is still queued after the run has ended is all fed, though the
+    clock has moved far past LEFTOVER_WAIT meanwhile: the wait cuts only a
+    queue found empty."""
+    chunks: queue.Queue[bytes] = queue.Queue()
+    for piece in (b"a", b"b", b"c", b"d"):
+        chunks.put(piece)
+    rec = _Rec()
+    clock = iter([0.0, 100.0, 200.0, 300.0])
+    with mock.patch.object(ml, "LEFTOVER_WAIT", 0.05), mock.patch.object(time, "monotonic", lambda: next(clock)):
+        ml._relay_until_done(chunks, rec, lambda: True)
+    check("every piece queued after the end, fed", "".join(text for what, text in rec.events if what == "feed"),
+          "abcd")
+    check("  and the relay closed, last", rec.events[-1], ("close", ""))
+
+
+class _Slow(_Rec):
+    """A relay that takes 2 ms over each piece, as one doing real work."""
+
+    def feed(self, text: str) -> None:
+        time.sleep(0.002)
+        super().feed(text)
+
+
+# A child that prints 100,000 numbered lines and ends, leaving a process of
+# its own writing to the pipe every 0.05 s for 3 s.
+_FLOOD = ("import subprocess, sys\n"
+          "subprocess.Popen([sys.executable, '-c', 'import time\\n"
+          "for _ in range(60):\\n    print(\"left\", flush=True); time.sleep(0.05)'])\n"
+          "out = sys.stdout\n"
+          "for i in range(100000):\n    out.write(f'own{i}\\n')\n"
+          "out.flush()\n")
+
+
+def test_a_run_s_whole_output_reaches_a_slow_relay() -> None:
+    """A run that writes faster than the relay reads, then ends with a
+    leftover still writing: every line of its own reaches the relay, the
+    last one included."""
+    rec = _Slow()
+    with mock.patch.object(ml, "TICK", 0.2), mock.patch.object(ml, "LEFTOVER_WAIT", 0.5):
+        rc = ml.run_relayed([sys.executable, "-c", _FLOOD], Path.cwd(), dict(os.environ), rec)
+    own = [line for line in "".join(t for what, t in rec.events if what == "feed").splitlines()
+           if line.startswith("own")]
+    check("every one of the run's 100,000 lines, in order, the last included",
+          (rc, len(own), own[:1], own[-1:]), (0, 100000, ["own0"], ["own99999"]))
 
 
 def test_drain_passes_each_piece_then_the_end() -> None:
@@ -525,11 +585,11 @@ _CHATTY = ("import subprocess, sys\n"
 
 
 def test_a_child_that_leaves_a_writer_behind_does_not_hold_the_run() -> None:
-    """What it left behind is never quiet for a TICK, so the run ends a TICK
-    after the child does, whatever still comes."""
+    """What it left behind is never quiet for a TICK, so the run ends
+    LEFTOVER_WAIT after the child does, whatever still comes."""
     rec = _Rec()
     began = time.monotonic()
-    with mock.patch.object(ml, "TICK", 0.2):
+    with mock.patch.object(ml, "TICK", 0.2), mock.patch.object(ml, "LEFTOVER_WAIT", 0.5):
         rc = ml.run_relayed([sys.executable, "-c", _CHATTY], Path.cwd(), dict(os.environ), rec)
     fed = "".join(text for what, text in rec.events if what == "feed")
     check("the child's exit and output, long before what it left behind stops",

@@ -49,6 +49,9 @@ STEPS = 10
 EVERY = 60.0
 # Seconds to wait for mutmut's output before checking whether a line is due.
 TICK = 1.0
+# Seconds a process mutmut left behind may go on writing to the pipe after
+# mutmut has ended, before the relay stops reading it (_relay_until_done).
+LEFTOVER_WAIT = 30.0
 # Seconds mutmut has to stop its workers after an interrupt before it is killed.
 STOP_WAIT = 30.0
 # Reads of the codes before a half-written .meta is given up on, and the
@@ -296,9 +299,16 @@ def run_relayed(cmd: list[str], cwd: Path, env: dict[str, str], relay: _Fed) -> 
 
 def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed, ended: Callable[[], bool]) -> None:
     """Feed RELAY each piece until the pipe's end, or until CMD has ENDED and
-    TICK seconds pass with nothing, or TICK seconds pass since it ended: what
-    still holds the pipe then is a process CMD left behind, not CMD, and one
-    that keeps writing must not hold the run until it stops."""
+    TICK seconds pass with nothing, or LEFTOVER_WAIT seconds pass since it
+    ended with nothing left queued: what still holds the pipe then is a
+    process CMD left behind, and one that never stops writing must not hold
+    the run until it does.
+
+    CMD's own output is never cut: _drain takes the pipe into the queue as
+    fast as it is written, so long before LEFTOVER_WAIT all of CMD's is
+    queued, and a queue found empty has fed it, however much slower than CMD
+    the relay was. CMD's last lines are the ones a reader of the log looks
+    for."""
     decoder = utf_8.IncrementalDecoder("replace")
     ended_at: float | None = None
     while True:
@@ -315,7 +325,7 @@ def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed, ended: Callable
         relay.tick()
         if ended_at is None and ended():
             ended_at = time.monotonic()
-        if ended_at is not None and time.monotonic() - ended_at >= TICK:
+        if ended_at is not None and chunks.empty() and time.monotonic() - ended_at >= LEFTOVER_WAIT:
             break
     relay.feed(decoder.decode(b"", final=True))
     relay.close()
