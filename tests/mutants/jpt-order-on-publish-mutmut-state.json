@@ -18,13 +18,8 @@
     },
     {
       "name": "the same commit counts as newer",
-      "edits": [["[ \"$ours\" != \"$theirs\" ]", "true"]],
+      "edits": [["[ \"$ours\" != \"$theirs\" ] || return 1", "true"]],
       "target": "  the same commit again: published"
-    },
-    {
-      "name": "no current state counts as a newer one, so the first publish refuses itself",
-      "edits": [["[ -n \"$ours\" ] && [ -n \"$theirs\" ]", "[ -n \"$ours\" ]"]],
-      "target": "a state judged at B, the newer: published"
     }
   ]
 }

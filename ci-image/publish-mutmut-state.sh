@@ -72,7 +72,9 @@ except (OSError, ValueError, AttributeError):
 # costs only the next run's extra work.
 current_is_newer() {
   local ours=$1 theirs=$2
-  [ -n "$ours" ] && [ -n "$theirs" ] && [ "$ours" != "$theirs" ] || return 1
+  # The same commit is not newer, though git counts it its own ancestor. An
+  # empty one is no commit to git, so merge-base fails and it is not newer.
+  [ "$ours" != "$theirs" ] || return 1
   git merge-base --is-ancestor "$ours" "$theirs" 2>/dev/null
 }
 # Ends the run, publishing nothing, when current's state is newer than this one.
