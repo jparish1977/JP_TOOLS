@@ -512,10 +512,13 @@ class _Slow(_Rec):
 # its own writing to the pipe every 0.05 s for 3 s. The leftover starts only
 # once the child's lines are all written: two writers on one pipe interleave
 # any write larger than PIPE_BUF, splitting a line, which no relay can undo.
+# The lines go in one write, so the pieces the relay is fed are as large as
+# the pipe gives, whatever buffering the child inherits: with
+# PYTHONUNBUFFERED=1 (CI's mutation job sets it) a write per line made them
+# one line each, and a relay paying 10 ms a piece took minutes.
+_OWN_LINES = "sys.stdout.write(''.join(f'own{i}\\n' for i in range(100000)))\nsys.stdout.flush()\n"
 _FLOOD = ("import subprocess, sys\n"
-          "out = sys.stdout\n"
-          "for i in range(100000):\n    out.write(f'own{i}\\n')\n"
-          "out.flush()\n"
+          + _OWN_LINES +
           "subprocess.Popen([sys.executable, '-c', 'import time\\n"
           "for _ in range(60):\\n    print(\"left\", flush=True); time.sleep(0.05)'])\n")
 
@@ -545,9 +548,7 @@ class _Slower(_Rec):
 # own writing 8,000 bytes every 5 ms to the pipe for 60 s: about 1.6 MB/s,
 # twice what _Slower takes, so the queue never empties.
 _TORRENT = ("import subprocess, sys\n"
-            "out = sys.stdout\n"
-            "for i in range(100000):\n    out.write(f'own{i}\\n')\n"
-            "out.flush()\n"
+            + _OWN_LINES +
             "subprocess.Popen([sys.executable, '-c', 'import sys, time\\n"
             "end = time.monotonic() + 60\\n"
             "while time.monotonic() < end:\\n"
