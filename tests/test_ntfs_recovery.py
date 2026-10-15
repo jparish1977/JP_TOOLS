@@ -50,7 +50,7 @@ if fail == "error":
     print("ntfsls: Failed to read index", file=sys.stderr)
     sys.exit(1)
 if fail == "hang":
-    time.sleep(5)
+    time.sleep(60)
 for size, name, is_dir in json.loads(os.environ["FAKE_TREE"]).get(path.rstrip("/") or "/", []):
     print(f"{size:>10} Jan  1 00:00 2020 {name}{'/' if is_dir else ''}")
 if fail == "partial":
@@ -108,11 +108,14 @@ def test_walk_records_what_it_could_not_read() -> None:
         files = [p for p, _ in walk(img, "/", 6, 30, missed=clean)]
         check("control: a clean walk misses nothing", clean, [])
         check_true("control: and finds the deep file", "/docs/deep/b.txt" in files)
-        for how, expect in (("error", "ntfsls exited 1"), ("hang", "timed out")):
+        # Every listing is a Python process, so the hang's timeout leaves room
+        # for the ones that do not hang to start on a busy box; the hang
+        # outlasts it many times over.
+        for how, expect, timeout in (("error", "ntfsls exited 1", 30), ("hang", "timed out", 5)):
             missed: list[tuple[str, str]] = []
             err = io.StringIO()
             with env(FAKE_FAIL=json.dumps({"/docs/deep": how})), contextlib.redirect_stderr(err):
-                files = [p for p, _ in walk(img, "/", 6, 1, missed=missed)]
+                files = [p for p, _ in walk(img, "/", 6, timeout, missed=missed)]
             check(f"{how}: recorded", [(p, why.startswith(expect)) for p, why in missed],
                   [("/docs/deep", True)])
             check_true(f"{how}: said on stderr", "/docs/deep" in err.getvalue())
