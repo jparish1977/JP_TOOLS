@@ -84,8 +84,8 @@ def test_say_stamps_and_flushes() -> None:
     check("the gate's line, the UTC time first, flushed once", (out.getvalue(), out.flushes),
           ("mutmut-gate 01:02:03Z: hello\n", 1))
     check("progress each tenth and each minute, mutmut's output waited for a second at a time",
-          (ml.STEPS, ml.EVERY, ml.TICK, ml.STOP_WAIT, ml.LEFTOVER_WAIT, ml.PIPE_HELD),
-          (10, 60.0, 1.0, 30.0, 30.0, 1 << 20))
+          (ml.STEPS, ml.EVERY, ml.TICK, ml.STOP_WAIT, ml.LEFTOVER_WAIT, ml.PIPE_HELD, ml.QUEUED_PIECES),
+          (10, 60.0, 1.0, 30.0, 30.0, 1 << 20, 1024))
 
 
 class _HalfWritten(_StubPlan):
@@ -561,17 +561,30 @@ def test_a_leftover_faster_than_the_relay_does_not_hold_the_run() -> None:
     LEFTOVER_WAIT has passed: every one of its lines, long before the
     leftover's 60 s are up (the relay before this waited for them, and for
     the backlog they left, two minutes and more). PIPE_HELD is a default
-    pipe's 64 KiB here, so what is owed past the queue is paid quickly."""
+    pipe's 64 KiB here, so what is owed past the queue is paid quickly. The
+    queue holds 4 pieces here, and never more: what was queued when the end
+    was seen is within 4 reads of 8 KiB (unbounded, it was 887,880 bytes),
+    and the run's own lines still all arrive, held back in the pipe."""
     rec = _Slower()
+    queued: list[int] = []
+    real = ml._queued
+
+    def counted(chunks: "queue.Queue[bytes]") -> int:
+        queued.append(real(chunks))
+        return queued[-1]
+
     began = time.monotonic()
     with mock.patch.object(ml, "TICK", 0.2), mock.patch.object(ml, "LEFTOVER_WAIT", 0.5), \
-            mock.patch.object(ml, "PIPE_HELD", 1 << 16):
+            mock.patch.object(ml, "PIPE_HELD", 1 << 16), mock.patch.object(ml, "QUEUED_PIECES", 4), \
+            mock.patch.object(ml, "_queued", counted):
         rc = ml.run_relayed([sys.executable, "-c", _TORRENT], Path.cwd(), dict(os.environ), rec)
     took = time.monotonic() - began
     own = [line for line in "".join(t for what, t in rec.events if what == "feed").splitlines()
            if line.startswith("own")]
     check("every one of the run's lines, the last included, and back within 40 s of the leftover's 60",
           (rc, len(own), own[-1:], took < 40), (0, 100000, ["own99999"], True))
+    check_true("  the queue held at most its 4 pieces when the end was seen",
+               len(queued) == 1 and 0 < queued[0] <= 4 * 8192)
 
 
 def test_drain_passes_each_piece_then_the_end() -> None:

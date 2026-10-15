@@ -56,6 +56,11 @@ LEFTOVER_WAIT = 30.0
 # seen: in the pipe (Linux's largest pipe unless raised, pipe-max-size; the
 # default pipe is 64 KiB) and in _drain's read in hand (8 KiB at most).
 PIPE_HELD = 1 << 20
+# Pieces the queue between _drain and the relay holds, each a read of at most
+# 8 KiB: under 8 MiB. Full, _drain waits, the pipe fills and the writer is held
+# back by the kernel, so a leftover flooding the pipe costs no memory; mutmut's
+# own output still all arrives, as mutmut cannot end until its writes are taken.
+QUEUED_PIECES = 1024
 # Seconds mutmut has to stop its workers after an interrupt before it is killed.
 STOP_WAIT = 30.0
 # Reads of the codes before a half-written .meta is given up on, and the
@@ -289,9 +294,10 @@ def run_relayed(cmd: list[str], cwd: Path, env: dict[str, str], relay: _Fed) -> 
     proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     out = proc.stdout
     assert isinstance(out, io.BufferedReader)  # reason: stdout=PIPE, unbuffered=-1, opens one; it has read1
-    chunks: queue.Queue[bytes] = queue.Queue()
+    chunks: queue.Queue[bytes] = queue.Queue(maxsize=QUEUED_PIECES)
     # A daemon: a process CMD started may keep the pipe open after CMD ends,
-    # and the reader blocked on it must not hold this process open at exit.
+    # and the reader blocked on it, or on a full queue once the relay has
+    # stopped, must not hold this process open at exit.
     threading.Thread(target=_drain, args=(out, chunks), daemon=True).start()
     try:
         _relay_until_done(chunks, relay, lambda: proc.poll() is not None)
