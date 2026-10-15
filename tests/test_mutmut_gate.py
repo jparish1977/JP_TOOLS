@@ -59,15 +59,21 @@ def test_counts_are_per_function() -> None:
           {"pkg.mod.x_alpha": {"killed": 1, "survived": 2},
            "pkg.mod.x_beta": {"no tests": 1},
            "script.x_main": {"killed": 1}})
+    check("a line with a colon that names no mutant is passed over, and the lines after it still counted",
+          gate.by_function("Mutant results: 2\n" + RESULTS),
+          {"pkg.mod.x_alpha": {"killed": 1, "survived": 2},
+           "pkg.mod.x_beta": {"no tests": 1},
+           "script.x_main": {"killed": 1}})
 
 
 def test_results_with_no_mutants_are_not_a_pass() -> None:
     try:
         gate.by_function("mutmut said nothing useful\n")
-        raised = False
-    except gate.GateError:
-        raised = True
-    check_true("results naming no mutant are an error, not an empty pass", raised)
+        raised = ""
+    except gate.GateError as e:
+        raised = str(e)
+    check("results naming no mutant are an error, not an empty pass, and say so",
+          raised, "no mutant results found; did mutmut run?")
 
 
 def test_the_strict_rule() -> None:
