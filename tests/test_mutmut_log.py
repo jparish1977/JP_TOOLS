@@ -84,7 +84,8 @@ def test_say_stamps_and_flushes() -> None:
     check("the gate's line, the UTC time first, flushed once", (out.getvalue(), out.flushes),
           ("mutmut-gate 01:02:03Z: hello\n", 1))
     check("progress each tenth and each minute, mutmut's output waited for a second at a time",
-          (ml.STEPS, ml.EVERY, ml.TICK, ml.STOP_WAIT, ml.LEFTOVER_WAIT), (10, 60.0, 1.0, 30.0, 30.0))
+          (ml.STEPS, ml.EVERY, ml.TICK, ml.STOP_WAIT, ml.LEFTOVER_WAIT, ml.PIPE_HELD),
+          (10, 60.0, 1.0, 30.0, 30.0, 1 << 20))
 
 
 class _HalfWritten(_StubPlan):
@@ -466,6 +467,39 @@ def test_what_the_run_wrote_is_all_fed_however_long_it_takes() -> None:
     check("  and the relay closed, last", rec.events[-1], ("close", ""))
 
 
+class _Busy(queue.Queue[bytes]):
+    """A queue that is never empty: a leftover writing faster than the relay
+    reads. Each get is one more byte, none of it counted as queued."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.handed = 0
+
+    def get(self, block: bool = True, timeout: float | None = None) -> bytes:
+        self.handed += 1
+        return b"x"
+
+    def empty(self) -> bool:
+        return False
+
+
+def test_a_leftover_faster_than_the_relay_is_cut_once_the_run_is_paid() -> None:
+    """A queue that never empties is cut once LEFTOVER_WAIT has passed and as
+    many bytes are fed as were owed the run when its end was seen (queued
+    then, and PIPE_HELD): here 3, so the cut comes at the third byte past the
+    end and the first moment after it at LEFTOVER_WAIT, and not a byte
+    sooner. The clock: the end seen at 10.0, then 10.5 once paid, 11.0."""
+    chunks = _Busy()
+    rec = _Rec()
+    clock = iter([10.0, 10.5, 11.0, 11.5, 12.0])
+    with mock.patch.object(ml, "LEFTOVER_WAIT", 1.0), mock.patch.object(ml, "PIPE_HELD", 3), \
+            mock.patch.object(time, "monotonic", lambda: next(clock)):
+        ml._relay_until_done(chunks, rec, lambda: True)
+    check("the end, 3 owed bytes, then one more until LEFTOVER_WAIT: 5 pieces, then the close",
+          (chunks.handed, "".join(text for what, text in rec.events if what == "feed"), rec.events[-1]),
+          (5, "xxxxx", ("close", "")))
+
+
 class _Slow(_Rec):
     """A relay that takes 2 ms over each piece, as one doing real work."""
 
@@ -497,6 +531,35 @@ def test_a_run_s_whole_output_reaches_a_slow_relay() -> None:
            if line.startswith("own")]
     check("every one of the run's 100,000 lines, in order, the last included",
           (rc, len(own), own[:1], own[-1:]), (0, 100000, ["own0"], ["own99999"]))
+
+
+# A child that prints 100,000 numbered lines and ends, leaving a process of its
+# own writing 8,000 bytes a millisecond to the pipe for 15 s: about 8 MB/s,
+# twice what _Slow takes (8 KiB pieces at 2 ms), so the queue never empties.
+_TORRENT = ("import subprocess, sys\n"
+            "out = sys.stdout\n"
+            "for i in range(100000):\n    out.write(f'own{i}\\n')\n"
+            "out.flush()\n"
+            "subprocess.Popen([sys.executable, '-c', 'import sys, time\\n"
+            "end = time.monotonic() + 15\\n"
+            "while time.monotonic() < end:\\n"
+            "    sys.stdout.write(\"left\\\\n\" * 1600); sys.stdout.flush(); time.sleep(0.001)'])\n")
+
+
+def test_a_leftover_faster_than_the_relay_does_not_hold_the_run() -> None:
+    """A leftover that writes faster than the relay reads never lets the queue
+    empty, and the run still ends once its own output is fed and
+    LEFTOVER_WAIT has passed: every one of its lines, long before the
+    leftover's 15 s are up."""
+    rec = _Slow()
+    began = time.monotonic()
+    with mock.patch.object(ml, "TICK", 0.2), mock.patch.object(ml, "LEFTOVER_WAIT", 0.5):
+        rc = ml.run_relayed([sys.executable, "-c", _TORRENT], Path.cwd(), dict(os.environ), rec)
+    took = time.monotonic() - began
+    own = [line for line in "".join(t for what, t in rec.events if what == "feed").splitlines()
+           if line.startswith("own")]
+    check("every one of the run's lines, the last included, and back within 8 s of the leftover's 15",
+          (rc, len(own), own[-1:], took < 8), (0, 100000, ["own99999"], True))
 
 
 def test_drain_passes_each_piece_then_the_end() -> None:

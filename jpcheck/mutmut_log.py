@@ -52,6 +52,10 @@ TICK = 1.0
 # Seconds a process mutmut left behind may go on writing to the pipe after
 # mutmut has ended, before the relay stops reading it (_relay_until_done).
 LEFTOVER_WAIT = 30.0
+# Bytes of mutmut's own output that may be outside the queue when its end is
+# seen: in the pipe (Linux's largest pipe unless raised, pipe-max-size; the
+# default pipe is 64 KiB) and in _drain's read in hand (8 KiB at most).
+PIPE_HELD = 1 << 20
 # Seconds mutmut has to stop its workers after an interrupt before it is killed.
 STOP_WAIT = 30.0
 # Reads of the codes before a half-written .meta is given up on, and the
@@ -297,20 +301,30 @@ def run_relayed(cmd: list[str], cwd: Path, env: dict[str, str], relay: _Fed) -> 
     return proc.wait()
 
 
+def _queued(chunks: "queue.Queue[bytes]") -> int:
+    """The bytes waiting in CHUNKS."""
+    with chunks.mutex:
+        return sum(len(c) for c in chunks.queue)
+
+
 def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed, ended: Callable[[], bool]) -> None:
     """Feed RELAY each piece until the pipe's end, or until CMD has ENDED and
     TICK seconds pass with nothing, or LEFTOVER_WAIT seconds pass since it
-    ended with nothing left queued: what still holds the pipe then is a
-    process CMD left behind, and one that never stops writing must not hold
-    the run until it does.
+    ended with CMD's own output all fed: what still holds the pipe then is a
+    process CMD left behind, and one that never stops writing, slower or
+    faster than the relay reads, must not hold the run until it does.
 
-    CMD's own output is never cut: _drain takes the pipe into the queue as
-    fast as it is written, so long before LEFTOVER_WAIT all of CMD's is
-    queued, and a queue found empty has fed it, however much slower than CMD
-    the relay was. CMD's last lines are the ones a reader of the log looks
-    for."""
+    CMD's own output is never cut. All of it is ahead of anything written
+    after it ended, in pipe order, and it is fed once the queue is found
+    empty (_drain queues the pipe as fast as it is written, so by
+    LEFTOVER_WAIT all of CMD's is queued), or once as many bytes are fed as
+    were queued when the end was seen, and PIPE_HELD more: what the pipe and
+    _drain's read in hand can still hold of it. However much slower than CMD
+    the relay was, CMD's last lines, the ones a reader of the log looks for,
+    are fed."""
     decoder = utf_8.IncrementalDecoder("replace")
     ended_at: float | None = None
+    owed = 0
     while True:
         try:
             chunk = chunks.get(timeout=TICK)
@@ -323,9 +337,12 @@ def _relay_until_done(chunks: "queue.Queue[bytes]", relay: _Fed, ended: Callable
             break
         relay.feed(decoder.decode(chunk))
         relay.tick()
-        if ended_at is None and ended():
-            ended_at = time.monotonic()
-        if ended_at is not None and chunks.empty() and time.monotonic() - ended_at >= LEFTOVER_WAIT:
+        if ended_at is not None:
+            owed -= len(chunk)
+        elif ended():
+            ended_at, owed = time.monotonic(), _queued(chunks) + PIPE_HELD
+        if ended_at is not None and (chunks.empty() or owed <= 0) \
+                and time.monotonic() - ended_at >= LEFTOVER_WAIT:
             break
     relay.feed(decoder.decode(b"", final=True))
     relay.close()
