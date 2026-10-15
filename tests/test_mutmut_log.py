@@ -475,13 +475,15 @@ class _Slow(_Rec):
 
 
 # A child that prints 100,000 numbered lines and ends, leaving a process of
-# its own writing to the pipe every 0.05 s for 3 s.
+# its own writing to the pipe every 0.05 s for 3 s. The leftover starts only
+# once the child's lines are all written: two writers on one pipe interleave
+# any write larger than PIPE_BUF, splitting a line, which no relay can undo.
 _FLOOD = ("import subprocess, sys\n"
-          "subprocess.Popen([sys.executable, '-c', 'import time\\n"
-          "for _ in range(60):\\n    print(\"left\", flush=True); time.sleep(0.05)'])\n"
           "out = sys.stdout\n"
           "for i in range(100000):\n    out.write(f'own{i}\\n')\n"
-          "out.flush()\n")
+          "out.flush()\n"
+          "subprocess.Popen([sys.executable, '-c', 'import time\\n"
+          "for _ in range(60):\\n    print(\"left\", flush=True); time.sleep(0.05)'])\n")
 
 
 def test_a_run_s_whole_output_reaches_a_slow_relay() -> None:
