@@ -714,6 +714,8 @@ def test_run_puts_its_python_first_on_path() -> None:
         cache = Path(str(seen["MYPY_CACHE_DIR"]))
         check("  and one mypy cache for every worker, a directory while mutmut runs", call["cache_is_dir"], True)
         check_true("  made for the run, removed after it", not cache.exists())
+        check_true("  named as the gate's, so one left behind says whose it is",
+                   cache.name.startswith("mutmut-gate-mypy-"))
         [bare] = _run_mutmut(root, full=False, env={"HOME": td})
         seen = bare["env"]
         assert isinstance(seen, dict)
