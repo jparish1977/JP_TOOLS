@@ -1,0 +1,30 @@
+{
+  "about": "ci-image/publish-mutmut-state.sh is shell, which mutmut does not mutate: its rule that an older state never replaces a newer one. Run: mutate-on-target.py TREE ci-image/publish-mutmut-state.sh tests/test_publish_mutmut_state.py tests/mutants/jpt-order-on-publish-mutmut-state.json",
+  "mutants": [
+    {
+      "name": "the order is never checked",
+      "edits": [["\nstop_if_current_is_newer\n", "\n"]],
+      "target": "then one judged at A, its ancestor: exit 0, nothing published, current still B"
+    },
+    {
+      "name": "the ancestry read backwards",
+      "edits": [["git merge-base --is-ancestor \"$ours\" \"$theirs\"", "git merge-base --is-ancestor \"$theirs\" \"$ours\""]],
+      "target": "then one judged at A, its ancestor: exit 0, nothing published, current still B"
+    },
+    {
+      "name": "a current commit this checkout does not have is taken as older",
+      "edits": [["! git cat-file -e", "git cat-file -e"]],
+      "target": "current judged at a commit this checkout does not have (pushed after it): nothing published"
+    },
+    {
+      "name": "the same commit counts as newer",
+      "edits": [["[ \"$ours\" != \"$theirs\" ]", "true"]],
+      "target": "  the same commit again: published"
+    },
+    {
+      "name": "no current state counts as a newer one, so the first publish refuses itself",
+      "edits": [["[ -n \"$ours\" ] && [ -n \"$theirs\" ]", "[ -n \"$ours\" ]"]],
+      "target": "a state judged at B, the newer: published"
+    }
+  ]
+}

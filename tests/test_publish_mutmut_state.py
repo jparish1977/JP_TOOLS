@@ -219,7 +219,8 @@ def test_an_older_state_never_replaces_a_newer_one() -> None:
         _checkout(co)
         state = Path(td) / "state"
         state.mkdir()
-        check("a state judged at B, the newer: published", _publish(_judged(co, b, "B"), state).returncode, 0)
+        check("a state judged at B, the newer: published",
+              (_publish(_judged(co, b, "B"), state).returncode, len(_versions(state))), (0, 1))
         p = _publish(_judged(co, a, "A"), state)
         check("then one judged at A, its ancestor: exit 0, nothing published, current still B",
               (p.returncode, (state / "current" / "baseline.json").read_text(encoding="utf-8"), len(_versions(state))),
