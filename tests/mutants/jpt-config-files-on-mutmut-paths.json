@@ -1,15 +1,15 @@
 {
-  "about": "jpcheck/mutmut_paths.py's CONFIG_FILES, module level, so mutmut does not mutate it: each file pytest reads its configuration from moves every test's reach. Run: mutate-on-target.py TREE jpcheck/mutmut_paths.py tests/test_mutmut_gate.py tests/mutants/jpt-config-files-on-mutmut-paths.json",
+  "about": "jpcheck/mutmut_paths.py's PYTEST_CONFIGS and CONFIG_FILES, module level, so mutmut does not mutate them: each file pytest reads its configuration from moves every test's reach. Run: mutate-on-target.py TREE jpcheck/mutmut_paths.py tests/test_mutmut_gate.py tests/mutants/jpt-config-files-on-mutmut-paths.json",
   "mutants": [
     {
       "name": "tox.ini is not read as pytest's configuration",
-      "edits": [["CONFIG_FILES = (\"pyproject.toml\", \"pytest.ini\", \"setup.cfg\", \"tox.ini\")", "CONFIG_FILES = (\"pyproject.toml\", \"pytest.ini\", \"setup.cfg\")"]],
-      "target": "which files the tests share"
+      "edits": [["(\"pyproject.toml\", \"tool.pytest.ini_options\"), (\"tox.ini\", \"pytest\"),", "(\"pyproject.toml\", \"tool.pytest.ini_options\"),"]],
+      "target": "which files the tests share, under JP_TOOLS' own layout"
     },
     {
       "name": "pyproject.toml is not read as pytest's configuration",
-      "edits": [["CONFIG_FILES = (\"pyproject.toml\", ", "CONFIG_FILES = ("]],
-      "target": "which files the tests share"
+      "edits": [["(\"pyproject.toml\", \"tool.pytest.ini_options\"), (\"tox.ini\", \"pytest\"),", "(\"tox.ini\", \"pytest\"),"]],
+      "target": "which files the tests share, under JP_TOOLS' own layout"
     }
   ]
 }
