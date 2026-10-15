@@ -530,6 +530,7 @@ def test_the_template_runs_tests() -> None:
 
 VOLUME = "${{ vars.MUTMUT_STATE_VOLUME }}"
 WORKERS = "${{ vars.MUTMUT_WORKERS || '8' }}"
+MEMORY = "${{ vars.MUTMUT_MEMORY || '8g' }}"
 TOOLS_STEP = "The project's tools for mutmut"
 CONFIGURED_STEP = "Mutation testing, if configured, runs"
 PR_RUN = ["bash ../JP_TOOLS/ci-image/fetch-mutmut-state.sh /mutmut-state",
@@ -561,8 +562,9 @@ def test_the_mutation_jobs_use_the_repos_own_volume() -> None:
           {"image": "fleet-ci:current", "options": f"-v {VOLUME}:/mutmut-state:ro"})
     check("the state job mounts it read-write", push.get("container"),
           {"image": "fleet-ci:current", "options": f"-v {VOLUME}:/mutmut-state"})
-    check("the nightly read-write, held to its share of the host", night.get("container"),
-          {"image": "fleet-ci:current", "options": f"--cpus {WORKERS} --memory 8g -v {VOLUME}:/mutmut-state"})
+    check("the nightly read-write, held to its share of the host: cores and memory each from a variable",
+          night.get("container"),
+          {"image": "fleet-ci:current", "options": f"--cpus {WORKERS} --memory {MEMORY} -v {VOLUME}:/mutmut-state"})
     for name, j in (("PR", pr), ("state", push), ("nightly", night)):
         check(f"the {name} job's workers come from MUTMUT_WORKERS", j.get("env"), {"MUTMUT_WORKERS": WORKERS})
     doc = yaml.safe_load(NIGHTLY.read_text(encoding="utf-8"))

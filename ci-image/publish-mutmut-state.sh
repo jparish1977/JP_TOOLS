@@ -27,7 +27,15 @@
 # made not group- or world-writable before it goes in, and so is the lock
 # file, which the same umask creates world-writable.
 #
-# Exit: 0 published; 2 nothing to publish, or STATE_DIR not writable.
+# Two publishes from close pushes can finish out of order. So once it holds
+# the lock, a publish compares the commit its state was judged at with the
+# current state's (each mutants/mutmut-gate.json): when current's is newer,
+# a descendant of this one or a commit this checkout does not have (pushed
+# after it), nothing is published and current stays. With either commit
+# unknown, or the same commit, it publishes.
+#
+# Exit: 0 published, or a newer state is current and nothing is published
+# (it says which); 2 nothing to publish, or STATE_DIR not writable.
 #
 # Used by mutmut-nightly.yml (the full run) and check.yml's mutation-state job
 # (the changed functions after each merge). tests/test_publish_mutmut_state.py
@@ -45,6 +53,34 @@ if ! { exec 9>>"$state/.lock"; } 2>/dev/null; then
 fi
 chmod go-w "$state/.lock"
 flock -x 9
+# The commit a state was judged at, from its mutmut-gate.json; empty when
+# there is no such file or it names none.
+judged() {
+  python3 -c 'import json, sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("commit") or "")
+except (OSError, ValueError, AttributeError):
+    print("")' "$1"
+}
+# True when current's commit (THEIRS) is newer than this state's (OURS): a
+# descendant of it, or one this checkout does not have. False when either is
+# unknown or they are the same.
+current_is_newer() {
+  local ours=$1 theirs=$2
+  [ -n "$ours" ] && [ -n "$theirs" ] && [ "$ours" != "$theirs" ] || return 1
+  ! git cat-file -e "${theirs}^{commit}" 2>/dev/null || git merge-base --is-ancestor "$ours" "$theirs"
+}
+# Ends the run, publishing nothing, when current's state is newer than this one.
+stop_if_current_is_newer() {
+  local ours theirs
+  ours=$(judged mutants/mutmut-gate.json)
+  theirs=$(judged "$state/current/mutants/mutmut-gate.json")
+  if current_is_newer "$ours" "$theirs"; then
+    echo "publish-mutmut-state: current was judged at $theirs, newer than this state's $ours: nothing published"
+    exit 0
+  fi
+}
+stop_if_current_is_newer
 version=v-$(date -u +%Y%m%dT%H%M%SZ)-$$
 dir=$state/$version
 mkdir "$dir"

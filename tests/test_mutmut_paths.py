@@ -54,8 +54,12 @@ def test_the_suite_layout_is_read_from_pytests_configuration() -> None:
     dt = {"pyproject.toml": "[tool.pytest.ini_options]\ntestpaths = [\"dtchecks/a_test.py\"]\n"
                             "python_files = [\"*_test.py\"]\n",
           "dtchecks/a_test.py": "", "dtchecks/helper.py": "", "lab/b_test.py": ""}
-    check("a repo's own: python_files, a testpaths FILE's directory, and every suite's",
-          _layout(dt), mp.SuiteLayout(("*_test.py",), frozenset({"dtchecks", "lab"})))
+    check("a repo's own: python_files, and testpaths alone: a suite pytest never collects (lab/) is not one",
+          _layout(dt), mp.SuiteLayout(("*_test.py",), frozenset({"dtchecks"})))
+    check("  with no testpaths, every tracked suite's directory",
+          _layout({"setup.cfg": "[tool:pytest]\npython_files = *_test.py\n", "dtchecks/a_test.py": "",
+                   "lab/b_test.py": ""}),
+          mp.SuiteLayout(("*_test.py",), frozenset({"dtchecks", "lab"})))
     check("no configuration: pytest's default names, the suites' directories",
           _layout({"x/test_a.py": "", "y/b.py": ""}), mp.SuiteLayout(DEFAULT, frozenset({"x"})))
     check("a pyproject.toml with no pytest table is passed over, as pytest does",
@@ -66,7 +70,7 @@ def test_the_suite_layout_is_read_from_pytests_configuration() -> None:
         check(f"{name}: [{section}] is read, words split",
               _layout({name: f"[{section}]\npython_files = a_*.py b_*.py\ntestpaths = t\n", "t/x.py": ""}),
               mp.SuiteLayout(("a_*.py", "b_*.py"), frozenset({"t"})))
-        check(f"{name} with no [{section}]: passed over",
+        check(f"{name} with no [{section}], alone: pytest's defaults",
               _layout({name: "[other]\nx = 1\n"}), mp.SuiteLayout(DEFAULT, frozenset()))
     check("pytest.ini first, before pyproject.toml",
           _layout({"pytest.ini": "[pytest]\npython_files = p_*.py\n",
@@ -97,6 +101,20 @@ def test_the_suite_layout_is_read_from_pytests_configuration() -> None:
           mp.SuiteLayout(("c_*.py",), frozenset({"a/b"})))
     check("a suite deep in the tree: its own directory, not the top one",
           _layout({"x/y/test_a.py": ""}), mp.SuiteLayout(DEFAULT, frozenset({"x/y"})))
+    for name in ("pytest.ini", ".pytest.ini"):
+        check(f"{name} with no [pytest] is still the configuration, as pytest takes it even empty",
+              _layout({name: "", "pyproject.toml": "[tool.pytest.ini_options]\npython_files = [\"q_*.py\"]\n"}),
+              mp.SuiteLayout(DEFAULT, frozenset()))
+    check("testpaths \".\": the root, which every path is under",
+          _layout({"setup.cfg": "[tool:pytest]\ntestpaths = .\n", "a/x.py": ""}), mp.SuiteLayout(DEFAULT, frozenset({""})))
+    check("a glob in testpaths: every directory it matches, as pytest expands it",
+          _layout({"setup.cfg": "[tool:pytest]\ntestpaths = src/*/tests\n", "src/a/tests/x.py": "",
+                   "src/b/tests/y.py": "", "src/c/other/z.py": ""}),
+          mp.SuiteLayout(DEFAULT, frozenset({"src/a/tests", "src/b/tests"})))
+    check("  and a glob matching files: each one's own directory",
+          _layout({"setup.cfg": "[tool:pytest]\ntestpaths = checks/*_test.py\n", "checks/a_test.py": "",
+                   "checks/b_test.py": ""}),
+          mp.SuiteLayout(DEFAULT, frozenset({"checks"})))
 
 
 def test_the_configuration_is_read_as_utf8_whatever_the_locale() -> None:

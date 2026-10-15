@@ -17,6 +17,10 @@ keep, with jobs running side by side:
       moved aside and replaced.
     - Nothing to publish, or a STATE that cannot be written: exit 2, the
       state untouched. fetch copies current's version whole, or exits 2.
+    - A state judged at an older commit than current's (an ancestor, or
+      current's commit not in the checkout) publishes nothing, exit 0, saying
+      so; a newer one, the same commit, or one whose commit is unknown
+      publishes.
 
     python3 tests/test_publish_mutmut_state.py
 """
@@ -180,6 +184,75 @@ def test_refusals_leave_the_state() -> None:
             finally:
                 os.chmod(state, 0o755)
             check("a state that cannot be written: exit 2", p.returncode, 2)
+
+
+def _repo_with_two_commits(where: Path) -> tuple[str, str]:
+    """WHERE as a git repo with commits A then B; their ids."""
+    where.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(where), "init", "-q"], check=True, env=_ENV)
+    ids = []
+    for n in ("a", "b"):
+        (where / "f").write_text(n, encoding="utf-8")
+        subprocess.run(["git", "-C", str(where), "add", "f"], check=True, env=_ENV)
+        subprocess.run(["git", "-C", str(where), "commit", "-q", "--no-verify", "-m", n], check=True, env=_ENV)
+        ids.append(subprocess.run(["git", "-C", str(where), "rev-parse", "HEAD"], capture_output=True,
+                                  text=True, check=True, env=_ENV).stdout.strip())
+    return ids[0], ids[1]
+
+
+def _judged(checkout: Path, commit: str, baseline: str) -> Path:
+    """CHECKOUT's state, judged at COMMIT, with BASELINE as its baseline."""
+    (checkout / "mutants" / "mutmut-gate.json").write_text(f'{{"commit": "{commit}"}}', encoding="utf-8")
+    (checkout / "baseline.json").write_text(baseline, encoding="utf-8")
+    return checkout
+
+
+def test_an_older_state_never_replaces_a_newer_one() -> None:
+    """Two publishes from close pushes can finish out of order: one judged at
+    an older commit than current's publishes nothing."""
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        co = Path(td) / "co"
+        a, b = _repo_with_two_commits(co)
+        _checkout(co)
+        state = Path(td) / "state"
+        state.mkdir()
+        check("a state judged at B, the newer: published", _publish(_judged(co, b, "B"), state).returncode, 0)
+        p = _publish(_judged(co, a, "A"), state)
+        check("then one judged at A, its ancestor: exit 0, nothing published, current still B",
+              (p.returncode, (state / "current" / "baseline.json").read_text(encoding="utf-8"), len(_versions(state))),
+              (0, "B", 1))
+        check_true("  and it says why", f"current was judged at {b}, newer than this state's {a}: nothing published"
+                   in p.stdout)
+        unknown = "0" * 40
+        (state / "current" / "mutants" / "mutmut-gate.json").chmod(0o644)
+        (state / "current" / "mutants" / "mutmut-gate.json").write_text(f'{{"commit": "{unknown}"}}',
+                                                                       encoding="utf-8")
+        check("current judged at a commit this checkout does not have (pushed after it): nothing published",
+              (_publish(_judged(co, b, "B2"), state).returncode, len(_versions(state))), (0, 1))
+    with tempfile.TemporaryDirectory() as td:
+        co = Path(td) / "co"
+        a, b = _repo_with_two_commits(co)
+        _checkout(co)
+        state = Path(td) / "state"
+        state.mkdir()
+        _publish(_judged(co, a, "A"), state)
+        time.sleep(1.1)  # versions are named to the second
+        _publish(_judged(co, b, "B"), state)
+        check("current judged at A, a state judged at B, its descendant: published",
+              (state / "current" / "baseline.json").read_text(encoding="utf-8"), "B")
+        time.sleep(1.1)
+        _publish(_judged(co, b, "B again"), state)
+        check("  the same commit again: published", (state / "current" / "baseline.json").read_text(encoding="utf-8"),
+              "B again")
+        time.sleep(1.1)
+        (co / "mutants" / "mutmut-gate.json").write_text("{}", encoding="utf-8")
+        (co / "baseline.json").write_text("no commit", encoding="utf-8")
+        _publish(co, state)
+        check("  a state whose commit is unknown: published", (state / "current" / "baseline.json").read_text(
+            encoding="utf-8"), "no commit")
 
 
 def test_fetch_copies_the_current_version() -> None:

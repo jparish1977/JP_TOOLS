@@ -30,6 +30,10 @@ DEFAULT_PYTHON_FILES = ("test_*.py", "*_test.py")
 _OPTIONS = ("python_files", "testpaths")
 # Every configuration file is read as UTF-8, whatever the locale.
 _UTF8 = "utf-8"
+# The configuration files pytest takes with no pytest section in them at all.
+_TAKEN_EMPTY = ("pytest.ini", ".pytest.ini")
+# The characters that make a testpaths entry a glob.
+_GLOB = "*?["
 
 
 @dataclass(frozen=True)
@@ -45,9 +49,11 @@ def _words(value: object) -> list[str]:
 
 def pytest_options(root: Path) -> dict[str, list[str]]:
     """The first pytest configuration found at ROOT, as pytest finds it: its
-    python_files and testpaths, each a list of words; {} when none has them.
-    A pyproject.toml without pytest's table, and a setup.cfg or tox.ini
-    without its section, are passed over, as pytest passes them."""
+    python_files and testpaths, each a list of words; {} when it has neither.
+    A pytest.ini or .pytest.ini is taken even with no [pytest] section (pytest
+    gives them precedence "even when empty"); a pyproject.toml without
+    pytest's table, and a setup.cfg or tox.ini without its section, are
+    passed over, as pytest passes them."""
     for name, section in PYTEST_CONFIGS:
         path = root / name
         if not path.is_file():
@@ -63,20 +69,39 @@ def pytest_options(root: Path) -> dict[str, list[str]]:
         ini = configparser.ConfigParser(interpolation=None)
         ini.read(path, encoding=_UTF8)
         if not ini.has_section(section):
+            if name in _TAKEN_EMPTY:
+                return {}
             continue
         return {k: ini.get(section, k).split() for k in _OPTIONS if ini.has_option(section, k)}
     return {}
 
 
+def _testpath_dirs(root: Path, entry: str) -> set[str]:
+    """The test directories one testpaths ENTRY names, as pytest resolves it:
+    a glob is expanded (pytest 7 and later), a directory is itself (the root
+    for "."), and a file or a path that does not exist stands for its own
+    directory. Paths are relative to ROOT, the root as ""."""
+    hits = sorted(root.glob(entry)) if any(c in entry for c in _GLOB) else [root / entry]
+    dirs = set()
+    for hit in hits:
+        rel = PurePosixPath(hit.relative_to(root).as_posix())
+        d = rel if hit.is_dir() else rel.parent
+        dirs.add("" if d == PurePosixPath() else str(d))
+    return dirs
+
+
 def suite_layout(root: Path, tracked: list[str]) -> SuiteLayout:
     """ROOT's test layout: python_files from its pytest configuration (pytest's
-    default without one), and as test directories each testpaths entry (a
-    file's own directory) and every directory holding one of TRACKED's suites."""
+    default without one), and its test directories. With testpaths set,
+    those are what testpaths names and nothing else, since that is all pytest
+    collects from: a suite pytest never collects does not make its directory
+    one. With none, every directory holding one of TRACKED's suites."""
     options = pytest_options(root)
     patterns = tuple(options.get("python_files", DEFAULT_PYTHON_FILES))
-    dirs = {str(PurePosixPath(p)) if (root / p).is_dir() else p.rpartition("/")[0]
-            for p in options.get("testpaths", [])}
-    dirs |= {p.rpartition("/")[0] for p in tracked if _named_as_suite(p, patterns)}
+    if "testpaths" in options:
+        dirs = {d for entry in options["testpaths"] for d in _testpath_dirs(root, entry)}
+    else:
+        dirs = {p.rpartition("/")[0] for p in tracked if _named_as_suite(p, patterns)}
     return SuiteLayout(patterns, frozenset(dirs))
 
 

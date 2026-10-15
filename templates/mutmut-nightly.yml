@@ -19,7 +19,10 @@
 # THE SCHEDULE IS THE BOX'S, NOT ONLY THIS REPO'S. Every nightly on one
 # runner shares its host, so pick an hour that does not overlap the others
 # there and agree it with whoever runs the host. --cpus and --memory hold the
-# run to its share; MUTMUT_WORKERS (default 8) should match --cpus.
+# run to its share: MUTMUT_WORKERS (default 8) sets both --cpus and the
+# workers, and MUTMUT_MEMORY (default 8g) the memory. Measure a full run's
+# peak and set MUTMUT_MEMORY above it, as with the timeout below: a run over
+# its memory is killed partway and the night's work is lost.
 #
 # timeout-minutes guards against a hung run, not a slow one: a full run takes
 # as long as the repo's suites times its mutants, and a limit cut below that
@@ -40,7 +43,9 @@ jobs:
     timeout-minutes: 720
     container:
       image: fleet-ci:current
-      options: --cpus ${{ vars.MUTMUT_WORKERS || '8' }} --memory 8g -v ${{ vars.MUTMUT_STATE_VOLUME }}:/mutmut-state
+      options: >-
+        --cpus ${{ vars.MUTMUT_WORKERS || '8' }} --memory ${{ vars.MUTMUT_MEMORY || '8g' }}
+        -v ${{ vars.MUTMUT_STATE_VOLUME }}:/mutmut-state
     env:
       MUTMUT_WORKERS: ${{ vars.MUTMUT_WORKERS || '8' }}
     # As in check.yml: this repo at project/, JP_TOOLS beside it.
