@@ -32,6 +32,7 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `chdman-build.sh` | nothing alone: builds a MAME release's chdman beside the packaged one, for the comparison |
 | `chdman-hang-backtrace.sh` | where a hung chdman is: every thread's stack, for a report or a fix upstream |
 | `test-against-ref.sh` | does a new test fail on the code before the fix |
+| `trace-compare.sh` | does mutmut's stats pass across workers record the same reach and callers as mutmut's serial pass, and how long each takes |
 | `ci-job-fields.py` | what did check.py report inside a CI job, per file; exits 1 on an empty log |
 | `file-sizes.py` | how many source files pass a line threshold, and how much of each is prose |
 | `doc-pointers.py` | do the `~/` paths in the docs still resolve, in three outcomes |
