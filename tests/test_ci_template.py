@@ -549,6 +549,40 @@ def job_step(path: Path, job_name: str, step: str) -> dict[str, Any]:
     return dict(next((s for s in job(path, job_name).get("steps", []) if s.get("name") == step), {}))
 
 
+def steps_before_checkout_without_a_directory(doc: dict[str, Any]) -> list[str]:
+    """In each job whose run steps default to a directory, the run steps
+    before its first actions/checkout that do not name their own: each
+    fails before its first line, since that directory does not exist yet."""
+    bad = []
+    for name, j in doc.get("jobs", {}).items():
+        if not j.get("defaults", {}).get("run", {}).get("working-directory"):
+            continue
+        for s in j.get("steps", []):
+            if str(s.get("uses", "")).startswith("actions/checkout"):
+                break
+            if "run" in s and "working-directory" not in s:
+                bad.append(f"{name}: {s.get('name', s['run'][:30])}")
+    return bad
+
+
+def test_no_step_runs_in_a_directory_the_checkout_has_not_made() -> None:
+    """An adopter's first dispatch of the mutation jobs died in 10 s: they
+    default to project/, and their root check ran before the checkout made
+    it (OCI exec: chdir ... no such file or directory)."""
+    workflows = [TEMPLATE, NIGHTLY, *sorted((ROOT / ".github" / "workflows").glob("*.yml"))]
+    for path in workflows:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        check(f"{path.relative_to(ROOT)}: every step before the checkout names a directory that exists",
+              steps_before_checkout_without_a_directory(doc), [])
+    shape = {"jobs": {"j": {"defaults": {"run": {"working-directory": "project"}},
+                            "steps": [{"name": "early", "run": "true"}, {"name": "named", "run": "true",
+                                                                        "working-directory": "."},
+                                      {"uses": "actions/checkout@v6"}, {"name": "late", "run": "true"}]},
+                      "k": {"steps": [{"name": "no default", "run": "true"}]}}}
+    check("control: the failing shape is found, a step naming its own and one after the checkout"
+          " are not, nor a job with no default", steps_before_checkout_without_a_directory(shape), ["j: early"])
+
+
 def test_the_mutation_jobs_use_the_repos_own_volume() -> None:
     """Each mutation job runs only when the repo names its state volume, and
     mounts it: read-only on a pull request, read-write where state is written."""
@@ -595,6 +629,36 @@ def test_the_mutation_jobs_run_the_gate() -> None:
     check("the tools step is one text in all three jobs", len(tools), 1)
 
 
+VENV_STEP = "The tests job's python3, in a venv"
+MUTATION_JOBS = ((TEMPLATE, "mutation"), (TEMPLATE, "mutation-state"), (NIGHTLY, "full-run"))
+
+
+def test_the_mutation_jobs_run_the_tests_jobs_python() -> None:
+    """The mutation jobs run the image's python3, as the tests job's tests/run
+    does, not actions/setup-python's 3.12, whose patch differs: a test pinned
+    to the interpreter's output then passed in one job and failed in the other."""
+    for path, name in MUTATION_JOBS:
+        uses = [str(s.get("uses", "")) for s in job(path, name).get("steps", [])]
+        check(f"{name}: no actions/setup-python", [u for u in uses if "setup-python" in u], [])
+    steps = {str(job_step(p, j, VENV_STEP).get("run")) for p, j in MUTATION_JOBS}
+    check("the venv step is one text in all three jobs", len(steps), 1)
+    script = steps.pop()
+    with tempfile.TemporaryDirectory() as tmp:
+        path_file = Path(tmp) / "github-path"
+        r = subprocess.run(["/bin/bash", "-eo", "pipefail", "-c", script], cwd=tmp,
+                           env={**os.environ, "RUNNER_TEMP": tmp, "GITHUB_PATH": str(path_file)},
+                           capture_output=True, text=True, check=False)
+        check("the step passes", r.returncode, 0)
+        venv_bin = Path(tmp) / "mutmut-venv" / "bin"
+        check("later steps get the venv first on PATH", path_file.read_text(encoding="utf-8"), f"{venv_bin}\n")
+        version = ["-c", "import sys; print(sys.version)"]
+        host = subprocess.run(["python3", *version], capture_output=True, text=True, check=True).stdout
+        venv = subprocess.run([str(venv_bin / "python"), *version], capture_output=True, text=True,
+                              check=True).stdout
+        check("its python is the python3 the step found, not another", venv, host)
+        check_true("and it can install: pip is in it", (venv_bin / "pip").exists())
+
+
 def run_step(script: str, files: dict[str, str], executable: tuple[str, ...] = (),
              env_add: dict[str, str] | None = None,
              fakes: dict[str, str] | None = None) -> tuple[int, list[list[str]], str]:
@@ -618,7 +682,8 @@ def test_the_tools_step_runs_the_projects_setup() -> None:
     setup = "#!/bin/sh\necho ran > setup-ran\n"
     rc, _, err = run_step(script, {})
     check_true("no tests/mutation-setup: exit 1, saying what to add",
-               rc == 1 and "No executable tests/mutation-setup" in err and "mutmut and pytest" in err)
+               rc == 1 and "No executable tests/mutation-setup" in err
+               and "mutmut, pytest and pytest-xdist" in err)
     rc, _, err = run_step(script, {"tests/mutation-setup": setup})
     check_true("one that is not executable: the same", rc == 1 and "No executable tests/mutation-setup" in err)
     with fake_tools() as (work, _):
