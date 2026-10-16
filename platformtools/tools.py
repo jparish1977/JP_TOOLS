@@ -72,12 +72,12 @@ class StalledError(Exception):
     or it ran past its limit. The message says which."""
 
 
-def _size(path: Path) -> int:
-    """PATH's size; -1 while it does not exist yet."""
+def _size(path: Path) -> int | None:
+    """PATH's size; None while it does not exist yet."""
     try:
         return path.stat().st_size
-    except FileNotFoundError:  # reason: a tool that has not opened its output yet: -1, a size of its own
-        return -1
+    except FileNotFoundError:  # reason: a tool that has not opened its output yet: None, a state of its own
+        return None
 
 
 def _drain(stream: IO[str], into: list[str]) -> None:
@@ -85,48 +85,56 @@ def _drain(stream: IO[str], into: list[str]) -> None:
         into.extend(stream)
 
 
+def _watch(ended: threading.Event, watch: Path | None, stall: float, limit: float, poll: float) -> str:
+    """Wait for ENDED, looking every POLL seconds: why the tool must be
+    killed (WATCH did not grow, or appear, for STALL seconds; it ran past
+    LIMIT), or "" once it has ended by itself. WATCH is first sized at the
+    first look."""
+    start = grew = time.monotonic()
+    size = None
+    while not ended.wait(poll):
+        now = time.monotonic()
+        if watch is not None and (current := _size(watch)) != size:
+            size, grew = current, now
+        elif watch is not None and now - grew >= stall:
+            return f"{watch} did not grow for {stall:g} s"
+        if now - start >= limit:
+            return f"it ran past {limit:g} s"
+    return ""
+
+
 def run_watched(prefix: list[str], args: list[str], *, watch: Path | None, stall: float, limit: float,
                 poll: float = 1.0) -> subprocess.CompletedProcess[str]:
     """Run a tool as run() does, captured, but never wait on it forever: one
     whose WATCH file does not grow (or appear) for STALL seconds, or that
-    runs past LIMIT seconds, is killed and StalledError raised, saying which.
-    Without WATCH only LIMIT applies. Checked every POLL seconds.
+    runs past LIMIT seconds, is killed and StalledError raised, saying which
+    (_watch). Without WATCH only LIMIT applies. Checked every POLL seconds,
+    and a tool that ends returns at once, not at the next look.
 
     Both pipes are drained while it runs: a tool that filled one would
-    block writing while this waited on it, a hang of this function's own."""
+    block writing while this waited on it, a hang of this function's own.
+    Every thread here ends with the tool, so none is a daemon."""
     cmd = [*prefix, *args]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     out: list[str] = []
     err: list[str] = []
-    pumps = [threading.Thread(target=_drain, args=(proc.stdout, out), daemon=True),
-             threading.Thread(target=_drain, args=(proc.stderr, err), daemon=True)]
+    pumps = [threading.Thread(target=_drain, args=(proc.stdout, out)),
+             threading.Thread(target=_drain, args=(proc.stderr, err))]
     for t in pumps:
         t.start()
-    # Set when the tool exits, so a quick one is not held to a poll.
     ended = threading.Event()
 
     def wait() -> None:
         proc.wait()
         ended.set()
 
-    threading.Thread(target=wait, daemon=True).start()
-    start = grew = time.monotonic()
-    size = _size(watch) if watch is not None else -1
-    why = ""
-    while not ended.wait(poll):
-        now = time.monotonic()
-        if watch is not None and (current := _size(watch)) != size:
-            size, grew = current, now
-        elif watch is not None and now - grew >= stall:
-            why = f"{watch} did not grow for {stall:g} s"
-        if not why and now - start >= limit:
-            why = f"it ran past {limit:g} s"
-        if why:
-            proc.kill()
-            break
+    threading.Thread(target=wait).start()
+    why = _watch(ended, watch, stall, limit, poll)
+    if why:
+        proc.kill()
     proc.wait()
     for t in pumps:
         t.join()
     if why:
-        raise StalledError(f"{Path(cmd[0]).name} {args[0] if args else ''} killed: {why}")
+        raise StalledError(f"{' '.join([Path(cmd[0]).name, *args[:1]])} killed: {why}")
     return subprocess.CompletedProcess(cmd, proc.returncode, "".join(out), "".join(err))

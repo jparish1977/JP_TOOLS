@@ -23,13 +23,14 @@ import io
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from unittest import mock
 
 from _harness import check, check_true, load_script, run
 from chdtool import chdman as chdman_mod
-from platformtools.tools import StalledError, run_watched
+from platformtools.tools import StalledError, _watch, run_watched
 
 
 def _watched(code: str, watch: Path | None, stall: float = 0.6, limit: float = 30.0) -> tuple[object, float]:
@@ -44,10 +45,11 @@ def _watched(code: str, watch: Path | None, stall: float = 0.6, limit: float = 3
 
 
 def test_a_tool_that_ends() -> None:
-    r, took = _watched("import sys; print('out'); print('err', file=sys.stderr); sys.exit(3)", None)
-    check("its exit status, stdout and stderr, as run() gives them",
-          (r.returncode, r.stdout, r.stderr) if isinstance(r, subprocess.CompletedProcess) else r,
-          (3, "out\n", "err\n"))
+    code = "import sys; print('o1'); print('o2'); print('e1', file=sys.stderr); print('e2', file=sys.stderr); sys.exit(3)"
+    r, took = _watched(code, None)
+    check("its command, exit status, stdout and stderr, every line, as run() gives them",
+          (r.args, r.returncode, r.stdout, r.stderr) if isinstance(r, subprocess.CompletedProcess) else r,
+          ([sys.executable, "-c", code], 3, "o1\no2\n", "e1\ne2\n"))
     t = time.monotonic()
     quick = run_watched([sys.executable], ["-c", "pass"], watch=None, stall=5, limit=5)
     took = time.monotonic() - t
@@ -57,14 +59,33 @@ def test_a_tool_that_ends() -> None:
 def test_a_tool_that_stalls() -> None:
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "o"
-        code = f"import time; open({str(out)!r}, 'w').write('h'); time.sleep(30)"
+        code = f"import time; open({str(out)!r}, 'w').write('h'); time.sleep(3)"
         r, took = _watched(code, out)
         check("its output stops growing: killed after STALL, the program, its first argument and why said",
-              (r, 0.5 < took < 5),
+              (r, 0.5 < took < 2.5),
               (f"{Path(sys.executable).name} -c killed: {out} did not grow for 0.6 s", True))
-        r, took = _watched("import time; time.sleep(30)", Path(td) / "never")
+        r, took = _watched("import time; time.sleep(3)", Path(td) / "never")
         check_true(f"  its output never appears: killed the same way (took {took:.2f} s)",
-                   isinstance(r, str) and r.endswith(f"{Path(td) / 'never'} did not grow for 0.6 s") and took < 5)
+                   isinstance(r, str) and r.endswith(f"{Path(td) / 'never'} did not grow for 0.6 s") and took < 2.5)
+        t = time.monotonic()
+        try:
+            run_watched([sys.executable, "-c", "import time; time.sleep(3)"], [], watch=None, stall=1, limit=0.2,
+                        poll=0.05)
+            said = ""
+        except StalledError as e:
+            said = str(e)
+        check("  a command given whole, no arguments after it: the program alone named",
+              said, f"{Path(sys.executable).name} killed: it ran past 0.2 s")
+        t = time.monotonic()
+        try:
+            run_watched([sys.executable], ["-c", "import time; time.sleep(3)"], watch=Path(td) / "never", stall=0.1,
+                        limit=30)
+            said = ""
+        except StalledError as e:
+            said = str(e)
+        took = time.monotonic() - t
+        check_true(f"  looked at every second by default: a 0.1 s stall seen at the first look (took {took:.2f} s)",
+                   said.endswith("did not grow for 0.1 s") and 0.9 < took < 1.8)
         grow = (f"import time\nf = open({str(out)!r}, 'w')\n"
                 "for _ in range(12):\n    f.write('x'); f.flush(); time.sleep(0.15)\n")
         r, took = _watched(grow, out)
@@ -73,9 +94,35 @@ def test_a_tool_that_stalls() -> None:
         r, took = _watched(grow, out, stall=30, limit=0.5)
         check_true(f"  past LIMIT, though it writes: killed, saying so (took {took:.2f} s)",
                    isinstance(r, str) and r.endswith("killed: it ran past 0.5 s") and took < 1.5)
-        r, took = _watched("import time; time.sleep(30)", None, stall=0.1, limit=0.5)
+        r, took = _watched("import time; time.sleep(3)", None, stall=0.1, limit=0.5)
         check_true(f"  with nothing to watch, only LIMIT: killed at it, not at STALL (took {took:.2f} s)",
-                   isinstance(r, str) and r.endswith("killed: it ran past 0.5 s") and took >= 0.5)
+                   isinstance(r, str) and r.endswith("killed: it ran past 0.5 s") and 0.5 <= took < 2.5)
+
+
+class _Clock:
+    """time.monotonic for _watch: 0, 1, 2, ... one tick a read."""
+
+    def __init__(self) -> None:
+        self.now = -1
+
+    def __call__(self) -> float:
+        self.now += 1
+        return float(self.now)
+
+
+def test_the_boundaries() -> None:
+    """_watch on a clock of whole seconds: a stall or a limit reached exactly
+    is reached."""
+    never = threading.Event()
+    with tempfile.TemporaryDirectory() as td:
+        for stall, limit, want in ((2, 100, f"{Path(td) / 'f'} did not grow for 2 s"), (100, 2, "it ran past 2 s")):
+            clock = _Clock()
+            with mock.patch("platformtools.tools.time.monotonic", clock):
+                why = _watch(never, Path(td) / "f", stall, limit, 0)
+            check(f"stall {stall}, limit {limit}: said when the clock reads exactly 2", (why, clock.now), (want, 2))
+    done = threading.Event()
+    done.set()
+    check("a tool already ended: nothing to say", _watch(done, None, 1, 1, 0), "")
 
 
 def test_a_tool_that_talks() -> None:
@@ -133,6 +180,20 @@ def test_chdman_watches_its_output_and_retries_once() -> None:
                 raised = str(e)
             check("  two stalls: the second raised, and no partial output left", (raised, out.exists()),
                   ("two", False))
+        writes: list[bool] = []
+
+        def silent(prefix: list[str], args: list[str], *, watch: Path | None, stall: float,
+                   limit: float) -> subprocess.CompletedProcess[str]:
+            """Stalls before writing anything, then succeeds."""
+            writes.append(out.exists())
+            if len(writes) == 1:
+                raise StalledError("chdman createraw killed: stuck before writing")
+            return ok
+
+        with mock.patch.object(chdman_mod, "require", return_value=["chdman"]), \
+                mock.patch.object(chdman_mod, "run_watched", silent), mock.patch("sys.stderr", io.StringIO()):
+            check("a stall before any output was written: nothing to remove, run once more",
+                  (chdman_mod.chdman(args), writes), (ok, [False, False]))
 
 
 def test_chd_says_a_stall_and_exits_1() -> None:
@@ -143,6 +204,10 @@ def test_chd_says_a_stall_and_exits_1() -> None:
         rc = chd.main(["verify", "a.chd"])
     check("chd.py: the stall said, exit 1", (rc, out.getvalue()),
           (1, "Error: chdman verify killed: x, twice; nothing was written.\n"))
+    out = io.StringIO()
+    with mock.patch("sys.stdout", out):
+        rc = chd.main([])
+    check("  and with no command: its help, exit 0", (rc, out.getvalue().startswith("usage:")), (0, True))
 
 
 if __name__ == "__main__":
