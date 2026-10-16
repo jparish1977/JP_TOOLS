@@ -41,6 +41,8 @@ def test_a_named_tool_runs_only_where_it_applies() -> None:
           tool_names("python", "shellcheck,ruff,directive-reason,smells", False), ["ruff", "smells"])
     check("  an audit tool serves its language", tool_names("python", "pip-audit", False), ["pip-audit"])
     check("  none that serves it: nothing runs", tool_names("shell", "mypy", False), [])
+    check("  a name with no runner still runs, to be reported as not run",
+          tool_names("python", "no-such-tool,shellcheck", False), ["no-such-tool"])
     check("a language with no tools of its own: the names as given",
           tool_names("unknown", "shellcheck,ruff", False), ["shellcheck", "ruff"])
     check("serves: a tool, an audit, another language's tool",

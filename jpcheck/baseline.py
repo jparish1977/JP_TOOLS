@@ -25,7 +25,7 @@ from jpcheck.common import (
 from jpcheck.files import _collect_files, _detect_lang, _drop_ignored, ignored_by, load_ignores
 from jpcheck.native_tools import _pwsh
 from jpcheck.php_tools import _composer_cmd
-from jpcheck.registry import AUDIT_TOOLS, DEFAULT_TOOLS, _run_tools, _summarize, serves
+from jpcheck.registry import AUDIT_TOOLS, DEFAULT_TOOLS, _run_tools, _summarize, applies
 
 # ── baseline ──────────────────────────────────────────────────────────────────
 #
@@ -229,7 +229,7 @@ def per_file_checks(target: str, lang: str = "auto",
         file_lang = _detect_lang(f)
         if lang not in ("auto", file_lang):
             continue
-        names = [t for t in tools if serves(t, file_lang)] if tools else list(DEFAULT_TOOLS.get(file_lang, []))
+        names = [t for t in tools if applies(t, file_lang)] if tools else list(DEFAULT_TOOLS.get(file_lang, []))
         if names:
             checks.extend(_run_tools(names, f))
     return checks

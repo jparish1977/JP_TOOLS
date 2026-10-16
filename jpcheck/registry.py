@@ -89,6 +89,12 @@ def serves(name: str, lang: str) -> bool:
     """Whether the tool NAME checks LANG's files: one of its tools or its audit."""
     return name in DEFAULT_TOOLS.get(lang, []) + AUDIT_TOOLS.get(lang, [])
 
+
+def applies(name: str, lang: str) -> bool:
+    """Whether a tool named for a run runs on LANG's files: one that serves
+    LANG, or a name with no runner, which runs to be reported as not run."""
+    return name not in TOOL_RUNNERS or serves(name, lang)
+
 # Tools that accept directories natively (pass the dir, not individual files).
 # Not smells: several languages run it, and each run over the whole directory
 # would report every language's smells again.

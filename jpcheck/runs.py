@@ -22,6 +22,7 @@ from jpcheck.registry import (
     _no_runner,
     _run_tools,
     _summarize,
+    applies,
     serves,
 )
 
@@ -41,13 +42,14 @@ def tool_names(lang: str, tools_arg: str | None, audit: bool) -> list[str]:
 
     A named tool runs only where it applies: on a file of a known language,
     the named tools that serve it (a shell linter on a Python file reports
-    nonsense). Each once, in first-named order: --audit adds the language's
-    audit tool to a --tools list that may already name it, and a check run
-    twice reports every finding twice."""
+    nonsense), and any name with no runner, which is reported as not run.
+    Each once, in first-named order: --audit adds the language's audit tool
+    to a --tools list that may already name it, and a check run twice
+    reports every finding twice."""
     if tools_arg:
         names = [t.strip() for t in tools_arg.split(",")]
         if lang in DEFAULT_TOOLS:
-            names = [n for n in names if serves(n, lang)]
+            names = [n for n in names if applies(n, lang)]
     elif lang in DEFAULT_TOOLS:
         names = list(DEFAULT_TOOLS[lang])
     else:
