@@ -278,6 +278,26 @@ def test_a_spec_is_kept_while_nothing_it_read_changed() -> None:
                    and sorted(p.name for p in entries.glob("*.json")) == before)
 
 
+SEEN_TEST = ("import os, sys\nimport t\n"
+             "open(os.environ['SEEN'], 'a').write(repr(os.environ.get('MUTATE_CACHE_DIR')) + '\\n')\n"
+             "if t.VALUE != 1:\n    print('FAIL value is one')\n    sys.exit(1)\nprint('ok')\n")
+
+
+def test_a_run_never_sees_the_cache() -> None:
+    """The runs a cached spec starts get no MUTATE_CACHE_DIR: a test that runs
+    mutate-spec itself must not trace and keep into this run's cache."""
+    with tempfile.TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        tree, spec, env = _fixture(td)
+        (tree / "test.py").write_text(SEEN_TEST, encoding="utf-8")
+        env["SEEN"] = str(td / "seen.txt")
+        rc, out, _ = _spec(tree, spec, env)
+        check("killed and kept, and the control and the mutant each saw no cache",
+              (rc, out.endswith("every one killed on target"),
+               (td / "seen.txt").read_text(encoding="utf-8").splitlines()),
+              (0, True, ["None", "None"]))
+
+
 def test_nothing_is_kept_for_a_spec_not_all_killed_or_without_strace() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         td = Path(tmp)

@@ -178,10 +178,14 @@ def run_in_copy(root: str, stem: str, args: list[str], traced: bool = False) -> 
         gitdir = own_git(root, tree)
         # Caches inside the copy: what a test or its tools cache (pwsh's
         # startup profile, say) is removed with it, and runs at once, or one
-        # killed mid-write, cannot corrupt the user's own.
+        # killed mid-write, cannot corrupt the user's own. The kept verdicts
+        # are this run's own business: a test that runs mutate-spec itself
+        # would otherwise trace its runs and keep or reuse verdicts in the
+        # cache this run is filling.
+        env = {k: v for k, v in os.environ.items() if k != "MUTATE_CACHE_DIR"}
+        env["XDG_CACHE_HOME"] = os.path.join(work, ".cache")
         p = subprocess.Popen([*(prefix or []), sys.executable, str(RUNNER), tree, *args],
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                             env=dict(os.environ, XDG_CACHE_HOME=os.path.join(work, ".cache")))
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
         with RUNNING_LOCK:
             RUNNING.add(p)
             if STOP.is_set():
