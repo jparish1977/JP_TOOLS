@@ -20,6 +20,7 @@ Real child processes (Python), with stalls of a fraction of a second.
 """
 
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -30,7 +31,7 @@ from unittest import mock
 
 from _harness import check, check_true, load_script, run
 from chdtool import chdman as chdman_mod
-from platformtools.tools import StalledError, _watch, run_watched
+from platformtools.tools import StalledError, _sizes, _watch, run_watched
 from platformtools.tools import run as run_tool
 
 
@@ -103,12 +104,35 @@ def test_a_tool_that_stalls() -> None:
         r, took = _watched(grow, out)
         check("one that keeps writing, slower than a poll but faster than STALL: runs to its end",
               (r.returncode if isinstance(r, subprocess.CompletedProcess) else r, took > 1.5), (0, True))
+        cue, track = Path(td) / "game.cue", Path(td) / "game.bin"
+        cd = (f"import time\nopen({str(cue)!r}, 'w').write('FILE')\nf = open({str(track)!r}, 'w')\n"
+              "for _ in range(12):\n    f.write('x'); f.flush(); time.sleep(0.15)\n")
+        r, took = _watched(cd, cue)
+        check("a CD extract: the cue written whole, then its bin beside it growing for longer than STALL: runs "
+              "to its end", (r.returncode if isinstance(r, subprocess.CompletedProcess) else r, took > 1.5), (0, True))
         r, took = _watched(grow, out, stall=30, limit=0.5)
         check_true(f"  past LIMIT, though it writes: killed, saying so (took {took:.2f} s)",
                    isinstance(r, str) and r.endswith("killed: it ran past 0.5 s") and took < 1.5)
         r, took = _watched("import time; time.sleep(3)", None, stall=0.1, limit=0.5)
         check_true(f"  with nothing to watch, only LIMIT: killed at it, not at STALL (took {took:.2f} s)",
                    isinstance(r, str) and r.endswith("killed: it ran past 0.5 s") and 0.5 <= took < 2.5)
+
+
+def test_sizes() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        check("no directory yet: nothing written", _sizes(d / "none" / "out.cue"), ())
+        check("  none of its files yet: the same", _sizes(d / "out.cue"), ())
+        for name, data in (("out.cue", "c"), ("out01.bin", "tt"), ("out.bin", "bbb"), ("other.bin", "o")):
+            (d / name).write_text(data, encoding="utf-8")
+        check("the output and every file beside it under its name, sorted, by size; another name not",
+              _sizes(d / "out.cue"), (("out.bin", 3), ("out.cue", 1), ("out01.bin", 2)))
+        # A listing taken while out01.bin was there, sized after it went.
+        entries = list(os.scandir(d))
+        (d / "out01.bin").unlink()
+        with mock.patch("platformtools.tools.os.scandir", return_value=entries):
+            check("  a file gone between the listing and its size: left out, the rest kept",
+                  _sizes(d / "out.cue"), (("out.bin", 3), ("out.cue", 1)))
 
 
 class _Clock:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -72,12 +73,23 @@ class StalledError(Exception):
     or it ran past its limit. The message says which."""
 
 
-def _size(path: Path) -> int | None:
-    """PATH's size; None while it does not exist yet."""
+def _sizes(path: Path) -> tuple[tuple[str, int], ...]:
+    """PATH and every file beside it whose name begins with PATH's stem, by
+    name and size, sorted; empty while there are none. A tool may write its
+    output's data into files of its own beside it: chdman extracting a CD
+    writes the cue whole, then the bin (or a gdi's track files)."""
     try:
-        return path.stat().st_size
-    except FileNotFoundError:  # reason: a tool that has not opened its output yet: None, a state of its own
-        return None
+        entries = list(os.scandir(path.parent))
+    except FileNotFoundError:  # reason: no directory yet: nothing written, an empty state of its own
+        return ()
+    out = []
+    for e in entries:
+        if e.name.startswith(path.stem):
+            try:
+                out.append((e.name, e.stat().st_size))
+            except FileNotFoundError:  # reason: gone since it was listed: not written, as a later look will find
+                continue
+    return tuple(sorted(out))
 
 
 def _drain(stream: IO[str], into: list[str]) -> None:
@@ -87,14 +99,14 @@ def _drain(stream: IO[str], into: list[str]) -> None:
 
 def _watch(ended: threading.Event, watch: Path | None, stall: float, limit: float, poll: float) -> str:
     """Wait for ENDED, looking every POLL seconds: why the tool must be
-    killed (WATCH did not grow, or appear, for STALL seconds; it ran past
-    LIMIT), or "" once it has ended by itself. WATCH is first sized at the
-    first look."""
+    killed (neither WATCH nor a file beside it under its name (_sizes)
+    changed for STALL seconds; it ran past LIMIT), or "" once it has ended
+    by itself. Nothing written yet is where a tool starts."""
     start = grew = time.monotonic()
-    size = None
+    size: tuple[tuple[str, int], ...] = ()
     while not ended.wait(poll):
         now = time.monotonic()
-        if watch is not None and (current := _size(watch)) != size:
+        if watch is not None and (current := _sizes(watch)) != size:
             size, grew = current, now
         elif watch is not None and now - grew >= stall:
             return f"{watch} did not grow for {stall:g} s"
@@ -106,7 +118,8 @@ def _watch(ended: threading.Event, watch: Path | None, stall: float, limit: floa
 def run_watched(prefix: list[str], args: list[str], *, watch: Path | None, stall: float, limit: float,
                 poll: float = 1.0) -> subprocess.CompletedProcess[str]:
     """Run a tool as run() does, captured, but never wait on it forever: one
-    whose WATCH file does not grow (or appear) for STALL seconds, or that
+    whose WATCH file, and the files beside it under its name, do not change
+    (or appear) for STALL seconds, or that
     runs past LIMIT seconds, is killed and StalledError raised, saying which
     (_watch). Without WATCH only LIMIT applies. Checked every POLL seconds,
     and a tool that ends returns at once, not at the next look.
