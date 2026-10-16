@@ -84,6 +84,11 @@ AUDIT_TOOLS = {
     "php":    ["composer-audit"],
 }
 
+
+def serves(name: str, lang: str) -> bool:
+    """Whether the tool NAME checks LANG's files: one of its tools or its audit."""
+    return name in DEFAULT_TOOLS.get(lang, []) + AUDIT_TOOLS.get(lang, [])
+
 # Tools that accept directories natively (pass the dir, not individual files).
 # Not smells: several languages run it, and each run over the whole directory
 # would report every language's smells again.

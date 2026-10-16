@@ -22,6 +22,7 @@ from jpcheck.registry import (
     _no_runner,
     _run_tools,
     _summarize,
+    serves,
 )
 
 Runner = Callable[[str], dict[str, Any]]
@@ -38,11 +39,15 @@ class NoSourceError(Exception):
 def tool_names(lang: str, tools_arg: str | None, audit: bool) -> list[str]:
     """The tools to run on one target: those named, else the language's defaults.
 
-    Each once, in first-named order: --audit adds the language's audit tool to
-    a --tools list that may already name it, and a check run twice reports
-    every finding twice."""
+    A named tool runs only where it applies: on a file of a known language,
+    the named tools that serve it (a shell linter on a Python file reports
+    nonsense). Each once, in first-named order: --audit adds the language's
+    audit tool to a --tools list that may already name it, and a check run
+    twice reports every finding twice."""
     if tools_arg:
         names = [t.strip() for t in tools_arg.split(",")]
+        if lang in DEFAULT_TOOLS:
+            names = [n for n in names if serves(n, lang)]
     elif lang in DEFAULT_TOOLS:
         names = list(DEFAULT_TOOLS[lang])
     else:
@@ -55,8 +60,7 @@ def tool_names(lang: str, tools_arg: str | None, audit: bool) -> list[str]:
 def _served(name: str, lang: str, groups: dict[str, list[str]]) -> list[str]:
     """The files in GROUPS the tool NAME runs on: LANG's, or with no language
     named (--tools alone), those of every language the tool serves."""
-    langs = [lang] if lang != "unknown" else [
-        g for g in groups if name in DEFAULT_TOOLS.get(g, []) + AUDIT_TOOLS.get(g, [])]
+    langs = [lang] if lang != "unknown" else [g for g in groups if serves(name, g)]
     return [f for g in langs for f in groups.get(g, [])]
 
 

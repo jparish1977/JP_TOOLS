@@ -25,7 +25,7 @@ from jpcheck.common import (
 from jpcheck.files import _collect_files, _detect_lang, _drop_ignored, ignored_by, load_ignores
 from jpcheck.native_tools import _pwsh
 from jpcheck.php_tools import _composer_cmd
-from jpcheck.registry import AUDIT_TOOLS, DEFAULT_TOOLS, _run_tools, _summarize
+from jpcheck.registry import AUDIT_TOOLS, DEFAULT_TOOLS, _run_tools, _summarize, serves
 
 # ── baseline ──────────────────────────────────────────────────────────────────
 #
@@ -212,7 +212,8 @@ def per_file_checks(target: str, lang: str = "auto",
     too, for the same reason.
 
     LANG other than "auto" keeps only that language's files; TOOLS, when
-    given, runs those in place of each file's default ones.
+    given, runs those of them that serve each file's language in place of
+    its default ones.
     """
     p = Path(target)
     root = _repo_root(target)
@@ -228,7 +229,7 @@ def per_file_checks(target: str, lang: str = "auto",
         file_lang = _detect_lang(f)
         if lang not in ("auto", file_lang):
             continue
-        names = list(tools) if tools else list(DEFAULT_TOOLS.get(file_lang, []))
+        names = [t for t in tools if serves(t, file_lang)] if tools else list(DEFAULT_TOOLS.get(file_lang, []))
         if names:
             checks.extend(_run_tools(names, f))
     return checks
@@ -325,9 +326,11 @@ def _report_recorded(dest: str, files: dict[str, Any], tools: list[str],
               "or a later real count will read as a regression.")
 
 
-def record_baseline(target: str, dest: str, force: bool = False) -> int:
+def record_baseline(target: str, dest: str, force: bool = False, tools: list[str] | None = None) -> int:
+    """Record TARGET's per-file counts to DEST: every file's default tools,
+    or the TOOLS named (where each applies), as a run with them measures."""
     root   = _repo_root(target)
-    checks = _not_audits(per_file_checks(target))
+    checks = _not_audits(per_file_checks(target, tools=tools))
     files  = _counts_by_file(checks, root)
     tools  = sorted({c.get("tool", "?") for c in checks})
     status = _statuses(checks)

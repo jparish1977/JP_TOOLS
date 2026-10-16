@@ -42,14 +42,26 @@ CLEAN = "x = 1\n"
 
 check_mod = load_script("check.py")
 
+# Every tool these files get but mypy, each where it applies. What is under
+# test here is the baseline (recording, comparing, --touched), which treats
+# every tool's counts alike, and the fixtures' findings are ruff's and
+# shellcheck's; mypy took most of each run's time and has suites of its own.
+# The default, every tool, still runs where that is the point
+# (git_test_recording, git_test_no_baseline_behaves_as_before).
+NO_MYPY = "ruff,no-cover,suppress-reason,noqa,smells,shellcheck,directive-reason"
 
-def check_py(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+
+def check_py(*args: str, cwd: Path, env: dict[str, str] | None = None,
+             tools: str | None = NO_MYPY) -> subprocess.CompletedProcess[str]:
     """check.py ARGS run in this process, from CWD with ENV added, as a
-    finished process: in-process so mutation testing sees what it reaches."""
+    finished process: in-process so mutation testing sees what it reaches.
+    TOOLS goes first as --tools, so ARGS naming their own win; None runs
+    check.py's default, every tool."""
     out, err = io.StringIO(), io.StringIO()
     here = os.getcwd()
     code: int = 0
-    with mock.patch.object(sys, "argv", ["check.py", *args]), mock.patch.dict(os.environ, env or {}), \
+    argv = ["check.py", *(["--tools", tools] if tools else []), *args]
+    with mock.patch.object(sys, "argv", argv), mock.patch.dict(os.environ, env or {}), \
             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         os.chdir(cwd)
         try:
@@ -86,11 +98,12 @@ def _files(path: Path) -> list[str]:
 def git_test_recording() -> None:
     with repo() as r:
         base = r / "base.json"
-        check("record exits 0", check_py(".", "--record-baseline", str(base), cwd=r).returncode, 0)
+        check("record exits 0", check_py(".", "--record-baseline", str(base), cwd=r, tools=None).returncode, 0)
         doc = _doc(base)
         check("records mode=per-file", doc.get("mode"), "per-file")
         tools = doc.get("tools")
-        check_true("records the tool versions it used", isinstance(tools, dict) and "ruff" in tools)
+        check_true("records the tool versions it used, every tool's by default (mypy's too)",
+                   isinstance(tools, dict) and {"ruff", "mypy"} <= set(tools))
         check_true("records per-tool status, so a tool that did not run stays visible",
                    isinstance(doc.get("status"), dict))
         check("keys files relative to the repo root; a clean file is absent", _files(base), ["dirty.py"])
@@ -101,6 +114,22 @@ def git_test_recording() -> None:
         check("each tool's entry holds every count, fixable ones included",
               sorted(entry), ["errors", "fixable", "fixable_unsafe", "warnings"])
         check_true("  and the unused imports are counted as fixable", entry["fixable"] >= 2)
+
+
+def git_test_recording_takes_tools() -> None:
+    """--record-baseline with --tools records those tools, each on the files
+    it serves, as a compare with the same --tools measures them."""
+    with repo() as r:
+        (r / "a.sh").write_text("#!/bin/sh\necho $1\n", encoding="utf-8")
+        base = r / "base.json"
+        check("record exits 0", check_py(".", "--record-baseline", str(base), cwd=r,
+                                          tools="ruff,shellcheck").returncode, 0)
+        doc = _doc(base)
+        tools, files = doc.get("tools"), doc.get("files")
+        assert isinstance(tools, dict) and isinstance(files, dict)
+        check("only the tools named are recorded", sorted(tools), ["ruff", "shellcheck"])
+        check("  each on the files it serves: ruff on the python file, shellcheck on the shell one",
+              {f: sorted(files[f]) for f in files}, {"a.sh": ["shellcheck"], "dirty.py": ["ruff"]})
 
 
 def git_test_a_version_1_baseline_is_refused_with_the_command() -> None:
@@ -458,8 +487,8 @@ def git_test_touched_never_counts_cross_file_tools() -> None:
 
 def git_test_no_baseline_behaves_as_before() -> None:
     with repo() as r:
-        check("dirty file with no --baseline still exits 1", check_py("dirty.py", cwd=r).returncode, 1)
-        check("clean file with no --baseline still exits 0", check_py("clean.py", cwd=r).returncode, 0)
+        check("dirty file with no --baseline still exits 1", check_py("dirty.py", cwd=r, tools=None).returncode, 1)
+        check("clean file with no --baseline still exits 0", check_py("clean.py", cwd=r, tools=None).returncode, 0)
 
 
 def git_test_a_linked_worktree_under_the_hooks_git_dir() -> None:

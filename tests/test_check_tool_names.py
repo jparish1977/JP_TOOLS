@@ -21,6 +21,7 @@ from pathlib import Path
 
 from _harness import ROOT, check, run
 from fake_tools import fake_tools
+from jpcheck.registry import serves
 from jpcheck.runs import tool_names
 
 
@@ -31,6 +32,19 @@ def test_tool_names() -> None:
           tool_names("python", "ruff,mypy,ruff", False), ["ruff", "mypy"])
     check("control: --audit still adds an audit tool not named",
           tool_names("php", "phpstan", True), ["phpstan", "composer-audit"])
+
+
+def test_a_named_tool_runs_only_where_it_applies() -> None:
+    """--tools on a file of a known language keeps the named tools that serve
+    it: a shell linter run on a Python file reports nonsense as findings."""
+    check("python: the shell tools named are dropped, the python ones kept in order",
+          tool_names("python", "shellcheck,ruff,directive-reason,smells", False), ["ruff", "smells"])
+    check("  an audit tool serves its language", tool_names("python", "pip-audit", False), ["pip-audit"])
+    check("  none that serves it: nothing runs", tool_names("shell", "mypy", False), [])
+    check("a language with no tools of its own: the names as given",
+          tool_names("unknown", "shellcheck,ruff", False), ["shellcheck", "ruff"])
+    check("serves: a tool, an audit, another language's tool",
+          [serves("smells", "shell"), serves("npm-audit", "js"), serves("ruff", "shell")], [True, True, False])
 
 
 def test_check_py_lists_composer_audit_once() -> None:
