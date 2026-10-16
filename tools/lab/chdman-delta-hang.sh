@@ -16,7 +16,10 @@
 #
 # Tested, chdman 0.264: 100 runs at 20 s on a quiet 32-thread box: 0 hung,
 # 0 failed. Eight copies at once, 40 runs each, on another 32-thread box:
-# 2 of 320 children hung, each at 124 bytes. Positive control: 3 runs at
+# 2 of 320 children hung, each at 124 bytes; again, 200 runs each: 7 of
+# 1600. chdman 0.289 built from source (chdman-build.sh), the same eight at
+# once on the same box just before: 13 of 1600, each at 124 bytes, so the
+# hang is not fixed by 0.289. Positive control: 3 runs at
 # 0.01 s: 3 hung, each named. A 0 from one copy on an idle box does not say
 # the hang cannot happen: run several at once.
 printf '%s' chdman-hang > /proc/$$/comm 2>/dev/null || true

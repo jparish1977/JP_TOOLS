@@ -39,9 +39,12 @@ dating 0.288 and 0.289 are not kept: one refused the fetch (HTTP 403), the
 other carries cookie and token values in its scripts, and mamedev's own page
 settles the version.
 
-## What none of them answers
+## What none of them answers, measured
 
-No release note or issue found says this hang is fixed after 0.264. Whether
-a newer chdman hangs the same way is a measurement: the same repro, loaded the
-same way, against chdman 0.289 built from source
-(`tools/lab/chdman-build.sh`).
+No release note or issue found says this hang is fixed after 0.264, so it
+was measured: chdman 0.289 built from source (`tools/lab/chdman-build.sh`)
+against the packaged 0.264, the repro run as eight copies at once, 200 runs
+each, on one 32-thread box, one version straight after the other. **0.289:
+13 of 1600 children hung; 0.264: 7 of 1600**, every one stuck at the
+124-byte header. A newer chdman does not remove it, so `chd.py` keeps its
+watchdog (kill, say so, run once more) whichever version is installed.
