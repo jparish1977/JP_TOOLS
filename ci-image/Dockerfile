@@ -8,7 +8,8 @@
 # requirements-system.txt (JP_TOOLS' gate tools and PHP extensions, pwsh and
 # PSScriptAnalyzer at their pins, through install-pwsh.sh and its sha256
 # check), plus the tools other repositories' CI installed on every run
-# (ripgrep, poppler-utils, iproute2, pandoc, dvipng, opensp, sgml-data).
+# (ripgrep, poppler-utils, iproute2, pandoc, dvipng, opensp, sgml-data,
+# ffmpeg, imagemagick, groff, docbook-to-man).
 # Python's packages stay with each job (requirements-dev.txt through the
 # runner's shared pip cache).
 #
@@ -33,8 +34,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 # is named because it is only a RECOMMENDS of dvipng: without it
 # --no-install-recommends gave a dvipng with no TeX fonts (kpsewhich
 # cmr10.tfm found nothing, measured in fleet-ci:b48264a), which reads every
-# DVI's font as missing. build.sh checks onsgmls by parsing a valid one-line
-# document: `onsgmls -v` alone parses an empty one and exits 1.
+# DVI's font as missing. ci-image/readback.sh checks onsgmls by parsing a valid one-line
+# document: `onsgmls -v` alone parses an empty one and exits 1. ffmpeg (with
+# ffprobe) and imagemagick (convert, identify) are an adopter's movie and
+# raster tools, groff (nroff) and docbook-to-man (`instant`) its man-page
+# tools, all declared in its requirements-system.txt: without them those
+# checks print SKIP in CI, and under mutmut their mutants survive.
 RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
     && apt-get update -q \
     && apt-get install -y -q --no-install-recommends \
@@ -43,6 +48,7 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
         ripgrep poppler-utils iproute2 \
         mame-tools testdisk gddrescue ntfs-3g \
         pandoc dvipng texlive-base opensp sgml-data \
+        ffmpeg imagemagick groff docbook-to-man \
     && rm -rf /var/lib/apt/lists/*
 
 # Jobs run as fleet-ci, never root. The base image's user is root, so every
