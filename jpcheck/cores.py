@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 
 # cgroup v2's CPU limit: "QUOTA PERIOD" in microseconds, or "max PERIOD" for none.
+# cgroup v1's quota (cpu.cfs_quota_us) is not read: on a v1 host the affinity
+# alone stands. The fleet's runners are v2.
 CPU_MAX = Path("/sys/fs/cgroup/cpu.max")
 CPU_COUNT = "PYTHON_CPU_COUNT"
 
@@ -36,8 +38,12 @@ def cpu_cores(cpu_max: Path = CPU_MAX) -> int:
 def child_cpu_count(env: dict[str, str], children: int, cores: int) -> dict[str, str]:
     """ENV with PYTHON_CPU_COUNT set to each of CHILDREN children's share of
     CORES, at least 1, so CHILDREN children do not each start a pool the
-    size of the box. A value already set is the repo's own choice and is
-    kept; ENV itself is not changed."""
-    if env.get(CPU_COUNT):
+    size of the box. A count already set is the repo's own choice and is
+    kept, but only a positive ASCII decimal: CPython 3.13 counts every core
+    again on "default" and refuses to START on "0", "-2" or "2.5" (a fatal
+    config_init_cpu_count error, exit 1; measured in python:3.13-slim), so
+    anything else is replaced by the share. ENV itself is not changed."""
+    preset = env.get(CPU_COUNT)
+    if preset and preset.isascii() and preset.isdecimal() and int(preset) > 0:
         return env
     return {**env, CPU_COUNT: str(max(1, cores // max(1, children)))}

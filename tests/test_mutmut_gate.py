@@ -777,7 +777,14 @@ def test_each_child_gets_its_share_of_the_cores() -> None:
     check("an uneven split rounds down, never past the cores", share({}, 3, 8), "2")
     check("no children given counts as one", share({}, 0, 8), "8")
     check("a value already set is kept", share({"PYTHON_CPU_COUNT": "3"}, 8, 32), "3")
+    check("  1, the smallest count there is, too", share({"PYTHON_CPU_COUNT": "1"}, 8, 32), "1")
     check("  an empty one is no setting, and is set", share({"PYTHON_CPU_COUNT": ""}, 8, 32), "4")
+    # Only a positive ASCII decimal is kept: CPython 3.13 counts every core on
+    # "default", and will not start at all on "0", "-2", "2.5" or a fullwidth
+    # digit (measured in python:3.13-slim).
+    for unusable in ("default", "0", "-2", "2.5", "".join(map(chr, (0xFF13,)))):
+        check(f"  {unusable!r}, no count CPython takes, is replaced by the share",
+              share({"PYTHON_CPU_COUNT": unusable}, 8, 32), "4")
     env = {"KEEP": "1"}
     check("the rest of the environment is kept, and the caller's dict is not changed",
           (cores_mod.child_cpu_count(env, 2, 8), env), ({"KEEP": "1", "PYTHON_CPU_COUNT": "4"}, {"KEEP": "1"}))

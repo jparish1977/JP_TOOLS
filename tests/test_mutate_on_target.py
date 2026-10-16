@@ -362,10 +362,14 @@ def test_spec_a_sigterm_leaves_nothing() -> None:
         return [d for d in os.listdir(TMP) if d.startswith(".mutate-term-wt-src-")]
 
     def mutant_in_place() -> bool:
+        # One read, not an exists() then a read: mutate-spec makes and removes
+        # its copy while this polls, and under load it went between the two.
         for d in copies():
-            t = os.path.join(TMP, d, "term-wt")
-            if os.path.exists(os.path.join(t, "t.py")) and b"VALUE = 3" in target_bytes(t):
-                return True
+            try:
+                if b"VALUE = 3" in target_bytes(os.path.join(TMP, d, "term-wt")):
+                    return True
+            except FileNotFoundError:  # reason: that copy is not there now, so its mutant is not in place
+                continue
         return False
 
     p = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(RUNNER), "mutate-spec.py"),
