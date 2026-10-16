@@ -79,9 +79,11 @@ def sort_paths(paths: dict[str, bool], tree: str, root: str,
                skip: tuple[str, ...]) -> tuple[dict[str, bool], dict[str, bool]]:
     """(paths in the checkout, relative to it; other inputs, absolute), each
     with whether it was opened. A path under TREE (the run's copy) or ROOT is
-    the checkout's; one under a SKIP prefix, or not an input (NOT_INPUTS), is
-    dropped, and so is a checkout path inside a tool's cache (CACHES). A
-    relative path is taken from TREE, where the runner runs."""
+    the checkout's; one under a SKIP prefix, or not an input (NOT_INPUTS) as
+    named or where it resolves (/etc/mtab is /proc/self/mounts, whose mtime
+    is the reading process's), is dropped, and so is a checkout path inside a
+    tool's cache (CACHES). A relative path is taken from TREE, where the
+    runner runs."""
     repo: dict[str, bool] = {}
     ext: dict[str, bool] = {}
     for p, opened in paths.items():
@@ -93,7 +95,8 @@ def sort_paths(paths: dict[str, bool], tree: str, root: str,
                     mark(repo, rel, opened)
                 break
         else:
-            if not a.startswith(NOT_INPUTS) and not any(a == s or a.startswith(s + os.sep) for s in skip):
+            if (not a.startswith(NOT_INPUTS) and not os.path.realpath(a).startswith(NOT_INPUTS)
+                    and not any(a == s or a.startswith(s + os.sep) for s in skip)):
                 mark(ext, a, opened)
     return repo, ext
 

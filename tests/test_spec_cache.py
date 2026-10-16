@@ -86,6 +86,13 @@ def test_sort_paths() -> None:
     check("  opened stays opened, in either order", repo, {"a.py": True})
     _, ext = spec_cache.sort_paths({"/usr/lib/": True, "/usr/lib": False, "/usr/x": False}, "/w/copy", "/root", ())
     check("  and outside, one path named two ways: opened if either was", ext, {"/usr/lib": True, "/usr/x": False})
+    with tempfile.TemporaryDirectory() as td:
+        (Path(td) / "mtab").symlink_to("/proc/self/mounts")
+        (Path(td) / "real").write_text("", encoding="utf-8")
+        (Path(td) / "link").symlink_to(Path(td) / "real")
+        _, ext = spec_cache.sort_paths({str(Path(td) / n): False for n in ("mtab", "link")}, "/w/copy", "/root", ())
+        check("  a link into /proc is no input, as /proc is not; a link elsewhere is, by its own name",
+              ext, {str(Path(td) / "link"): False})
 
 
 def test_fingerprints() -> None:
