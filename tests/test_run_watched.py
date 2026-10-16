@@ -31,6 +31,7 @@ from unittest import mock
 from _harness import check, check_true, load_script, run
 from chdtool import chdman as chdman_mod
 from platformtools.tools import StalledError, _watch, run_watched
+from platformtools.tools import run as run_tool
 
 
 def _watched(code: str, watch: Path | None, stall: float = 0.6, limit: float = 30.0) -> tuple[object, float]:
@@ -42,6 +43,17 @@ def _watched(code: str, watch: Path | None, stall: float = 0.6, limit: float = 3
     except StalledError as e:
         result = str(e)
     return result, time.monotonic() - t
+
+
+def test_run() -> None:
+    """run(), which chdman() no longer goes through: the command, text, both
+    pipes captured, and a failure returned rather than raised."""
+    code = "import sys; print('o'); print('e', file=sys.stderr); sys.exit(4)"
+    r = run_tool([sys.executable, "-c"], [code])
+    check("the prefix then the arguments; exit status, stdout and stderr as text, nothing raised",
+          (r.args, r.returncode, r.stdout, r.stderr), ([sys.executable, "-c", code], 4, "o\n", "e\n"))
+    r = run_tool([sys.executable, "-c"], ["pass"], capture=False)
+    check("  capture=False: nothing captured", (r.returncode, r.stdout, r.stderr), (0, None, None))
 
 
 def test_a_tool_that_ends() -> None:
