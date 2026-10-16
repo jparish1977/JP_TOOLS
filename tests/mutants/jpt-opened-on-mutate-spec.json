@@ -3,7 +3,7 @@
   "mutants": [
     {
       "name": "the last run's word for a path",
-      "edits": [["                        merged[p] = merged.get(p, False) or opened\n", "                        merged[p] = opened\n"]],
+      "edits": [["                        spec_cache.mark(merged, p, opened)\n", "                        merged[p] = opened\n"]],
       "target": "a file added to a directory one run listed and another resolved through: run again"
     }
   ]

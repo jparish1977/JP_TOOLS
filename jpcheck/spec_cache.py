@@ -53,6 +53,14 @@ def strace_prefix(trace: str) -> list[str] | None:
     return [exe, "-f", "-qq", "-e", f"trace={CALLS}", "-o", trace] if exe else None
 
 
+def mark(paths: dict[str, bool], path: str, opened: bool) -> None:
+    """Record PATH in PATHS: opened once any call opened it."""
+    if opened:
+        paths[path] = True
+    else:
+        paths.setdefault(path, False)
+
+
 def paths_in(trace_text: str) -> dict[str, bool]:
     """Every path a trace's calls name, unescaped, each with whether any of
     those calls opened it."""
@@ -63,8 +71,7 @@ def paths_in(trace_text: str) -> dict[str, bool]:
             # strace writes a byte it will not print as \xNN: back to bytes,
             # then the file system's own encoding.
             raw: bytes = codecs.escape_decode(m.group(2).encode())[0]
-            path = os.fsdecode(raw)
-            out[path] = out.get(path, False) or m.group(1) in OPENS
+            mark(out, os.fsdecode(raw), m.group(1) in OPENS)
     return out
 
 
@@ -83,11 +90,11 @@ def sort_paths(paths: dict[str, bool], tree: str, root: str,
             if a == base or a.startswith(base + os.sep):
                 rel = os.path.relpath(a, base)
                 if not CACHES & set(Path(rel).parts):
-                    repo[rel] = repo.get(rel, False) or opened
+                    mark(repo, rel, opened)
                 break
         else:
             if not a.startswith(NOT_INPUTS) and not any(a == s or a.startswith(s + os.sep) for s in skip):
-                ext[a] = ext.get(a, False) or opened
+                mark(ext, a, opened)
     return repo, ext
 
 

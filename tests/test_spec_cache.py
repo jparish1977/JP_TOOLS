@@ -62,6 +62,16 @@ def test_paths_in_strace_lines() -> None:
            "/repo": True, "/home": False, "/etc/x": False, "/repo/new": True, "/etc/y": True, "/etc/z": True})
 
 
+def test_mark() -> None:
+    paths: dict[str, bool] = {}
+    spec_cache.mark(paths, "a", False)
+    spec_cache.mark(paths, "b", True)
+    check("first seen: as that call left it", paths, {"a": False, "b": True})
+    spec_cache.mark(paths, "a", True)
+    spec_cache.mark(paths, "b", False)
+    check("  then opened once any call opened it, in either order", paths, {"a": True, "b": True})
+
+
 def test_sort_paths() -> None:
     paths = {"/w/copy/a.py": False, "/root/a.py": True, "/root/b.py": False, "/w/copy/.mypy_cache/x.db": True,
              "/w/copy/pkg/__pycache__/m.pyc": True, "/w/other/x": True, "/proc/self/maps": True,
@@ -74,6 +84,8 @@ def test_sort_paths() -> None:
           ext, {"/usr/lib/python3/os.py": True, "/usr/lib": False})
     repo, _ = spec_cache.sort_paths({"/root/a.py": True, "/w/copy/a.py": False}, "/w/copy", "/root", ("/w",))
     check("  opened stays opened, in either order", repo, {"a.py": True})
+    _, ext = spec_cache.sort_paths({"/usr/lib/": True, "/usr/lib": False, "/usr/x": False}, "/w/copy", "/root", ())
+    check("  and outside, one path named two ways: opened if either was", ext, {"/usr/lib": True, "/usr/x": False})
 
 
 def test_fingerprints() -> None:
@@ -151,6 +163,9 @@ def test_matches() -> None:
         listed = {**doc, "repo": {"d": spec_cache.repo_print(td, "d", True)},
                   "ext": {str(Path(td) / "d"): spec_cache.ext_print(str(Path(td) / "d"), True)}}
         passed = {**doc, "repo": {"d": "dir"}, "ext": {str(Path(td) / "d"): "dir"}}
+        check("a directory unchanged: its listing recorded, in or outside the checkout, still matches",
+              (spec_cache._matches({**listed, "ext": {}}, td, {"s": "1"}),
+               spec_cache._matches({**listed, "repo": {}}, td, {"s": "1"})), ("V", "V"))
         (Path(td) / "d" / "new").write_bytes(b"")
         check("a directory gains a file: a listing recorded no longer matches; a directory resolved through still does",
               (spec_cache._matches(listed, td, {"s": "1"}), spec_cache._matches(passed, td, {"s": "1"})), (None, "V"))
@@ -211,19 +226,22 @@ def test_keep_names_by_content_and_keeps_the_newest() -> None:
         (root / "f").write_bytes(b"x")
         outside = Path(td) / "out.txt"
         outside.write_bytes(b"y")
-        outdir = Path(td) / "outdir"
+        outdir, listed = Path(td) / "outdir", Path(td) / "listed"
         outdir.mkdir()
+        listed.mkdir()
         cache = Path(td) / "a" / "b"
-        repo, ext = {"f": False, ".": True}, {str(outside): False, str(outdir): False}
+        repo = {"f": False, ".": True}
+        ext = {str(outside): False, str(outdir): False, str(listed): True}
         spec_cache.keep(str(cache), "s", str(root), {"p": "1"}, repo, ext, "V")
         doc = {"sources": {"p": "1"}, "verdict": "V",
                "repo": {"f": spec_cache.repo_print(str(root), "f", False),
                         ".": spec_cache.repo_print(str(root), ".", True)},
-               "ext": {str(outside): spec_cache.ext_print(str(outside), False), str(outdir): "dir"}}
+               "ext": {str(outside): spec_cache.ext_print(str(outside), False), str(outdir): "dir",
+                       str(listed): spec_cache.ext_print(str(listed), True)}}
         text = json.dumps(doc, sort_keys=True).encode()
         named = cache / "s" / f"{hashlib.sha256(text).hexdigest()[:16]}.json"
         check("written where no cache was, named by its sorted JSON, holding it, each path printed as it was "
-              "read (the checkout's root listed, an outside directory resolved through)",
+              "read (the checkout's root and an outside directory listed, another resolved through)",
               named.read_bytes() if named.is_file() else None, text)
         spec_cache.keep(str(cache), "s", str(root), {"p": "1"}, repo, ext, "V")
         check("  the same state again: the same one entry", len(list((cache / "s").glob("*.json"))), 1)

@@ -273,7 +273,7 @@ def _keep(cache: str | None, stem: str, root: str, want: dict[str, str],
             if r:
                 for merged, part in ((repo, r[0]), (ext, r[1])):
                     for p, opened in part.items():
-                        merged[p] = merged.get(p, False) or opened
+                        spec_cache.mark(merged, p, opened)
         try:
             spec_cache.keep(cache, stem, root, want, repo, ext, verdict)
         except OSError as e:  # reason: a verdict not kept only means the spec runs next time; the run's verdict stands
