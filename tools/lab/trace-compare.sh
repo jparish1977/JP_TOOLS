@@ -14,10 +14,11 @@
 #   process-wide state (functools.cache, a module-level instance made at
 #   import) records only the first test that reaches it in a process: one
 #   test in mutmut's single serial process, the first in each worker in
-#   parallel. Measured at c8fc44b: 2 of 591 functions (jpcheck.common._git,
-#   under the cached tool_roots, and Directive.__init__), every serial test
-#   kept. Extra reach runs more tests against those functions' mutants,
-#   never fewer.
+#   parallel. Such a function can also LOSE a test: code run as its module is
+#   collected is credited to the first test that runs after, which is a
+#   different test serially and in each worker, so this exits 1. A loss is
+#   then judged by its verdicts: run that function's mutants with the
+#   parallel trace and compare them with a serial run's.
 #
 # HOW: for each mode, mutmut-gate.py's prepare() makes mutants/ fresh, then
 #   mutmut-clean.py runs mutmut with a mutant pattern that names nothing, so
