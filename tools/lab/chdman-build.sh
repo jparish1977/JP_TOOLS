@@ -15,13 +15,16 @@
 # (oob/chdman-hangs/CHDMAN-NOTE.md); whether a later release does is measured
 # with tools/lab/chdman-delta-hang.sh, which takes the chdman to run as CHDMAN.
 #
-# USE_QTDEBUG=0: the makefile otherwise looks for Qt (qmake6, moc) for
-# MAME's debugger window, which no tool uses; without Qt installed it stops
-# before compiling anything ("Qt's Meta Object Compiler (moc) wasn't found!").
+# Two steps: the top-level makefile generates the project makefiles (with
+# USE_QTDEBUG=0, or it looks for Qt's qmake6 and moc for MAME's debugger
+# window, which no tool uses, and stops before compiling anything); then
+# the generated makefile builds the chdman target alone. A whole TOOLS=1
+# build also compiles MAME's display layer, which wants SDL2_ttf's headers,
+# and chdman uses none of it.
 #
-# Tested: mame0289 on Ubuntu 24.04 (g++ 13.3, SDL2 headers installed, no Qt):
-# without USE_QTDEBUG=0 it stopped as above. NOT tested: any other tag; a box
-# without SDL2 headers.
+# Tested: mame0289 on Ubuntu 24.04 (g++ 13.3, SDL2 headers, no Qt, no
+# SDL2_ttf): a TOOLS=1 build stopped first on Qt, then (with USE_QTDEBUG=0)
+# on SDL2/SDL_ttf.h. NOT tested: any other tag.
 printf '%s' chdman-build > /proc/$$/comm 2>/dev/null || true
 set -eu
 tag=${1:-mame0289}
@@ -33,12 +36,16 @@ if [ ! -d "$src/.git" ]; then
 fi
 cd "$src"
 git log --oneline -1
-make -s TOOLS=1 EMULATOR=0 USE_QTDEBUG=0 NOWERROR=1 -j"$jobs" > "$src/build.log" 2>&1 || {
+project=build/projects/sdl/mame/gmake-linux
+{ make -s TOOLS=1 EMULATOR=0 USE_QTDEBUG=0 NOWERROR=1 "$project/Makefile" &&
+  make -s -C "$project" config=release64 -j"$jobs" chdman; } > "$src/build.log" 2>&1 || {
     echo "chdman-build: the build failed; the end of $src/build.log:"
     tail -n 30 "$src/build.log"
     exit 1
 }
+built=$(find "$src" -name chdman -type f -perm -u+x -newer "$src/makefile" | head -1)
+[ -n "$built" ] || { echo "chdman-build: the build said it finished, but no chdman binary is there"; exit 1; }
 mkdir -p "$dest"
-cp chdman "$dest/chdman"
+cp "$built" "$dest/chdman"
 "$dest/chdman" --help 2>&1 | head -1
 echo "chdman-build: $dest/chdman"
