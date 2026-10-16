@@ -115,24 +115,89 @@ def test_names_without_a_directory() -> None:
           (t.paths, t.found >= {"/r/.git/hooks/pre-commit"}, t.unplaced),
           ({"/r/.git/hooks/pre-commit": False, "/elsewhere/x": True, "/etc/ld.so.cache": True}, True, []))
     for between in ('7 chdir("/x")                    = 0\n', '7 fchdir(4</x>)                    = 0\n'):
+        what = between.split("(")[0][2:]
         t = spec_cache.paths_in('9 stat("b", 0x1) = 0\n' + between + '9 openat(AT_FDCWD</r>, "/e", O_RDONLY) = 3\n')
-        check(f"  with a {between.split('(')[0][2:]} by any process in between: it cannot be placed",
+        check(f"  a {what} by another process in between: still placed", (t.paths.get("/r/b"), t.unplaced),
+              (False, []))
+        t = spec_cache.paths_in(THREAD + '9 stat("b", 0x1) = 0\n' + between
+                                + '9 openat(AT_FDCWD</r>, "/e", O_RDONLY) = 3\n')
+        check(f"  a {what} by a thread of its own in between: it cannot be placed",
               ("/r/b" in t.paths, [line.split("(")[0] for line in t.unplaced]), (False, ["9 stat"]))
-    t = spec_cache.paths_in('9 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n7 chdir("/x") = 0\n9 stat("b", 0x1) = 0\n')
-    check("  a working directory known before a chdir by any process is forgotten: threads share one",
-          [line.split("(")[0] for line in t.unplaced], ["9 stat"])
+    t = spec_cache.paths_in(THREAD + '9 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n7 chdir("/x") = 0\n'
+                            '9 stat("b", 0x1) = 0\n7 stat("c", 0x1) = 0\n')
+    check("  a thread's chdir to a known place moves the process with it: both now there",
+          (t.paths.get("/x/b"), t.paths.get("/x/c"), t.unplaced), (False, False, []))
     t = spec_cache.paths_in('9 stat("b", 0x1) = 0\n')
     check("  never told where: cannot be placed", (t.paths, len(t.unplaced)), ({}, 1))
     t = spec_cache.paths_in('9 chdir("sub") = 0\n')
     check("  a relative chdir from nowhere known: cannot be placed", (t.paths, len(t.unplaced)), ({}, 1))
+    t = spec_cache.paths_in('9 chdir("sub") = 0\n9 stat("b", 0x1) = 0\n9 openat(AT_FDCWD</r/sub>, "x", O_RDONLY) = 3\n')
+    check("  after it, a held name is placed by the next AT_FDCWD, which says where the chdir went",
+          (t.paths, len(t.unplaced)), ({"/r/sub/b": False, "/r/sub/x": True}, 1))
     t = spec_cache.paths_in('9 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n9 chdir("sub") = 0\n9 stat("b", 0x1) = 0\n'
-                            '9 chdir("/nowhere") = -1 ENOENT (No such file or directory)\n9 stat("c", 0x1) = 0\n')
-    check("  a chdir that worked: names after it in the new directory; one that failed: no directory known",
+                            '9 chdir("/nowhere") = -1 ENOENT (No such file or directory)\n9 stat("c", 0x1) = 0\n'
+                            '9 chdir("/u" <unfinished ...>\n9 <... chdir resumed>) = 0\n9 stat("d", 0x1) = 0\n')
+    check("  a chdir that worked: names after it in the new directory; one that failed: where they were; "
+          "one whose result came later: not known",
           (sorted(t.paths), [line.split("(")[0] for line in t.unplaced]),
-          (["/nowhere", "/r/a", "/r/sub", "/r/sub/b"], ["9 stat"]))
-    t = spec_cache.paths_in('9 fchdir(4</r/d>) = 0\n9 stat("b", 0x1) = 0\n9 fchdir(5) = 0\n9 stat("c", 0x1) = 0\n')
-    check("  an fchdir: names after it in its directory; one strace could not name: none known",
-          (t.paths, [line.split("(")[0] for line in t.unplaced]), ({"/r/d/b": False}, ["9 stat"]))
+          (["/nowhere", "/r/a", "/r/sub", "/r/sub/b", "/r/sub/c", "/u"], ["9 stat"]))
+    t = spec_cache.paths_in('9 fchdir(4</r/d>) = 0\n9 stat("b", 0x1) = 0\n9 fchdir(6</q>) = -1 EBADF (Bad file)\n'
+                            '9 stat("c", 0x1) = 0\n9 fchdir(5) = 0\n9 stat("e", 0x1) = 0\n')
+    check("  an fchdir: names after it in its directory; one that failed: where they were; one strace could "
+          "not name: none known",
+          (t.paths, [line.split("(")[0] for line in t.unplaced]), ({"/r/d/b": False, "/r/d/c": False}, ["9 stat"]))
+
+
+# Process 9 starts thread 7: CLONE_FS, so the two share a working directory.
+THREAD = ("9 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD, child_tid=0x1, "
+          "exit_signal=0, stack=0x2, stack_size=0x3}, 88) = 7\n")
+
+
+def test_children() -> None:
+    """A child process starts where its parent was at the clone; a thread
+    shares its parent's working directory."""
+    t = spec_cache.paths_in('9 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n'
+                            '9 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|SIGCHLD, child_tidptr=0x1) = 7\n'
+                            '7 access(".git/hooks/post-checkout", X_OK) = -1 ENOENT (No such file or directory)\n'
+                            '7 chdir("/y") = 0\n7 stat("c", 0x1) = 0\n9 stat("d", 0x1) = 0\n')
+    check("a forked child: a relative name where its parent was; its own chdir moves it alone",
+          (sorted(t.paths), t.unplaced),
+          (["/r/.git/hooks/post-checkout", "/r/a", "/r/d", "/y", "/y/c"], []))
+    t = spec_cache.paths_in('9 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n'
+                            '9 clone(child_stack=NULL, flags=SIGCHLD <unfinished ...>\n'
+                            '7 access(".git/hooks/post-checkout", X_OK) = -1 ENOENT (No such file or directory)\n'
+                            '9 chdir("/later") = 0\n'
+                            '9 <... clone resumed>, child_tidptr=0x1) = 7\n')
+    check("  its calls before the clone returns (strace -f prints the child first): held, then placed where "
+          "the parent was when it cloned, not where it went after",
+          (t.paths.get("/r/.git/hooks/post-checkout"), t.unplaced), (False, []))
+    t = spec_cache.paths_in('9 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n9 vfork()                         = 7\n'
+                            '7 execve("./x", ["./x"], 0x1 /* 1 var */) = 0\n')
+    check("  vfork (posix_spawn): the same", (t.paths.get("/r/x"), t.unplaced), (False, []))
+    t = spec_cache.paths_in('9 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n9 clone(child_stack=NULL <unfinished ...>\n'
+                            '7 openat(AT_FDCWD</own>, "o", O_RDONLY) = 3\n9 <... clone resumed>) = 7\n'
+                            '7 stat("w", 0x1) = 0\n')
+    check("  a child whose own AT_FDCWD came first: where that said, not its parent's",
+          (t.paths.get("/own/w"), t.paths.get("/r/w")), (False, None))
+    t = spec_cache.paths_in('9 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n9 clone(child_stack=NULL <unfinished ...>\n'
+                            '7 chdir("sub") = 0\n9 <... clone resumed>) = 7\n7 stat("z", 0x1) = 0\n')
+    check("  a child that moved somewhere not known before the clone returned: not put back at its parent's",
+          ([line.split("(")[0] for line in t.unplaced], "/r/z" in t.paths), (["7 chdir", "7 stat"], False))
+    t = spec_cache.paths_in('9 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n'
+                            '9 clone(child_stack=NULL, flags=SIGCHLD) = -1 EAGAIN (Resource temporarily unavailable)\n'
+                            '7 stat("q", 0x1) = 0\n')
+    check("  a clone that failed: no child, and pid 7 is no one's", ([line.split("(")[0] for line in t.unplaced]),
+          ["7 stat"])
+    t = spec_cache.paths_in('9 clone(child_stack=NULL, flags=SIGCHLD) = 7\n7 stat("q", 0x1) = 0\n')
+    check("  a parent whose own directory was not known: nor is the child's",
+          [line.split("(")[0] for line in t.unplaced], ["7 stat"])
+    t = spec_cache.paths_in('9 clone3({flags=CLONE_VM|CLONE_FS|CLONE_THREAD, exit_signal=0} <unfinished ...>\n'
+                            '7 stat("t", 0x1) = 0\n9 <... clone3 resumed> => {parent_tid=[7]}, 88) = 7\n'
+                            '9 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n')
+    check("a thread: what it named before its clone returned is placed by its process's next AT_FDCWD",
+          (t.paths.get("/r/t"), t.unplaced), (False, []))
+    t = spec_cache.paths_in(THREAD + '7 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n9 stat("p", 0x1) = 0\n')
+    check("  and a thread's AT_FDCWD says where its process is", (t.paths.get("/r/p"), t.unplaced), (False, []))
 
 
 def test_lines_it_cannot_place() -> None:
@@ -283,9 +348,10 @@ def test_exact_forms() -> None:
         check("strace -f, quiet, descriptors as their paths, the traced calls, to the file named",
               spec_cache.strace_prefix("T"),
               ["/x/strace", "-f", "-qq", "-y", "-e", f"trace={spec_cache.CALLS}", "-o", "T"])
-    check("  the calls: every one that names a path, the listing, and the working directory's changes",
+    check("  the calls: every one that names a path, the listing, the working directory's changes, and the "
+          "ones that make a child",
           spec_cache.CALLS, "open,openat,openat2,creat,execve,execveat,stat,lstat,newfstatat,statx,access,"
-          "faccessat,faccessat2,readlink,readlinkat,getdents64,chdir,fchdir")
+          "faccessat,faccessat2,readlink,readlinkat,getdents64,chdir,fchdir,clone,clone3,fork,vfork")
     with tempfile.TemporaryDirectory() as td:
         (Path(td) / "d").mkdir()
         for name in ("b", "a"):
@@ -463,13 +529,17 @@ def test_changed_since_margin() -> None:
                spec_cache._changed_since(str(f), False, c + spec_cache.MARGIN_NS + 1)), (True, False))
         check("  the margin is one second", spec_cache.MARGIN_NS, 10**9)
         check("  a path not there: not", spec_cache._changed_since(str(Path(td) / "none"), True, 0), False)
-        with mock.patch("os.lstat", side_effect=PermissionError("denied")):
+        for unreachable in (NotADirectoryError("a parent is a file"), PermissionError("denied")):
+            with mock.patch("os.lstat", side_effect=unreachable):
+                check(f"  a path no run of this user could reach ({type(unreachable).__name__}): no status, so not",
+                      spec_cache._changed_since(str(f), False, 0), False)
+        with mock.patch("os.lstat", side_effect=OSError(5, "I/O error")):
             try:
                 spec_cache._changed_since(str(f), False, 0)
                 raised = ""
-            except PermissionError as e:
-                raised = str(e)
-        check("  a status it cannot read: raised, never read as unchanged", raised, "denied")
+            except OSError as e:
+                raised = e.strerror or ""
+        check("  any other status it cannot read: raised, never read as unchanged", raised, "I/O error")
         # A link newer than its target, by more than the clock's tick.
         time.sleep(0.05)
         (Path(td) / "link").symlink_to(f)

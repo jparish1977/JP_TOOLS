@@ -30,9 +30,14 @@ WHERE A PATH IS. strace runs with -y, so a call made relative to a directory
 that directory, and AT_FDCWD prints the caller's working directory: a name is
 joined to the directory its call names. A call that takes no directory (open,
 stat, execve) with a relative name is joined to its process's working
-directory as its last AT_FDCWD call printed it, forgotten at any chdir. A
-traced call whose path it cannot place keeps nothing for that run: a read it
-cannot name is a read it cannot fingerprint.
+directory as its AT_FDCWD calls print it, before or after (a working
+directory outlives execve). clone, fork and vfork are traced too: a thread,
+or any clone with CLONE_FS, shares its parent's working directory, so a
+chdir there moves both; any other child starts where its parent was at the
+clone. A chdir to somewhere not known leaves its group's directory unknown
+until an AT_FDCWD says it again. A traced call whose path it cannot place
+keeps nothing for that run: a read it cannot name is a read it cannot
+fingerprint.
 
 AS IT WAS WHEN THE RUNS READ IT. Each run reads its copy as the checkout was
 when that copy was made, and outside paths as they were then, while the
@@ -65,7 +70,11 @@ from pathlib import Path
 from typing import NamedTuple
 
 CALLS = ("open,openat,openat2,creat,execve,execveat,stat,lstat,newfstatat,statx,access,"
-         "faccessat,faccessat2,readlink,readlinkat,getdents64,chdir,fchdir")
+         "faccessat,faccessat2,readlink,readlinkat,getdents64,chdir,fchdir,clone,clone3,fork,vfork")
+# The calls that make a process or a thread, and the flag that has it share
+# its parent's working directory rather than start with a copy.
+CLONES = {"clone", "clone3", "fork", "vfork"}
+_SHARES_FS = re.compile(r"\bCLONE_FS\b")
 # A traced call's pid and name, as strace -f writes them.
 _CALL = re.compile(r'(?:\[pid\s+)?(\d+)\]?\s+(\w+)\(')
 # Its first arguments: the directory one, when the call takes one (AT_FDCWD
@@ -74,7 +83,7 @@ _CALL = re.compile(r'(?:\[pid\s+)?(\d+)\]?\s+(\w+)\(')
 _ARGS = re.compile(r'(?:(AT_FDCWD|\d+)(?:<((?:[^>\\]|\\.)*)>)?, )?(?:"((?:[^"\\]|\\.)*)"|NULL\b)')
 # fchdir's one argument, a directory by its number and path.
 _FD = re.compile(r'\d+<((?:[^>\\]|\\.)*)>')
-_RESUMED = re.compile(r'(?:\[pid\s+)?(\d+)\]?\s+<\.\.\. \w+ resumed>')
+_RESUMED = re.compile(r'(?:\[pid\s+)?(\d+)\]?\s+<\.\.\. (\w+) resumed>')
 # The calls that open a path: a directory opened is a directory listed.
 OPENS = {"open", "openat", "openat2", "creat"}
 NOT_INPUTS = ("/proc/", "/sys/", "/dev/")
@@ -126,19 +135,36 @@ def _succeeded(line: str) -> bool:
     return bool(results) and results[-1] not in ("-1", "?")
 
 
+def _failed(line: str) -> bool:
+    """Whether LINE's call returned an error: it changed nothing (a failed
+    chdir leaves the working directory where it was)."""
+    results = _RESULT.findall(line)
+    return bool(results) and results[-1] == "-1"
+
+
 class _Reader:
-    """paths_in's state, line by line: each process's working directory as
-    its calls last printed it; a call still running (unfinished), by pid;
-    relative names from calls with no directory, waiting for their process's
-    next AT_FDCWD to say where they were."""
+    """paths_in's state, line by line: the working directory of each group
+    of processes that share one (a thread, or any clone with CLONE_FS, joins
+    its parent's group), as its calls last printed it, or lost to a chdir
+    that went somewhere not known; each clone still running, with its
+    parent's directory then; a call still running (unfinished), by pid;
+    relative names from calls with no directory, by pid, waiting for their
+    group's next AT_FDCWD to say where they were."""
 
     def __init__(self) -> None:
         self.out: dict[str, bool] = {}
         self.found: set[str] = set()
         self.unplaced: list[str] = []
+        self.group: dict[str, str] = {}
         self.cwd: dict[str, str] = {}
+        self.lost: set[str] = set()
+        self.spawning: dict[str, tuple[str | None, bool]] = {}
         self.running: dict[str, str] = {}
         self.held: dict[str, list[tuple[str, str, str]]] = {}
+
+    def g(self, pid: str) -> str:
+        """PID's group: the pid it shares a working directory with."""
+        return self.group.get(pid, pid)
 
     def place(self, call: str, path: str, line: str) -> str:
         """PATH, named by CALL on LINE, as read; found if it succeeded.
@@ -149,30 +175,61 @@ class _Reader:
             self.found.add(path)
         return path
 
-    def forget(self) -> None:
-        """A chdir or fchdir: threads share a working directory and strace
-        names a thread as it names a process, so every one known is
-        forgotten and every held name can no longer be placed."""
-        self.cwd.clear()
-        for lines in self.held.values():
-            self.unplaced.extend(line for _, _, line in lines)
-        self.held.clear()
+    def forget(self, g: str, now: str | None) -> None:
+        """A chdir or fchdir in group G that did not fail: its directory is
+        NOW, or lost when that is not known; names its pids held can no
+        longer be placed."""
+        for pid in [p for p in self.held if self.g(p) == g]:
+            self.unplaced.extend(line for _, _, line in self.held.pop(pid))
+        if now is None:
+            self.cwd.pop(g, None)
+            self.lost.add(g)
+        else:
+            self.cwd[g] = now
+            self.lost.discard(g)
 
     def fchdir(self, pid: str, line: str, pos: int) -> None:
-        """PID's fchdir on LINE, its argument from POS: every working
-        directory forgotten (forget), PID's the descriptor's when it worked."""
+        """PID's fchdir on LINE, its argument from POS: its group's
+        directory is the descriptor's when it worked, else lost (forget)."""
         fd = _FD.match(line, pos)
-        self.forget()
-        if fd and _succeeded(line):
-            self.cwd[pid] = _text(fd.group(1))
+        if not _failed(line):
+            self.forget(self.g(pid), _text(fd.group(1)) if fd and _succeeded(line) else None)
 
     def at(self, pid: str, cwd: str) -> None:
-        """PID's working directory, as an AT_FDCWD printed it: names it held
-        were there (a working directory outlives execve). A held call's
-        result is already joined to its line (resumed)."""
-        self.cwd[pid] = cwd
-        for call, name, line in self.held.pop(pid, []):
-            self.place(call, os.path.join(cwd, name), line)
+        """PID's working directory, as an AT_FDCWD printed it: its group's,
+        and where every name its group's pids held was (a working directory
+        outlives execve). A held call's result is already joined to its
+        line (resumed)."""
+        g = self.g(pid)
+        self.cwd[g] = cwd
+        self.lost.discard(g)
+        for p in [p for p in self.held if self.g(p) == g]:
+            for call, name, line in self.held.pop(p):
+                self.place(call, os.path.join(cwd, name), line)
+
+    def spawn(self, pid: str, line: str) -> None:
+        """A clone, fork or vfork by PID on LINE: its group's directory now,
+        and whether the child shares it (CLONE_FS); the child is placed
+        when the call's result names it (born)."""
+        self.spawning[pid] = (self.cwd.get(self.g(pid)), bool(_SHARES_FS.search(line)))
+        self.born(pid, line)
+
+    def born(self, pid: str, line: str) -> None:
+        """The result of PID's clone on LINE, when it has one: a child that
+        shares PID's directory joins its group; one with a copy of it starts
+        where PID's group was at the clone, unless its own calls already
+        said where it is."""
+        results = _RESULT.findall(line)
+        if not results or pid not in self.spawning:
+            return
+        cwd, shares = self.spawning.pop(pid)
+        child = results[-1]
+        if child in ("-1", "?"):
+            return
+        if shares:
+            self.group[child] = self.g(pid)
+        elif cwd is not None and child not in self.cwd and child not in self.lost:
+            self.at(child, cwd)
 
     def resumed(self, line: str) -> None:
         """A '<... call resumed>' LINE: the result of PID's call still running."""
@@ -180,7 +237,9 @@ class _Reader:
         if not r:
             return
         pid = r.group(1)
-        if (path := self.running.pop(pid, None)) and _succeeded(line):
+        if r.group(2) in CLONES:
+            self.born(pid, line)
+        elif (path := self.running.pop(pid, None)) and _succeeded(line):
             self.found.add(path)
         elif ((held := self.held.get(pid)) and "<unfinished ...>" in held[-1][2]
               and " resumed>" not in held[-1][2]):
@@ -205,14 +264,14 @@ class _Reader:
         if not name:
             # No path and no descriptor: the call failed and read nothing.
             return None
-        if dirfd is None and pid in self.cwd:
-            return os.path.join(self.cwd[pid], name)
+        if dirfd is None and self.g(pid) in self.cwd:
+            return os.path.join(self.cwd[self.g(pid)], name)
         if dirfd is None and call != "chdir":
             self.held.setdefault(pid, []).append((call, name, line))
             return None
         self.unplaced.append(line)
-        if call == "chdir":
-            self.forget()
+        if call == "chdir" and not _failed(line):
+            self.forget(self.g(pid), None)
         return None
 
     def line(self, line: str) -> None:
@@ -222,6 +281,9 @@ class _Reader:
             return
         pid, call = m.groups()
         self.running.pop(pid, None)
+        if call in CLONES:
+            self.spawn(pid, line)
+            return
         if call == "getdents64":
             return
         if call == "fchdir":
@@ -239,10 +301,8 @@ class _Reader:
         path = self.place(call, named, line)
         if "<unfinished ...>" in line:
             self.running[pid] = path
-        if call == "chdir":
-            self.forget()
-            if _succeeded(line):
-                self.cwd[pid] = path
+        if call == "chdir" and not _failed(line):
+            self.forget(self.g(pid), path if _succeeded(line) else None)
 
 
 def paths_in(trace_text: str) -> Trace:
@@ -421,7 +481,7 @@ def _changed_since(path: str, opened: bool, since: int) -> bool:
             if st.st_ctime_ns >= cutoff:
                 return True
             st = os.stat(path)
-    except FileNotFoundError:  # reason: a path not there, or a link to none, has no status to compare; a run that found it is answered by moved(). Any other error propagates, and keep() keeps nothing
+    except (FileNotFoundError, NotADirectoryError, PermissionError):  # reason: a path not there (a parent that is a file is ENOTDIR: Python probing bin/mypy/__init__), or one no run of this user could reach either (git probing /root/.git), has no status; its print says absent (ext_print), and a run that found it is answered by moved(). Any other error propagates, and keep() keeps nothing
         return False
     if stat.S_ISDIR(st.st_mode) and not opened:
         return False
