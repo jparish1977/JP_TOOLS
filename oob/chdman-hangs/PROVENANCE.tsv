@@ -1,0 +1,5 @@
+file	url	fetched_utc	sha256	bytes
+mametesters-04709.html	https://mametesters.org/view.php?id=4709	2026-10-16T23:09:20Z	9b1ca3790a9e97fda65be537eb0a5af9f96976016d6c3b82a55840a58ffb67e2	62560
+mamedev-release.html	https://www.mamedev.org/release.html	2026-10-16T23:09:50Z	51602d876ce3cafc74684f69f2bceb247d9c9380379714084433cd000fe00172	11014
+mame-issue-9006-chdman-threading.json	https://api.github.com/repos/mamedev/mame/issues/9006	2026-10-16T23:15:03Z	80feb811fe33decd7b399b85e3b579757b47cf53d24c4f5f3b403535b16e7c06	4497
+mame-issue-12948-cue-toc-gdi-parsers.json	https://api.github.com/repos/mamedev/mame/issues/12948	2026-10-16T23:15:03Z	3dbcdbae63eec6cf32cf3028a554215516cc901006aab824e5e408456f5afbd0	4245

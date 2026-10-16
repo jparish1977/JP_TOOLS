@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # tools/lab/chdman-delta-hang.sh -- how often chdman hangs making a child CHD
 #
-#   bash tools/lab/chdman-delta-hang.sh [RUNS] [SECONDS]
+#   [CHDMAN=PATH] bash tools/lab/chdman-delta-hang.sh [RUNS] [SECONDS]
 #
-# Makes the images tests/test_chd_chdman.py's delta test makes (64 sectors of
+# CHDMAN is the chdman to run (default: chdman on PATH), so a built release
+# (tools/lab/chdman-build.sh) can be held to the same runs. Makes the images tests/test_chd_chdman.py's delta test makes (64 sectors of
 # 2048 bytes, 7 bytes changed at 5000), then RUNS times (default 50): the
 # parent with createraw as chd.py runs it, then the child against it with
 # --outputparent, each under `timeout SECONDS` (default 20). Prints one line
@@ -13,15 +14,16 @@
 # 17 workers waited on a futex, writing nothing past the 124-byte header,
 # for as long as it was left (killed at 8 minutes). This counts how often.
 #
-# Tested: 100 runs at 20 s on a quiet 32-thread box (chdman 0.264): 0 hung,
-# 0 failed. Positive control: 3 runs at 0.01 s: 3 hung, each named.
-# NOT tested: under load. The one hang seen came while a proof ran 8 suites
-# at once beside it; this runs one chdman at a time on an idle box, so a 0
-# here does not say the hang cannot happen.
+# Tested, chdman 0.264: 100 runs at 20 s on a quiet 32-thread box: 0 hung,
+# 0 failed. Eight copies at once, 40 runs each, on another 32-thread box:
+# 2 of 320 children hung, each at 124 bytes. Positive control: 3 runs at
+# 0.01 s: 3 hung, each named. A 0 from one copy on an idle box does not say
+# the hang cannot happen: run several at once.
 printf '%s' chdman-hang > /proc/$$/comm 2>/dev/null || true
 set -u
 runs=${1:-50}
 limit=${2:-20}
+chdman=${CHDMAN:-chdman}
 d=$(mktemp -d)
 trap 'rm -rf "$d"' EXIT
 python3 - "$d" <<'EOF'
@@ -38,11 +40,11 @@ hung=0
 failed=0
 for n in $(seq 1 "$runs"); do
     rm -f "$d/a.chd" "$d/b.chd"
-    timeout "$limit" chdman createraw --input "$d/a.img" --output "$d/a.chd" \
+    timeout "$limit" "$chdman" createraw --input "$d/a.img" --output "$d/a.chd" \
         --hunksize 2048 --unitsize 512 > /dev/null 2>&1
     rc=$?
     if [ "$rc" -eq 0 ]; then
-        timeout "$limit" chdman createraw --input "$d/b.img" --output "$d/b.chd" \
+        timeout "$limit" "$chdman" createraw --input "$d/b.img" --output "$d/b.chd" \
             --outputparent "$d/a.chd" > /dev/null 2>&1
         rc=$?
         what=child
@@ -57,4 +59,4 @@ for n in $(seq 1 "$runs"); do
         echo "run $n: $what failed rc=$rc"
     fi
 done
-echo "chdman $(chdman --help 2>&1 | head -1 | cut -d' ' -f10): $runs runs, $hung hung, $failed failed, nproc $(nproc)"
+echo "chdman $("$chdman" --help 2>&1 | head -1 | cut -d' ' -f10): $runs runs, $hung hung, $failed failed, nproc $(nproc)"
