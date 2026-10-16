@@ -7,7 +7,8 @@ WHAT IS CHECKED
     The report for a shell file holding reasonless and reasoned directives,
     compared whole: tool, status, and each issue's every field, the message
     word for word. A file with only reasoned directives passes with no
-    issues. A file that cannot be read is an error naming the exception. The
+    issues. A language with no directives listed finds none. A file that
+    cannot be read is an error naming the exception. The
     file is read as UTF-8 whatever the default codec (a NEL, U+0085, is a
     line break only when decoded as UTF-8, so the issue's line number shows
     the codec), and a byte that is not UTF-8 is replaced rather than raised.
@@ -27,7 +28,7 @@ from pathlib import Path
 from unittest import mock
 
 from _harness import check, run
-from jpcheck.directives import run_directive_reason
+from jpcheck.directives import directives, run_directive_reason
 
 
 def outcome(fn: Callable[[], object]) -> object:
@@ -65,6 +66,11 @@ def test_the_whole_report() -> None:
         check("report: only reasoned directives pass with no issues",
               outcome(lambda: run_directive_reason(str(why))),
               {"tool": "directive-reason", "status": "pass", "issues": []})
+
+
+def test_a_language_with_no_directives() -> None:
+    check("a language no directive is listed for: none found, not a crash",
+          outcome(lambda: directives("x = 1  # noqa: E501\n# shellcheck disable=SC2086\n", "python")), [])
 
 
 def test_an_unreadable_file() -> None:

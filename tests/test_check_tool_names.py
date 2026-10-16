@@ -21,8 +21,8 @@ from pathlib import Path
 
 from _harness import ROOT, check, run
 from fake_tools import fake_tools
-from jpcheck.registry import serves
-from jpcheck.runs import tool_names
+from jpcheck.registry import DEFAULT_TOOLS, serves
+from jpcheck.runs import NoToolsError, tool_names
 
 
 def test_tool_names() -> None:
@@ -32,6 +32,15 @@ def test_tool_names() -> None:
           tool_names("python", "ruff,mypy,ruff", False), ["ruff", "mypy"])
     check("control: --audit still adds an audit tool not named",
           tool_names("php", "phpstan", True), ["phpstan", "composer-audit"])
+    check("--audit on a language with no audit tool: the tools alone, named or default",
+          (tool_names("shell", "shellcheck", True), tool_names("shell", None, True)),
+          (["shellcheck"], list(DEFAULT_TOOLS["shell"])))
+    try:
+        tool_names("unknown", None, False)
+        raised: object = None
+    except NoToolsError as e:
+        raised = e.args
+    check("no language and no tools named: refused, naming the language", raised, ("unknown",))
 
 
 def test_a_named_tool_runs_only_where_it_applies() -> None:
