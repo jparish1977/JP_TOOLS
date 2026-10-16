@@ -1,0 +1,10 @@
+{
+  "about": "mutate-spec keeps a path as opened when any of a spec's runs opened it, so a directory one run listed is kept by its listing though another only resolved through it. Run: mutate-on-target.py TREE mutate-spec.py tests/test_spec_cache.py tests/mutants/jpt-opened-on-mutate-spec.json",
+  "mutants": [
+    {
+      "name": "the last run's word for a path",
+      "edits": [["                        merged[p] = merged.get(p, False) or opened\n", "                        merged[p] = opened\n"]],
+      "target": "a file added to a directory one run listed and another resolved through: run again"
+    }
+  ]
+}

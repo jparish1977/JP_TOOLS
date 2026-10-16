@@ -159,7 +159,8 @@ def own_git(root: str, tree: str) -> str | None:
     return gitdir
 
 
-Reads = tuple[set[str], set[str]]
+# (checkout paths, outside paths), each with whether a run opened it.
+Reads = tuple[dict[str, bool], dict[str, bool]]
 
 
 def run_in_copy(root: str, stem: str, args: list[str], traced: bool = False) -> tuple[int, str, Reads | None]:
@@ -266,8 +267,13 @@ def _keep(cache: str | None, stem: str, root: str, want: dict[str, str],
     """Keep a spec's all-killed VERDICT with what every one of its runs read;
     nothing when a run was not traced (no strace) or the verdict is not a pass."""
     if cache and verdict and all(r is not None for r in every_read):
-        repo = set().union(*(r[0] for r in every_read if r))
-        ext = set().union(*(r[1] for r in every_read if r))
+        repo: dict[str, bool] = {}
+        ext: dict[str, bool] = {}
+        for r in every_read:
+            if r:
+                for merged, part in ((repo, r[0]), (ext, r[1])):
+                    for p, opened in part.items():
+                        merged[p] = merged.get(p, False) or opened
         try:
             spec_cache.keep(cache, stem, root, want, repo, ext, verdict)
         except OSError as e:  # reason: a verdict not kept only means the spec runs next time; the run's verdict stands
