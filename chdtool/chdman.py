@@ -52,8 +52,8 @@ OTHER_HUNK_SIZE = "4096"
 # A chdman whose output stops growing this long is stuck, not working, and
 # no call runs past the limit. chdman 0.264 has been seen to spin one thread
 # for as long as it is left while its workers wait, writing nothing past a
-# CHD's header (tools/lab/chdman-delta-hang.sh); romtools' disc pool uses the
-# same two numbers after chdman sat five days writing nothing.
+# CHD's header (tools/lab/chdman-delta-hang.sh), and to sit for days writing
+# nothing at all.
 CHDMAN_STALL = 600.0
 CHDMAN_LIMIT = 6 * 3600.0
 

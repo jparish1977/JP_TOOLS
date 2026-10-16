@@ -56,9 +56,9 @@ STRACE_LINES = """\
 14 newfstatat(3</repo/a.py>, "", {st_mode=S_IFREG|0644, ...}, AT_EMPTY_PATH) = 0
 """
 
-# dynatext-tools' two cases on #244, as strace 6.8 wrote them: find walking a
-# subdirectory through its parent's descriptor, and a file opened with
-# Python's dir_fd.
+# Two calls made relative to a directory's descriptor, as strace 6.8 wrote
+# them: find walking a subdirectory through its parent's descriptor, and a
+# file opened with Python's dir_fd.
 FIND = """\
 71 openat(AT_FDCWD</r>, ".", O_RDONLY|O_NOCTTY|O_NONBLOCK|O_NOFOLLOW|O_CLOEXEC|O_DIRECTORY) = 4</r>
 71 getdents64(4</r>, 0x5adac725c100 /* 3 entries */, 32768) = 72
@@ -91,7 +91,7 @@ def test_paths_in_strace_lines() -> None:
     check("  every line placed", t.unplaced, [])
 
 
-def test_dynatext_tools_cases() -> None:
+def test_calls_relative_to_a_descriptor() -> None:
     check("find: the subdirectory it walks by its parent's descriptor is opened, so listed; the file "
           "cat reads, from the directory find's fchdir left",
           spec_cache.paths_in(FIND).paths, {"/r": True, "/r/sub": True, "/usr/bin/cat": False, "/r/sub/f.txt": True})
