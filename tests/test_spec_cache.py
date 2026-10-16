@@ -20,6 +20,7 @@ has changed (jpcheck/spec_cache.py), and runs it again when anything has.
     python3 tests/test_spec_cache.py
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -77,6 +78,48 @@ def test_fingerprints() -> None:
         check("no strace: no prefix, so nothing is traced", spec_cache.strace_prefix("t"), None)
 
 
+def test_exact_forms() -> None:
+    """The strace command, fingerprints and sources, each exactly."""
+    with mock.patch("shutil.which", side_effect=lambda name: "/x/strace" if name == "strace" else None):
+        check("strace -f, quiet, the traced calls, to the file named",
+              spec_cache.strace_prefix("T"),
+              ["/x/strace", "-f", "-qq", "-e", f"trace={spec_cache.CALLS}", "-o", "T"])
+    with tempfile.TemporaryDirectory() as td:
+        (Path(td) / "d").mkdir()
+        for name in ("b", "a"):
+            (Path(td) / "d" / name).write_text("", encoding="utf-8")
+        (Path(td) / "f").write_bytes(b"x")
+        listing = "dir:" + hashlib.sha256(b"a\0b").hexdigest()
+        check("a directory: its names, sorted, NUL between, hashed",
+              (spec_cache.repo_print(td, "d"), spec_cache.ext_print(str(Path(td) / "d"))), (listing, listing))
+        check("a checkout file: its content hashed",
+              spec_cache.repo_print(td, "f"), "file:" + hashlib.sha256(b"x").hexdigest())
+        st = (Path(td) / "f").stat()
+        check("an outside file: size and mtime", spec_cache.ext_print(str(Path(td) / "f")),
+              f"stat:1:{st.st_mtime_ns}")
+        check("sources: each file's content hashed, by path",
+              spec_cache.key(str(Path(td) / "f")), {str(Path(td) / "f"): hashlib.sha256(b"x").hexdigest()})
+
+
+def test_matches() -> None:
+    """An entry matches only with the sources asked for, fingerprints held as
+    mappings, and every one of them still as recorded."""
+    with tempfile.TemporaryDirectory() as td:
+        (Path(td) / "f").write_bytes(b"x")
+        out = str(Path(td) / "f")
+        doc: dict[str, object] = {"sources": {"s": "1"}, "verdict": "V",
+                                  "repo": {"f": spec_cache.repo_print(td, "f")},
+                                  "ext": {out: spec_cache.ext_print(out)}}
+        check("everything as recorded: its verdict", spec_cache._matches(doc, td, {"s": "1"}), "V")
+        check("other sources: none", spec_cache._matches(doc, td, {"s": "2"}), None)
+        check("other sources, even with nothing recorded to compare: none",
+              spec_cache._matches({**doc, "repo": {}, "ext": {}}, td, {"s": "2"}), None)
+        check("checkout prints not a mapping: none", spec_cache._matches({**doc, "repo": []}, td, {"s": "1"}), None)
+        check("outside prints not a mapping: none", spec_cache._matches({**doc, "ext": []}, td, {"s": "1"}), None)
+        check("an outside print that moved: none",
+              spec_cache._matches({**doc, "ext": {out: "stat:0:0"}}, td, {"s": "1"}), None)
+
+
 def test_kept_refuses_what_it_cannot_read() -> None:
     with tempfile.TemporaryDirectory() as td:
         check("no entry: run it", spec_cache.kept(td, "s", td, {}), None)
@@ -88,6 +131,10 @@ def test_kept_refuses_what_it_cannot_read() -> None:
         (Path(td) / "s" / "a.json").write_text(json.dumps({"sources": {}, "repo": [], "ext": {}, "verdict": "v"}),
                                                encoding="utf-8")
         check("an entry whose fingerprints are not a mapping: run it", spec_cache.kept(td, "s", td, {}), None)
+        (Path(td) / "s" / "b.json").write_text(json.dumps({"sources": {}, "repo": {}, "ext": {}, "verdict": "V"}),
+                                               encoding="utf-8")
+        check("an entry it cannot read does not stop it finding one that matches",
+              spec_cache.kept(td, "s", td, {}), "V")
 
 
 def test_entries_per_state_newest_kept() -> None:
@@ -107,6 +154,40 @@ def test_entries_per_state_newest_kept() -> None:
             (root / "f").write_text(str(n), encoding="utf-8")
             spec_cache.keep(td, "s", str(root), {}, {"f"}, set(), str(n))
         check("past KEEP entries, the oldest go", len(list((Path(td) / "s").glob("*.json"))), spec_cache.KEEP)
+
+
+def test_keep_names_by_content_and_keeps_the_newest() -> None:
+    """An entry is written where no cache was yet, named by its sorted JSON;
+    pruning goes by modification time, newest kept, not by name."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td) / "root"
+        root.mkdir()
+        (root / "f").write_bytes(b"x")
+        outside = Path(td) / "out.txt"
+        outside.write_bytes(b"y")
+        cache = Path(td) / "a" / "b"
+        spec_cache.keep(str(cache), "s", str(root), {"p": "1"}, {"f"}, {str(outside)}, "V")
+        doc = {"sources": {"p": "1"}, "verdict": "V", "repo": {"f": spec_cache.repo_print(str(root), "f")},
+               "ext": {str(outside): spec_cache.ext_print(str(outside))}}
+        text = json.dumps(doc, sort_keys=True).encode()
+        named = cache / "s" / f"{hashlib.sha256(text).hexdigest()[:16]}.json"
+        check("written where no cache was, named by its sorted JSON, holding it",
+              named.read_bytes() if named.is_file() else None, text)
+        spec_cache.keep(str(cache), "s", str(root), {"p": "1"}, {"f"}, {str(outside)}, "V")
+        check("  the same state again: the same one entry", len(list((cache / "s").glob("*.json"))), 1)
+        entries = cache / "s"
+        for p in entries.glob("*.json"):
+            p.unlink()
+        names = [f"{c}.json" for c in "abcdefghijk"]
+        for age, name in enumerate(names):
+            (entries / name).write_text("{}", encoding="utf-8")
+            os.utime(entries / name, ns=(10**9 * (100 - age), 10**9 * (100 - age)))
+        (root / "f").write_bytes(b"new")
+        spec_cache.keep(str(cache), "s", str(root), {}, {"f"}, set(), "N")
+        left = sorted(p.name for p in entries.glob("*.json"))
+        check("pruned by age, newest kept: the new entry and the 7 youngest, whatever their names",
+              len(left) == spec_cache.KEEP and "a.json" in left and "k.json" not in left
+              and not any(n in left for n in ("i.json", "j.json", "k.json", "h.json")), True)
 
 
 FAKE_STRACE = '''#!/usr/bin/env python3

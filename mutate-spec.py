@@ -264,7 +264,10 @@ def _keep(cache: str | None, stem: str, root: str, want: dict[str, str],
     if cache and verdict and all(r is not None for r in every_read):
         repo = set().union(*(r[0] for r in every_read if r))
         ext = set().union(*(r[1] for r in every_read if r))
-        spec_cache.keep(cache, stem, root, want, repo, ext, verdict)
+        try:
+            spec_cache.keep(cache, stem, root, want, repo, ext, verdict)
+        except OSError as e:  # reason: a verdict not kept only means the spec runs next time; the run's verdict stands
+            sys.stderr.write(f"mutate-spec: {stem}: verdict not kept: {e}\n")
 
 
 def names(spec: str) -> list[tuple[str, str]]:

@@ -34,6 +34,7 @@ from pathlib import Path
 from unittest import mock
 
 from _harness import ROOT, check, check_true, load_script, run
+from jpcheck.registry import DEFAULT_TOOLS
 
 DIRTY = "import os\nimport sys\nx = 1\n"  # unused imports: ruff findings to count
 WORSE = "import os\nimport sys\nimport json\nx = 1\n"
@@ -42,13 +43,14 @@ CLEAN = "x = 1\n"
 
 check_mod = load_script("check.py")
 
-# Every tool these files get but mypy, each where it applies. What is under
+# Every tool check.py has but mypy, each where it applies (a fixture's .js
+# file still gets eslint and prettier, its .sh file shellcheck). What is under
 # test here is the baseline (recording, comparing, --touched), which treats
-# every tool's counts alike, and the fixtures' findings are ruff's and
-# shellcheck's; mypy took most of each run's time and has suites of its own.
+# every tool's counts alike; mypy took most of each run's time and has suites
+# of its own. Built from the registry, so a tool added later is not left out.
 # The default, every tool, still runs where that is the point
 # (git_test_recording, git_test_no_baseline_behaves_as_before).
-NO_MYPY = "ruff,no-cover,suppress-reason,noqa,smells,shellcheck,directive-reason"
+NO_MYPY = ",".join(sorted({t for ts in DEFAULT_TOOLS.values() for t in ts} - {"mypy"}))
 
 
 def check_py(*args: str, cwd: Path, env: dict[str, str] | None = None,

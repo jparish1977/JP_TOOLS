@@ -26,7 +26,6 @@ import json
 import os
 import re
 import shutil
-import tempfile
 from pathlib import Path
 
 CALLS = ("open,openat,openat2,creat,execve,execveat,stat,lstat,newfstatat,statx,access,"
@@ -119,15 +118,6 @@ def key(*files: str) -> dict[str, str]:
 KEEP = 8
 
 
-def _entries(cache: str, stem: str) -> list[Path]:
-    """STEM's kept entries, newest first."""
-    try:
-        found = list((Path(cache) / stem).glob("*.json"))
-    except OSError:  # reason: no cache directory yet is no entry
-        return []
-    return sorted(found, key=lambda p: p.stat().st_mtime_ns, reverse=True)
-
-
 def _matches(doc: dict[str, object], root: str, want: dict[str, str]) -> str | None:
     """DOC's verdict when its sources are WANT and every fingerprint still matches."""
     repo, ext = doc["repo"], doc["ext"]
@@ -142,8 +132,9 @@ def _matches(doc: dict[str, object], root: str, want: dict[str, str]) -> str | N
 
 def kept(cache: str, stem: str, root: str, want: dict[str, str]) -> str | None:
     """The verdict of a kept entry for STEM whose key is WANT and whose every
-    fingerprint still matches; None to run it."""
-    for entry in _entries(cache, stem):
+    fingerprint still matches; None to run it. In any order: every entry
+    that matches is a pass kept for exactly this state."""
+    for entry in (Path(cache) / stem).glob("*.json"):
         try:
             verdict = _matches(json.loads(entry.read_bytes()), root, want)
         except (OSError, ValueError, KeyError, TypeError, AttributeError):  # reason: an entry this cannot read is no match
@@ -155,18 +146,21 @@ def kept(cache: str, stem: str, root: str, want: dict[str, str]) -> str | None:
 
 def keep(cache: str, stem: str, root: str, want: dict[str, str], repo: set[str], ext: set[str],
          verdict: str) -> None:
-    """Keep STEM's VERDICT with the fingerprints of what its runs read, named
-    by its content and written whole (a file beside it renamed in), so a
-    reader never sees half; then only the newest KEEP of STEM's entries stay."""
+    """Keep STEM's VERDICT with the fingerprints of what its runs read, then
+    only the newest KEEP of STEM's entries (by modification time).
+
+    An entry is named by its content, so it needs no temporary file: a
+    reader that meets one half written cannot parse it and passes it over
+    (kept), and two runs keeping the same state write the same bytes. A
+    removal that loses a race with another run's raises, as any OSError
+    here does; the caller keeps nothing then and runs on."""
     doc = {"sources": want, "verdict": verdict,
            "repo": {r: repo_print(root, r) for r in sorted(repo)},
            "ext": {p: ext_print(p) for p in sorted(ext)}}
-    text = json.dumps(doc, sort_keys=True)
+    text = json.dumps(doc, sort_keys=True).encode()
     where = Path(cache) / stem
     where.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=where, prefix=".new.")
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(text)
-    os.replace(tmp, where / f"{hashlib.sha256(text.encode()).hexdigest()[:16]}.json")
-    for old in _entries(cache, stem)[KEEP:]:
-        old.unlink(missing_ok=True)
+    (where / f"{hashlib.sha256(text).hexdigest()[:16]}.json").write_bytes(text)
+    entries = sorted(where.glob("*.json"), key=lambda p: p.stat().st_mtime_ns, reverse=True)
+    for old in entries[KEEP:]:
+        old.unlink()
