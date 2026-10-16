@@ -127,8 +127,9 @@ def test_sizes() -> None:
             (d / name).write_text(data, encoding="utf-8")
         check("the output and every file beside it under its name, sorted, by size; another name not",
               _sizes(d / "out.cue"), (("out.bin", 3), ("out.cue", 1), ("out01.bin", 2)))
-        # A listing taken while out01.bin was there, sized after it went.
-        entries = list(os.scandir(d))
+        # A listing taken while out01.bin was there, sized after it went;
+        # listed first, so the files after it must still be sized.
+        entries = sorted(os.scandir(d), key=lambda e: e.name != "out01.bin")
         (d / "out01.bin").unlink()
         with mock.patch("platformtools.tools.os.scandir", return_value=entries):
             check("  a file gone between the listing and its size: left out, the rest kept",
