@@ -113,7 +113,10 @@ class _Clock:
 def test_the_boundaries() -> None:
     """_watch on a clock of whole seconds: a stall or a limit reached exactly
     is reached."""
+    # Set in 2 s: a _watch that waited without its poll would return "" then,
+    # not hang the run.
     never = threading.Event()
+    threading.Timer(2, never.set).start()
     with tempfile.TemporaryDirectory() as td:
         for stall, limit, want in ((2, 100, f"{Path(td) / 'f'} did not grow for 2 s"), (100, 2, "it ran past 2 s")):
             clock = _Clock()
@@ -134,27 +137,30 @@ def test_a_tool_that_talks() -> None:
 def test_chdman_watches_its_output_and_retries_once() -> None:
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "b.chd"
-        calls: list[tuple[list[str], Path | None, float, float]] = []
+        calls: list[tuple[list[str], list[str], Path | None, float, float]] = []
         stalls: list[str] = []
         ok: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(["chdman"], 0, "", "")
 
         def fake(prefix: list[str], args: list[str], *, watch: Path | None, stall: float,
                  limit: float) -> subprocess.CompletedProcess[str]:
             """Writes a partial output; stalls with each of STALLS in turn, then succeeds."""
-            calls.append((args, watch, stall, limit))
+            calls.append((prefix, args, watch, stall, limit))
             out.write_bytes(b"partial")
             if stalls:
                 raise StalledError(stalls.pop(0))
             return ok
 
         args = ["createraw", "--input", "b.img", "--output", str(out)]
+        call = (["/x/chdman"], args, out, 600.0, 21600.0)
         err = io.StringIO()
-        with mock.patch.object(chdman_mod, "require", return_value=["chdman"]), \
+        with mock.patch.object(chdman_mod, "require", return_value=["/x/chdman"]) as require, \
                 mock.patch.object(chdman_mod, "run_watched", fake), mock.patch("sys.stderr", err):
-            check("a call that ends: its result, the file after --output watched, at 600 s and 6 h",
-                  (chdman_mod.chdman(args), calls), (ok, [(args, out, 600.0, 21600.0)]))
+            check("a call that ends: its result; chdman as require finds it, Windows' usual folders "
+                  "included; the file after --output watched, at 600 s and 6 h",
+                  (chdman_mod.chdman(args), calls, require.call_args.args),
+                  (ok, [call], ("chdman", chdman_mod.CHDMAN_HINT, chdman_mod.WINDOWS_CHDMAN)))
             calls.clear()
-            check("  info, which writes no file: nothing watched", (chdman_mod.chdman(["info"]), calls[0][1]),
+            check("  info, which writes no file: nothing watched", (chdman_mod.chdman(["info"]), calls[0][2]),
                   (ok, None))
             calls.clear()
             removed: list[bool] = []
@@ -167,10 +173,10 @@ def test_chdman_watches_its_output_and_retries_once() -> None:
             with mock.patch.object(chdman_mod, "_discard", discard):
                 stalls[:] = ["chdman createraw killed: stuck"]
                 r = chdman_mod.chdman(args)
-            check("a stall: its partial output removed, said, and run once more",
-                  (r, len(calls), removed, err.getvalue()),
-                  (ok, 2, [True], ("chd: chdman createraw killed: stuck; its partial output removed, "
-                                   "running it once more\n")))
+            check("a stall: its partial output removed, said, and run once more, the same call",
+                  (r, calls, removed, err.getvalue()),
+                  (ok, [call, call], [True], ("chd: chdman createraw killed: stuck; its partial output removed, "
+                                              "running it once more\n")))
             calls.clear()
             stalls[:] = ["one", "two"]
             try:
