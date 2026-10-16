@@ -16,8 +16,9 @@ killed on target is kept with a fingerprint of each of those paths:
   readlink'd, as resolving a path does to every parent of the checkout, as a
   directory, whatever is in it. Otherwise a log written beside the checkout,
   or a dotfile in the home directory, would run every spec again;
-- and the spec and both drivers (mutate-spec.py, mutate-on-target.py) by
-  content.
+- and the spec, both drivers (mutate-spec.py, mutate-on-target.py) and this
+  module by content: it decides what an entry's inputs are, so one recorded
+  under other rules is never reused.
 
 A later run reuses the verdict only when every fingerprint still matches;
 anything else runs again and is traced afresh. A spec that was not all killed
@@ -383,8 +384,10 @@ def ext_print(path: str, opened: bool) -> str:
 
 
 def key(*files: str) -> dict[str, str]:
-    """The spec's and drivers' contents, by path."""
-    return {f: hashlib.sha256(Path(f).read_bytes()).hexdigest() for f in files}
+    """The spec's and drivers' contents, by path, and this module's own: it
+    decides what a verdict's inputs are, so an entry it recorded under other
+    rules is no match."""
+    return {f: hashlib.sha256(Path(f).read_bytes()).hexdigest() for f in (*files, str(Path(__file__).resolve()))}
 
 
 # Each spec keeps its newest few entries, one per state of what it read, so

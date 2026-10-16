@@ -369,8 +369,11 @@ def test_exact_forms() -> None:
         st = (Path(td) / "f").stat()
         check("an outside file: size and mtime", spec_cache.ext_print(str(Path(td) / "f"), False),
               f"stat:1:{st.st_mtime_ns}")
-        check("sources: each file's content hashed, by path",
-              spec_cache.key(str(Path(td) / "f")), {str(Path(td) / "f"): hashlib.sha256(b"x").hexdigest()})
+        me = Path(spec_cache.__file__).resolve()
+        check("sources: each file's content hashed, by path, and spec_cache's own, which decides what an "
+              "entry's inputs are",
+              spec_cache.key(str(Path(td) / "f")),
+              {str(Path(td) / "f"): hashlib.sha256(b"x").hexdigest(), str(me): hashlib.sha256(me.read_bytes()).hexdigest()})
 
 
 def test_matches() -> None:
