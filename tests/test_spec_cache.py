@@ -163,6 +163,10 @@ def test_reader_edges() -> None:
                             '9 <... getdents64 resumed>) = 0\n')
     check("a call that never resumed (its process killed): not found by the next call's result",
           (t.paths, t.found), ({"/r/a": True}, set()))
+    t = spec_cache.paths_in('9 execve("/usr/bin/x", ["x"], 0x1 /* 1 var */ <unfinished ...>\n'
+                            '9 <... execve resumed>)           = ?\n')
+    check("a result strace could not learn ('= ?', its process gone): named, not found",
+          (t.paths, t.found), ({"/usr/bin/x": False}, set()))
 
 
 def test_a_descriptor_itself() -> None:
