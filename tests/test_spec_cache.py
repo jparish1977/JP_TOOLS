@@ -136,12 +136,33 @@ def test_names_without_a_directory() -> None:
 
 
 def test_lines_it_cannot_place() -> None:
-    t = spec_cache.paths_in('9 openat(5, "sub", O_RDONLY) = 6\n9 openat(AT_FDCWD, "rel", O_RDONLY) = 6\n'
-                            '9 openat(AT_FDCWD</r>, 0x7f00, O_RDONLY) = 3\n'
-                            '9 openat(AT_FDCWD</r>, "/abs", O_RDONLY) = 3\n')
+    lines = ['9 openat(5, "sub", O_RDONLY) = 6', '9 openat(AT_FDCWD, "rel", O_RDONLY) = 6',
+             '9 openat(AT_FDCWD</r>, 0x7f00, O_RDONLY) = 3']
+    t = spec_cache.paths_in("\n".join(lines) + '\n9 openat(AT_FDCWD</r>, "/abs", O_RDONLY) = 3\n')
     check("a relative name under a directory strace could not name, and a traced call whose path it cannot "
-          "read, are unplaced; an absolute one needs no directory",
-          (t.paths, len(t.unplaced)), ({"/abs": True}, 3))
+          "read, are unplaced, each line as written; an absolute one needs no directory",
+          (t.paths, t.unplaced), ({"/abs": True}, lines))
+    t = spec_cache.paths_in('9 openat(AT_FDCWD</r>, "a", O_RDONLY) = 3\n9 openat(5, "x", O_RDONLY) = 6\n'
+                            '9 stat("b", 0x1) = 0\n')
+    check("  a line it cannot place that is no chdir: the working directory is still known",
+          (t.paths, t.unplaced), ({"/r/a": True, "/r/b": False}, ['9 openat(5, "x", O_RDONLY) = 6']))
+
+
+def test_reader_edges() -> None:
+    t = spec_cache.paths_in('9 open("rel", O_RDONLY) = 3\n9 openat(AT_FDCWD</r>, "/e", O_RDONLY) = 3\n')
+    check("a held open, once placed, is an open", t.paths, {"/r/rel": True, "/e": True})
+    t = spec_cache.paths_in('9 newfstatat(3</r/f>, "", 0x1, AT_EMPTY_PATH <unfinished ...>\n'
+                            '9 <... newfstatat resumed>) = 0\n')
+    check("an empty path on a call still running: the descriptor's own file, found once it returns",
+          (t.paths, t.found), ({"/r/f": False}, {"/r/f"}))
+    t = spec_cache.paths_in('9 stat("b", 0x1) = 0\n9 chdir("sub") = 0\n9 openat(AT_FDCWD</r/sub>, "x", O_RDONLY) = 3\n')
+    check("a held name, then a chdir from a directory not known: neither placed in the one that follows",
+          (t.paths, t.unplaced), ({"/r/sub/x": True}, ['9 chdir("sub") = 0', '9 stat("b", 0x1) = 0']))
+    t = spec_cache.paths_in('9 openat(AT_FDCWD</r>, "a", O_RDONLY <unfinished ...>\n'
+                            '9 getdents64(3</r>, 0x1, 32768 <unfinished ...>\n'
+                            '9 <... getdents64 resumed>) = 0\n')
+    check("a call that never resumed (its process killed): not found by the next call's result",
+          (t.paths, t.found), ({"/r/a": True}, set()))
 
 
 def test_a_descriptor_itself() -> None:
@@ -344,11 +365,9 @@ def test_snapshot() -> None:
               (spec_cache.snapshot(td, max(st.st_mtime_ns, st.st_ctime_ns))["top"][4],
                spec_cache.snapshot(td, max(st.st_mtime_ns, st.st_ctime_ns) + 1)["top"][4],
                spec_cache.snapshot(td, 0)["sub"][4]), (x, "", ""))
-        real = os.lstat
-        with mock.patch("os.lstat", side_effect=lambda p, *a: (_ for _ in ()).throw(FileNotFoundError(p))
-                        if str(p).endswith("top") else real(p, *a)):
-            check("  a path gone between the listing and its status: left out", "top" in spec_cache.snapshot(td, old),
-                  False)
+        with mock.patch("os.walk", return_value=[(td, [], ["gone", "top"])]):
+            check("  a path gone between the listing and its status: left out, and the ones after it kept",
+                  sorted(spec_cache.snapshot(td, old)), ["top"])
 
 
 def test_an_edit_the_status_cannot_show() -> None:
@@ -447,6 +466,12 @@ def test_changed_since_margin() -> None:
             except PermissionError as e:
                 raised = str(e)
         check("  a status it cannot read: raised, never read as unchanged", raised, "denied")
+        # A link newer than its target, by more than the clock's tick.
+        time.sleep(0.05)
+        (Path(td) / "link").symlink_to(f)
+        lc = os.lstat(Path(td) / "link").st_ctime_ns
+        check("  a link changed at the start less the margin, its target older: changed",
+              (lc > c, spec_cache._changed_since(str(Path(td) / "link"), False, lc + spec_cache.MARGIN_NS)), (True, True))
         (Path(td) / "dangling").symlink_to(Path(td) / "none")
         check("  a link to nothing, itself older: not",
               spec_cache._changed_since(str(Path(td) / "dangling"), False,

@@ -140,35 +140,39 @@ class _Reader:
         self.running: dict[str, str] = {}
         self.held: dict[str, list[tuple[str, str, str]]] = {}
 
-    def place(self, pid: str, call: str, path: str, line: str, held: bool = False) -> None:
-        """PATH, named by PID's CALL on LINE, as read; found if it succeeded.
-        A call still running is waited for, unless it was HELD: its result
-        has already been joined to its line."""
+    def place(self, call: str, path: str, line: str) -> str:
+        """PATH, named by CALL on LINE, as read; found if it succeeded.
+        Returns it normalised."""
         path = os.path.normpath(path)
         mark(self.out, path, call in OPENS)
         if _succeeded(line):
             self.found.add(path)
-        elif "<unfinished ...>" in line and not held:
-            self.running[pid] = path
+        return path
 
-    def moved(self, pid: str, now: str | None) -> None:
-        """A chdir or fchdir by PID: threads share a working directory and
-        strace names a thread as it names a process, so every one known is
-        forgotten and every held name can no longer be placed; PID's is NOW
-        when it is known."""
+    def forget(self) -> None:
+        """A chdir or fchdir: threads share a working directory and strace
+        names a thread as it names a process, so every one known is
+        forgotten and every held name can no longer be placed."""
         self.cwd.clear()
         for lines in self.held.values():
             self.unplaced.extend(line for _, _, line in lines)
         self.held.clear()
-        if now is not None:
-            self.cwd[pid] = now
+
+    def fchdir(self, pid: str, line: str, pos: int) -> None:
+        """PID's fchdir on LINE, its argument from POS: every working
+        directory forgotten (forget), PID's the descriptor's when it worked."""
+        fd = _FD.match(line, pos)
+        self.forget()
+        if fd and _succeeded(line):
+            self.cwd[pid] = _text(fd.group(1))
 
     def at(self, pid: str, cwd: str) -> None:
         """PID's working directory, as an AT_FDCWD printed it: names it held
-        were there (a working directory outlives execve)."""
+        were there (a working directory outlives execve). A held call's
+        result is already joined to its line (resumed)."""
         self.cwd[pid] = cwd
         for call, name, line in self.held.pop(pid, []):
-            self.place(pid, call, os.path.join(cwd, name), line, held=True)
+            self.place(call, os.path.join(cwd, name), line)
 
     def resumed(self, line: str) -> None:
         """A '<... call resumed>' LINE: the result of PID's call still running."""
@@ -208,7 +212,7 @@ class _Reader:
             return None
         self.unplaced.append(line)
         if call == "chdir":
-            self.moved(pid, None)
+            self.forget()
         return None
 
     def line(self, line: str) -> None:
@@ -221,8 +225,7 @@ class _Reader:
         if call == "getdents64":
             return
         if call == "fchdir":
-            fd = _FD.match(line, m.end())
-            self.moved(pid, _text(fd.group(1)) if fd and _succeeded(line) else None)
+            self.fchdir(pid, line, m.end())
             return
         a = _ARGS.match(line, m.end())
         if not a:
@@ -230,12 +233,16 @@ class _Reader:
             return
         if a.group(1) == "AT_FDCWD" and a.group(2) is not None:
             self.at(pid, _text(a.group(2)))
-        path = self.resolve(pid, call, a, line)
-        if path is None:
+        named = self.resolve(pid, call, a, line)
+        if named is None:
             return
-        self.place(pid, call, path, line)
+        path = self.place(call, named, line)
+        if "<unfinished ...>" in line:
+            self.running[pid] = path
         if call == "chdir":
-            self.moved(pid, os.path.normpath(path) if _succeeded(line) else None)
+            self.forget()
+            if _succeeded(line):
+                self.cwd[pid] = path
 
 
 def paths_in(trace_text: str) -> Trace:

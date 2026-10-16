@@ -69,6 +69,9 @@ def test_a_refused_unlink_counts_no_surviving_links() -> None:
               (note is not None and note.startswith("link/f.ps (could not reach it: ")
                and note.endswith("; whether link is a symlink is unknown: PermissionError)"), survivors), (True, 0))
         check_true("    the file behind it survives", (root / "real" / "f.ps").exists())
+        (root / "plain").write_bytes(b"")
+        check("a component that is a plain file, no symlink: could not reach it, by its error",
+              _at(root, "plain/f.ps"), ("plain/f.ps (could not reach it: NotADirectoryError)", 0))
 
 
 def test_unlink_at_removes_at_any_depth() -> None:

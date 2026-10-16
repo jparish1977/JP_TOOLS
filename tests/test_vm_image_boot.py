@@ -208,7 +208,7 @@ class _Sock:
 
     def ready(self, r: list[Any], w: list[Any], x: list[Any], t: float) -> tuple[list[Any], list[Any], list[Any]]:
         """select.select: the socket readable when the monitor sent a banner."""
-        self.calls.append(("select", r == [self], t))
+        self.calls.append(("select", r == [self], w, x, t))
         return ([self] if self.banner else [], [], [])
 
     def sendall(self, b: bytes) -> None:
@@ -239,7 +239,7 @@ def test_screendump() -> None:
         check("  the monitor asked, a second given for its banner, the banner read, the command sent, the socket "
               "closed", calls, [
                   ("socket", vm.socket.AF_UNIX), ("settimeout", 2), ("connect", "/w/mon.sock"),
-                  ("select", True, 1), ("recv", 65536),
+                  ("select", True, [], [], 1), ("recv", 65536),
                   ("sendall", b"screendump " + str(ppm).encode() + b"\n"), ("close",)])
         check("  half-seconds until the dump, a second to finish", slept, [0.5, 1])
         ppm.unlink()

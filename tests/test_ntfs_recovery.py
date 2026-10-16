@@ -223,6 +223,15 @@ def test_restore_owner() -> None:
                 mock.patch.object(INVENTORY.os, "chown", lambda p, u, g: calls.append((p, u, g))):
             INVENTORY.restore_owner(str(f))
         check("under sudo: handed back to the invoking user", calls, [(str(f), 7, 8)])
+        calls.clear()
+        for half in ({"SUDO_UID": "7"}, {"SUDO_GID": "8"}):
+            with mock.patch.dict("os.environ", half), \
+                    mock.patch.object(INVENTORY.os, "chown", lambda p, u, g: calls.append((p, u, g))):
+                for k in ("SUDO_UID", "SUDO_GID"):
+                    if k not in half:
+                        INVENTORY.os.environ.pop(k, None)
+                INVENTORY.restore_owner(str(f))
+        check("  a uid without a gid, or a gid without a uid: left as it is", calls, [])
         err = io.StringIO()
         with mock.patch.dict("os.environ", {"SUDO_UID": "7", "SUDO_GID": "8"}), \
                 mock.patch.object(INVENTORY.os, "chown", side_effect=PermissionError("not permitted")), \
