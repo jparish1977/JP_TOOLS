@@ -138,9 +138,10 @@ class GateError(Exception):
 
 
 def _git(*args: str) -> str:
-    p = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
-    if p.returncode != 0:
-        raise GateError(f"git {' '.join(args)}: {p.stderr.strip()[:300]}")
+    try:
+        p = subprocess.run(["git", *args], capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as e:
+        raise GateError(f"git {' '.join(args)}: {e.stderr.strip()[:300]}") from e
     return p.stdout.strip()
 
 
@@ -149,7 +150,9 @@ def _is_worktree_of(mutants: Path, root: Path) -> bool:
     if not (mutants / ".git").is_file():
         return False
     try:
-        mine = _git("-C", str(mutants), "rev-parse", "--path-format=absolute", "--git-common-dir")
+        # A linked worktree's common dir comes out absolute; ROOT's own comes
+        # out as ".git", relative to ROOT, unless asked for an absolute path.
+        mine = _git("-C", str(mutants), "rev-parse", "--git-common-dir")
         theirs = _git("-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir")
     except GateError:  # reason: a .git link git cannot follow is the restored-state case; prepare rebuilds it
         return False
@@ -162,16 +165,18 @@ def prepare(root: Path) -> Path:
     mutants.mkdir(exist_ok=True)
     if not _is_worktree_of(mutants, root):
         # git makes a worktree only at a path that does not exist, so make it
-        # beside mutants/ and move its .git link in, then repair both ends.
-        (mutants / ".git").unlink(missing_ok=True)
+        # beside mutants/ and move its .git link in (over a broken one), then
+        # repair both ends. HEAD is a commit, not a branch name, so the new
+        # worktree's HEAD is detached and no branch is made.
         scratch = root / f".mutants-wt-{os.getpid()}"
-        _git("-C", str(root), "worktree", "add", "--no-checkout", "--detach", str(scratch), "HEAD")
+        _git("-C", str(root), "worktree", "add", "--no-checkout", str(scratch), "HEAD")
         os.replace(scratch / ".git", mutants / ".git")
         shutil.rmtree(scratch)
         _git("-C", str(root), "worktree", "repair", str(mutants))
     head = _git("-C", str(root), "rev-parse", "HEAD")
+    # --no-deref: a HEAD someone pointed at a branch moves, not the branch.
     _git("-C", str(mutants), "update-ref", "--no-deref", "HEAD", head)
-    _git("-C", str(mutants), "reset", "-q")
+    _git("-C", str(mutants), "reset")
     for name in LINKED:
         link = mutants / name
         if (root / name).is_dir() and not link.exists() and not link.is_symlink():
