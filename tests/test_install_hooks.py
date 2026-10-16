@@ -46,7 +46,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from _harness import ROOT
+from _harness import ROOT, load_script
 
 INSTALL_HOOKS = ROOT / "install-hooks.py"
 
@@ -757,7 +757,35 @@ def lint_debt_ok_cases(tmp: Path) -> None:
           r.stdout + r.stderr)
     git(repo, "reset", "-q", "--hard")
 
-    (repo / ".git" / "hooks" / "commit-msg").unlink()
+    # Behind the global hooks' stubs (install-global-hooks.py), set here as the
+    # repository's own core.hooksPath, which git reads the same way.
+    stubs = tmp / "global-hooks"
+    load_script("install-global-hooks.py").install(stubs)
+    git(repo, "config", "core.hooksPath", str(stubs))
+    (repo / "a.py").write_text(DEBT.replace("x = 1", "x = 5"), encoding="utf-8")
+    git(repo, "add", "--", "a.py")
+    r = git(repo, "commit", "-m", "touch\n\nLINT-DEBT-OK: through the global hooks")
+    out = r.stdout + r.stderr
+    check("behind the global hooks' stubs, the repository's own commit-msg reads the line: committed",
+          r.returncode == 0 and "LINT-DEBT-OK in the message" in out, out)
+    own = repo / ".git" / "hooks" / "commit-msg"
+    own.chmod(0o644)
+    (repo / "a.py").write_text(DEBT.replace("x = 1", "x = 6"), encoding="utf-8")
+    git(repo, "add", "--", "a.py")
+    git(repo, "config", "--unset", "core.hooksPath")
+    r = git(repo, "commit", "-m", "touch\n\nLINT-DEBT-OK: not executable")
+    check("a commit-msg not executable, which git would not run: refused",
+          r.returncode != 0 and "no JP_TOOLS commit-msg hook" in r.stdout + r.stderr, r.stdout + r.stderr)
+    git(repo, "config", "core.hooksPath", str(stubs))
+    r = git(repo, "commit", "-m", "touch\n\nLINT-DEBT-OK: not executable")
+    check("  and behind the stubs, the same",
+          r.returncode != 0 and "no JP_TOOLS commit-msg hook" in r.stdout + r.stderr, r.stdout + r.stderr)
+    own.unlink()
+    r = git(repo, "commit", "-m", "touch\n\nLINT-DEBT-OK: no hook behind the stub")
+    check("  no commit-msg of its own behind the stub: refused",
+          r.returncode != 0 and "no JP_TOOLS commit-msg hook" in r.stdout + r.stderr, r.stdout + r.stderr)
+    git(repo, "config", "--unset", "core.hooksPath")
+
     (repo / "a.py").write_text(DEBT.replace("x = 1", "x = 4"), encoding="utf-8")
     git(repo, "add", "--", "a.py")
     r = git(repo, "commit", "-m", "touch\n\nLINT-DEBT-OK: no hook to read me")

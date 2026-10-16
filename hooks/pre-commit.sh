@@ -313,9 +313,17 @@ check_raised() {
 # blob as it was staged before this run (for commit-msg to put back), then a
 # line per held item, naming it and why. The tree ties it to this commit, so a
 # hold left by a commit that never reached its message is not read by a later one.
+# The hook git runs is core.hooksPath's, else the repository's own. A global
+# hook (install-global-hooks.py) is a stub running global-dispatch.sh, which
+# runs the repository's own in turn, so behind a stub the repository's own is
+# the one that reads the line. git runs only an executable hook.
 commit_msg_hook_installed() {
     hooks=$(git config --get core.hooksPath) || hooks=$(git rev-parse --git-path hooks)
-    grep -q "^# JP_TOOLS commit-msg hook" "$hooks/commit-msg" 2>/dev/null
+    hook="$hooks/commit-msg"
+    if grep -q "/hooks/global-dispatch.sh\" commit-msg " "$hook" 2>/dev/null; then
+        hook="$(git rev-parse --git-common-dir)/hooks/commit-msg"
+    fi
+    [ -x "$hook" ] && grep -q "^# JP_TOOLS commit-msg hook" "$hook" 2>/dev/null
 }
 
 hold_needs_commit_msg() {
