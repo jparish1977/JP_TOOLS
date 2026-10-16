@@ -52,6 +52,12 @@ branch a commit in a copy would move it, hence detached. A copy shares the
 repository's refs and objects, as any worktree does. Its gitdir is removed
 with the copy.
 
+KEPT VERDICTS. With $MUTATE_CACHE_DIR set and strace installed, a whole spec
+(not an --only run) whose every mutant was killed on target is kept there,
+and a later run reuses its verdict while nothing its runs read has changed,
+printing "kept"; anything else runs again (jpcheck/spec_cache.py says how).
+Without strace nothing is kept, and the run says so.
+
 A SIGTERM (a job manager's cancel) ends the run without leaving a copy or a
 gitdir behind: the runners still going are sent TERM (the runner restores and
 exits 143), runs not yet started do not start, every copy is removed as its
@@ -77,6 +83,7 @@ from typing import NoReturn
 # The packages beside this file import when another program loads it by path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from jpcheck import spec_cache
 from platformtools.procname import name_process
 
 RUNNER = Path(__file__).resolve().parent / "mutate-on-target.py"
@@ -152,22 +159,28 @@ def own_git(root: str, tree: str) -> str | None:
     return gitdir
 
 
-def run_in_copy(root: str, stem: str, args: list[str]) -> tuple[int, str]:
-    """The runner on a private copy of ROOT: (rc, its output)."""
+Reads = tuple[set[str], set[str]]
+
+
+def run_in_copy(root: str, stem: str, args: list[str], traced: bool = False) -> tuple[int, str, Reads | None]:
+    """The runner on a private copy of ROOT: (rc, its output, and when TRACED
+    and strace is here, the paths its run read: jpcheck.spec_cache)."""
     if STOP.is_set():
-        return 143, "mutate-spec: stopped (SIGTERM) before this run started\n"
+        return 143, "mutate-spec: stopped (SIGTERM) before this run started\n", None
     work = tempfile.mkdtemp(prefix=f".mutate-{stem}-",
                             dir=os.environ.get("MUTATE_COPY_DIR") or os.path.dirname(root))
     tree = os.path.join(work, os.path.basename(root))
     gitdir = None
+    trace = os.path.join(work, "strace.out")
+    prefix = spec_cache.strace_prefix(trace) if traced else None
     try:
         _copy_tree(root, tree)
         gitdir = own_git(root, tree)
         # Caches inside the copy: what a test or its tools cache (pwsh's
         # startup profile, say) is removed with it, and runs at once, or one
         # killed mid-write, cannot corrupt the user's own.
-        p = subprocess.Popen([sys.executable, str(RUNNER), tree, *args], stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True,
+        p = subprocess.Popen([*(prefix or []), sys.executable, str(RUNNER), tree, *args],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                              env=dict(os.environ, XDG_CACHE_HOME=os.path.join(work, ".cache")))
         with RUNNING_LOCK:
             RUNNING.add(p)
@@ -178,9 +191,13 @@ def run_in_copy(root: str, stem: str, args: list[str]) -> tuple[int, str]:
         finally:
             with RUNNING_LOCK:
                 RUNNING.discard(p)
-        return p.returncode, out
+        reads = None
+        if prefix:
+            text = Path(trace).read_text(encoding="utf-8", errors="replace")
+            reads = spec_cache.sort_paths(spec_cache.paths_in(text), tree, root, (work, tempfile.gettempdir()))
+        return p.returncode, out, reads
     except (OSError, subprocess.CalledProcessError) as e:
-        return 2, f"mutate-spec: could not make a private copy of {root}: {e}\n"
+        return 2, f"mutate-spec: could not make a private copy of {root}: {e}\n", None
     finally:
         shutil.rmtree(work, ignore_errors=True)
         if gitdir:
@@ -208,25 +225,46 @@ def run_spec(root: str, spec: str, outdir: str, base: str, only: list[str] | Non
     chosen = list(dict.fromkeys(only or every))
     ran = sum(n in chosen for n in every)
     out = os.path.join(outdir, stem + ".mutate.out")
-    rc, text = pool.submit(run_in_copy, root, stem,
-                           [*run, "--control-only", *(a for n in chosen for a in ("--only", n))]).result()
+    # KEPT VERDICTS (jpcheck/spec_cache.py): a whole spec, never an --only run.
+    cache = None if only else os.environ.get("MUTATE_CACHE_DIR")
+    want = spec_cache.key(os.path.abspath(spec), os.path.abspath(__file__), str(RUNNER)) if cache else {}
+    if cache and (verdict := spec_cache.kept(cache, stem, root, want)):
+        last = f"{verdict}, kept: nothing its runs read has changed"
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write(last + "\n")
+        return stem, 0, last
+    rc, text, reads = pool.submit(run_in_copy, root, stem,
+                                  [*run, "--control-only", *(a for n in chosen for a in ("--only", n))],
+                                  bool(cache)).result()
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(text)
     if rc != 0:
         return stem, rc, (text.strip().splitlines() or ["(no output)"])[-1]
-    runs = [pool.submit(run_in_copy, root, stem, [*run, "--no-control", "--only", n]) for n in chosen]
-    rcs = []
+    runs = [pool.submit(run_in_copy, root, stem, [*run, "--no-control", "--only", n], bool(cache)) for n in chosen]
+    rcs, every_read = [], [reads]
     with open(out, "a", encoding="utf-8") as fh:
         for fut in runs:
-            mrc, text = fut.result()
+            mrc, text, mreads = fut.result()
             rcs.append(mrc)
+            every_read.append(mreads)
             fh.write(text)
         of = f"{ran} of {len(every)} mutant(s) (--only)" if only else f"{ran} mutant(s)"
         bad = sum(r != 0 for r in rcs)
         last = f"mutate-spec: {of}, one control, " + (
             "every one killed on target" if not bad else f"{bad} wrong")
         fh.write(last + "\n")
+    _keep(cache, stem, root, want, every_read, last if not bad else None)
     return stem, max(rcs, default=0), last
+
+
+def _keep(cache: str | None, stem: str, root: str, want: dict[str, str],
+          every_read: list[Reads | None], verdict: str | None) -> None:
+    """Keep a spec's all-killed VERDICT with what every one of its runs read;
+    nothing when a run was not traced (no strace) or the verdict is not a pass."""
+    if cache and verdict and all(r is not None for r in every_read):
+        repo = set().union(*(r[0] for r in every_read if r))
+        ext = set().union(*(r[1] for r in every_read if r))
+        spec_cache.keep(cache, stem, root, want, repo, ext, verdict)
 
 
 def names(spec: str) -> list[tuple[str, str]]:
@@ -276,6 +314,9 @@ def main(argv: list[str]) -> int:
                 print(f"{spec_stem(sp, base)}: {name}\t-> {target}")
         return 0
     runs = chosen(specs, args.only)
+    if os.environ.get("MUTATE_CACHE_DIR") and not spec_cache.strace_prefix(""):
+        sys.stderr.write("mutate-spec: MUTATE_CACHE_DIR is set but strace is not installed: "
+                         "every spec runs, and no verdict is kept\n")
     outdir = os.environ.get("MUTATE_OUT_DIR", ".")
     bad = 0
     # Each spec is a waiting thread of its own; only POOL's runs count against --jobs.

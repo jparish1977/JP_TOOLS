@@ -35,7 +35,10 @@ fi
 JOBS=$jobs ./run-suites.sh .
 suites=$?
 
-MUTATE_OUT_DIR="$out" python3 mutate-spec.py --jobs "$jobs" . tests/mutants/*.json
+# Kept verdicts (mutate-spec.py, KEPT VERDICTS) in the user's cache, unless
+# MUTATE_CACHE_DIR names another, or is set empty to run every spec.
+MUTATE_CACHE_DIR="${MUTATE_CACHE_DIR-$HOME/.cache/jp-tools-spec-cache}" \
+  MUTATE_OUT_DIR="$out" python3 mutate-spec.py --jobs "$jobs" . tests/mutants/*.json
 specs=$?
 for f in "$out"/*.mutate.out; do
   [ -e "$f" ] || continue

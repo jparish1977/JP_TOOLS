@@ -39,7 +39,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ffprobe) and imagemagick (convert, identify) are an adopter's movie and
 # raster tools, groff (nroff) and docbook-to-man (`instant`) its man-page
 # tools, all declared in its requirements-system.txt: without them those
-# checks print SKIP in CI, and under mutmut their mutants survive.
+# checks print SKIP in CI, and under mutmut their mutants survive. strace
+# names what a mutant spec's runs read, so its verdict can be kept while none
+# of it changes (mutate-spec.py, KEPT VERDICTS); without it every spec runs.
 RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
     && apt-get update -q \
     && apt-get install -y -q --no-install-recommends \
@@ -48,7 +50,7 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
         ripgrep poppler-utils iproute2 \
         mame-tools testdisk gddrescue ntfs-3g \
         pandoc dvipng texlive-base opensp sgml-data \
-        ffmpeg imagemagick groff docbook-to-man \
+        ffmpeg imagemagick groff docbook-to-man strace \
     && rm -rf /var/lib/apt/lists/*
 
 # Jobs run as fleet-ci, never root. The base image's user is root, so every
