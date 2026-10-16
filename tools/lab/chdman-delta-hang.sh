@@ -12,6 +12,12 @@
 # Why: on a 32-thread box chdman 0.264 once spun one thread at 100% while its
 # 17 workers waited on a futex, writing nothing past the 124-byte header,
 # for as long as it was left (killed at 8 minutes). This counts how often.
+#
+# Tested: 100 runs at 20 s on a quiet 32-thread box (chdman 0.264): 0 hung,
+# 0 failed. Positive control: 3 runs at 0.01 s: 3 hung, each named.
+# NOT tested: under load. The one hang seen came while a proof ran 8 suites
+# at once beside it; this runs one chdman at a time on an idle box, so a 0
+# here does not say the hang cannot happen.
 printf '%s' chdman-hang > /proc/$$/comm 2>/dev/null || true
 set -u
 runs=${1:-50}
