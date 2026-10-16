@@ -31,6 +31,7 @@ from pathlib import Path
 from unittest import mock
 
 from _harness import ROOT, check, check_true, run
+from jpcheck import cores as cores_mod
 from jpcheck import mutmut_log, mutmut_own
 from mutmut_gate_support import ENV as _ENV
 from mutmut_gate_support import MUTMUT as _MUTMUT
@@ -714,8 +715,10 @@ def test_run_puts_its_python_first_on_path() -> None:
         check("PATH is mutmut's python's directory, then the PATH it had",
               seen["PATH"], os.pathsep.join([here, git]))
         check("  and the rest of the environment is kept, Python told not to buffer its output, the clean run"
-              " given the children", {k: v for k, v in seen.items() if k not in ("PATH", "MYPY_CACHE_DIR")},
-              {"HOME": td, "KEEP": "1", "PYTHONUNBUFFERED": "1", "MUTMUT_CLEAN_WORKERS": "2"})
+              " given the children, each child its share of the cores",
+              {k: v for k, v in seen.items() if k not in ("PATH", "MYPY_CACHE_DIR")},
+              {"HOME": td, "KEEP": "1", "PYTHONUNBUFFERED": "1", "MUTMUT_CLEAN_WORKERS": "2",
+               "PYTHON_CPU_COUNT": str(max(1, cores_mod.cpu_cores() // 2))})
         cache = Path(str(seen["MYPY_CACHE_DIR"]))
         check("  and one mypy cache for every worker, a directory while mutmut runs", call["cache_is_dir"], True)
         check_true("  made for the run, removed after it", not cache.exists())
@@ -726,6 +729,85 @@ def test_run_puts_its_python_first_on_path() -> None:
         assert isinstance(seen, dict)
         check("no PATH at all: its python's directory and an empty rest",
               seen["PATH"], here + os.pathsep)
+
+
+def test_cpu_cores_holds_the_affinity_to_the_quota() -> None:
+    """A container's --cpus is a cgroup quota, not an affinity: the cores a
+    run may use are the affinity held to the quota, rounded up."""
+    with tempfile.TemporaryDirectory() as td:
+        cpu_max = Path(td) / "cpu.max"
+
+        def cores(text: str | None, affinity: int = 32) -> int:
+            if text is None:
+                cpu_max.unlink(missing_ok=True)
+            else:
+                cpu_max.write_text(text, encoding="utf-8")
+            with mock.patch.object(os, "sched_getaffinity", return_value=set(range(affinity)), create=True):
+                return cores_mod.cpu_cores(cpu_max)
+
+        check("a quota of 8 cores on a 32-core affinity: 8", cores("800000 100000\n"), 8)
+        check("half a core counts as one", cores("50000 100000\n"), 1)
+        check("a core and a half, two", cores("150000 100000\n"), 2)
+        check("a quota past the affinity: the affinity", cores("800000 100000\n", affinity=4), 4)
+        check("no quota (max): the affinity", cores("max 100000\n"), 32)
+        check("no quota file (no cgroup v2): the affinity", cores(None), 32)
+        check("a file this cannot read as a quota: the affinity", cores("garbage\n"), 32)
+        check("a zero period: the affinity", cores("100000 0\n"), 32)
+        check("digits that are not ASCII (fullwidth, which str's int() reads) are no quota: the affinity",
+              cores("".join(map(chr, (0xFF18, 0xFF10, 0xFF10))) + "000 100000\n"), 32)
+        check("the default reads cgroup v2's own file", cores_mod.CPU_MAX, Path("/sys/fs/cgroup/cpu.max"))
+        cpu_max.unlink()
+        with mock.patch.object(os, "sched_getaffinity", side_effect=AttributeError, create=True), \
+                mock.patch.object(os, "cpu_count", return_value=6):
+            check("no affinity on the platform (Windows): os.cpu_count", cores_mod.cpu_cores(cpu_max), 6)
+        with mock.patch.object(os, "sched_getaffinity", side_effect=AttributeError, create=True), \
+                mock.patch.object(os, "cpu_count", return_value=None):
+            check("  and when that cannot say either: 1", cores_mod.cpu_cores(cpu_max), 1)
+
+
+def test_each_child_gets_its_share_of_the_cores() -> None:
+    """PYTHON_CPU_COUNT, each child's share, at least 1; a value the
+    environment already sets is the repo's and kept."""
+    def share(env: dict[str, str], children: int, cores: int) -> str | None:
+        return cores_mod.child_cpu_count(env, children, cores).get("PYTHON_CPU_COUNT")
+
+    check("8 cores over 8 children: 1 each", share({}, 8, 8), "1")
+    check("32 over 8: 4", share({}, 8, 32), "4")
+    check("fewer cores than children: still 1", share({}, 8, 4), "1")
+    check("an uneven split rounds down, never past the cores", share({}, 3, 8), "2")
+    check("no children given counts as one", share({}, 0, 8), "8")
+    check("a value already set is kept", share({"PYTHON_CPU_COUNT": "3"}, 8, 32), "3")
+    check("  1, the smallest count there is, too", share({"PYTHON_CPU_COUNT": "1"}, 8, 32), "1")
+    check("  an empty one is no setting, and is set", share({"PYTHON_CPU_COUNT": ""}, 8, 32), "4")
+    # Only a positive ASCII decimal is kept: CPython 3.13 counts every core on
+    # "default", and will not start at all on "0", "-2", "2.5" or a fullwidth
+    # digit (measured in python:3.13-slim).
+    for unusable in ("default", "0", "-2", "2.5", "".join(map(chr, (0xFF13,)))):
+        check(f"  {unusable!r}, no count CPython takes, is replaced by the share",
+              share({"PYTHON_CPU_COUNT": unusable}, 8, 32), "4")
+    env = {"KEEP": "1"}
+    check("the rest of the environment is kept, and the caller's dict is not changed",
+          (cores_mod.child_cpu_count(env, 2, 8), env), ({"KEEP": "1", "PYTHON_CPU_COUNT": "4"}, {"KEEP": "1"}))
+    check("the variable is CPython's own", cores_mod.CPU_COUNT, "PYTHON_CPU_COUNT")
+
+
+def test_run_keeps_the_repos_own_cpu_count() -> None:
+    if not shutil.which("git"):
+        print("SKIP: git not found")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = _repo(Path(td))
+        git = str(Path(shutil.which("git") or "git").parent)
+        [call] = _run_mutmut(root, full=False, env={"PATH": git, "HOME": td, "PYTHON_CPU_COUNT": "5"})
+        seen = call["env"]
+        assert isinstance(seen, dict)
+        check("PYTHON_CPU_COUNT set by the repo reaches mutmut as it was", seen["PYTHON_CPU_COUNT"], "5")
+
+
+def test_max_children_defaults_to_the_cores_it_may_use() -> None:
+    with mock.patch.object(gate, "cpu_cores", return_value=7):
+        args = gate._parser().parse_args(["run"])
+    check("--max-children defaults to cpu_cores(), not os.cpu_count()", args.max_children, 7)
 
 
 def test_run_full_starts_from_nothing() -> None:

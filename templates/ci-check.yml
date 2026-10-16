@@ -40,7 +40,13 @@
 #     the same in both.
 #   - one nightly run, by hand (workflow_dispatch) the first time: until a
 #     state exists, the mutation job fails as could-not-look rather than pass.
-# MUTMUT_WORKERS (default 8) is how many mutants run at once.
+# MUTMUT_WORKERS (default 8) is how many mutants run at once, and the cores
+# (--cpus) each mutation job is held to; MUTMUT_MEMORY (default 8g) its
+# memory. --cpus is a quota, not an affinity, so inside the job every core of
+# the host still shows: mutmut-gate.py gives each mutant's run its share,
+# --cpus over the workers (1 by default), in PYTHON_CPU_COUNT. A suite that
+# sizes a worker pool should honour it: CPython 3.13's os.cpu_count() does by
+# itself; on 3.12, read the variable first. A value the repo sets is kept.
 # What the repo's tests/conftest.py does under mutmut, which runs its tests
 # in its own copy of the checkout, again and again in one process:
 #   - each test in an empty working directory of its own: a mutant that turns
@@ -485,7 +491,9 @@ jobs:
     runs-on: fleet-ci
     container:
       image: fleet-ci:current
-      options: -v ${{ vars.MUTMUT_STATE_VOLUME }}:/mutmut-state:ro
+      options: >-
+        --cpus ${{ vars.MUTMUT_WORKERS || '8' }} --memory ${{ vars.MUTMUT_MEMORY || '8g' }}
+        -v ${{ vars.MUTMUT_STATE_VOLUME }}:/mutmut-state:ro
     env:
       MUTMUT_WORKERS: ${{ vars.MUTMUT_WORKERS || '8' }}
     # The check job's layout: this repo at project/, JP_TOOLS beside it. A step
@@ -552,7 +560,9 @@ jobs:
     runs-on: fleet-ci
     container:
       image: fleet-ci:current
-      options: -v ${{ vars.MUTMUT_STATE_VOLUME }}:/mutmut-state
+      options: >-
+        --cpus ${{ vars.MUTMUT_WORKERS || '8' }} --memory ${{ vars.MUTMUT_MEMORY || '8g' }}
+        -v ${{ vars.MUTMUT_STATE_VOLUME }}:/mutmut-state
     env:
       MUTMUT_WORKERS: ${{ vars.MUTMUT_WORKERS || '8' }}
     defaults:
