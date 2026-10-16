@@ -145,9 +145,10 @@ def _failed(line: str) -> bool:
 class _Reader:
     """paths_in's state, line by line: the working directory of each group
     of processes that share one (a thread, or any clone with CLONE_FS, joins
-    its parent's group), as its calls last printed it, or lost to a chdir
-    that went somewhere not known; each clone still running, with its
-    parent's directory then; a call still running (unfinished), by pid;
+    its parent's group), as its calls last printed it; the groups a chdir
+    took somewhere not known (read by born, only while still not known);
+    each clone still running, with its parent's directory then; a call
+    still running (unfinished), by pid;
     relative names from calls with no directory, by pid, waiting for their
     group's next AT_FDCWD to say where they were."""
 
@@ -186,7 +187,6 @@ class _Reader:
             self.lost.add(g)
         else:
             self.cwd[g] = now
-            self.lost.discard(g)
 
     def fchdir(self, pid: str, line: str, pos: int) -> None:
         """PID's fchdir on LINE, its argument from POS: its group's
@@ -202,7 +202,6 @@ class _Reader:
         line (resumed)."""
         g = self.g(pid)
         self.cwd[g] = cwd
-        self.lost.discard(g)
         for p in [p for p in self.held if self.g(p) == g]:
             for call, name, line in self.held.pop(p):
                 self.place(call, os.path.join(cwd, name), line)
@@ -222,10 +221,10 @@ class _Reader:
         results = _RESULT.findall(line)
         if not results or pid not in self.spawning:
             return
+        # A clone that failed names -1 or ?, which no process is: recording
+        # it changes nothing any call reads.
         cwd, shares = self.spawning.pop(pid)
         child = results[-1]
-        if child in ("-1", "?"):
-            return
         if shares:
             self.group[child] = self.g(pid)
         elif cwd is not None and child not in self.cwd and child not in self.lost:
