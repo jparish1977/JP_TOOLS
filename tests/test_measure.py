@@ -21,6 +21,10 @@ WHAT IS CHECKED
     measures like any other: the tree's JSON cannot fail on it. A deprecation
     PHP prints while loading php-parser goes to stderr, not into the tree.
 
+    The JS runner, stubbed: node from PATH or else node.exe; its call whole;
+    the exact message when node is missing, when it prints no JSON (the last
+    200 characters of stderr) and when it reports an error.
+
     A tool that is not installed prints SKIP for its language: not a pass.
 
     python3 tests/test_measure.py
@@ -37,7 +41,7 @@ from unittest import mock
 from _harness import ROOT, check, run
 from jpcheck import measure as measure_module
 from jpcheck import smells as smells_module
-from jpcheck.common import _php_bin, _php_cmd, node_module_roots
+from jpcheck.common import TOOLS_ROOT, _php_bin, _php_cmd, node_module_roots
 from jpcheck.measure import TOP_LEVEL, file_complexity, measure
 from jpcheck.smells import run_smells
 
@@ -215,6 +219,48 @@ def test_php_diagnostics_stay_off_the_tree() -> None:
             except Exception as e:  # noqa: BLE001 -- reason: any failure is this check's value
                 got = f"{type(e).__name__}: {e}"
     check("php: a deprecation from the autoloader does not reach the tree", got, {"f": (4, 1, 3)})
+
+
+def test_js_runner_called_and_reported_exactly() -> None:
+    """measure_js's runner, stubbed: node from PATH or else node.exe, the call
+    made whole, and what it says when node, eslint or the source fails."""
+    env = {"RUNNER": "env"}
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def answer(stdout: str, stderr: str = "") -> object:
+        def fake_run(argv: list[str], **kw: object) -> object:
+            calls.append((argv, kw))
+            return subprocess.CompletedProcess(argv, 0, stdout, stderr)
+        return fake_run
+
+    def js(found: dict[str, str], stdout: str, stderr: str = "") -> object:
+        calls.clear()
+        with mock.patch("jpcheck.measure.shutil.which", side_effect=found.get), \
+                mock.patch("jpcheck.js_tools._resolve_args", return_value=["--flag"]), \
+                mock.patch("jpcheck.js_tools._runner_env", return_value=env), \
+                mock.patch("jpcheck.measure.subprocess.run", side_effect=answer(stdout, stderr)):
+            try:
+                return measure_module.measure_js("let a = 1;\n")
+            except (measure_module.ToolMissingError, ValueError) as e:
+                return f"{type(e).__name__}: {e}"
+
+    ok = '{"lines": 1, "funcs": {"f": [1, 2, 1]}}'
+    check("no node on PATH: node.exe runs it",
+          (js({"node.exe": "/x/node.exe"}, ok), calls[0][0][0] if calls else None),
+          ((1, {"f": (1, 2, 1)}), "/x/node.exe"))
+    check("neither: node is missing, said exactly", js({}, ok),
+          "ToolMissingError: node (on PATH, to run jp_measure.mjs)")
+    js({"node": "/x/node"}, ok)
+    check("the runner's call, whole",
+          calls, [(["/x/node", "--flag", str(TOOLS_ROOT / "jp_measure.mjs")],
+                   {"input": "let a = 1;\n", "capture_output": True, "text": True, "check": False,
+                    "cwd": str(TOOLS_ROOT), "env": env})])
+    check("no JSON: eslint is missing, with the last 200 characters of stderr, stripped",
+          js({"node": "/x/node"}, "", "x" * 50 + "y" * 200 + "  \n"),
+          f"ToolMissingError: eslint (jp_measure.mjs: {'y' * 200})")
+    check("the runner's own error: refused with its message",
+          js({"node": "/x/node"}, '{"error": "Parsing error: Unexpected token"}'),
+          "ValueError: Parsing error: Unexpected token")
 
 
 def test_a_tool_that_cannot_run_is_not_a_finding() -> None:
