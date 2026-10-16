@@ -81,6 +81,13 @@ every tenth of the way or each minute, and any other line mutmut writes (a
 warning, an error, a traceback) whole. Every line of the gate's is stamped
 with the UTC time and flushed, and one comes at least each minute.
 
+CORES. `run` starts --max-children mutants at once, by default as many as
+the cores this process may use: its affinity, held to its cgroup's CPU quota
+(a container's --cpus). Each child's share of those cores goes to mutmut's
+whole run as PYTHON_CPU_COUNT, unless the environment already sets it, so a
+suite that sizes a pool of its own starts that many workers, not one per core
+of the host.
+
 --results FILE reads `mutmut results --all true` output from FILE instead of
 running it, so a run's results are read once and judged twice (record, gate).
 
@@ -107,6 +114,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import jpexit
 from jpcheck import mutmut_log, mutmut_own, pyproject_moves
+from jpcheck.cores import child_cpu_count, cpu_cores
 from jpcheck.mutmut_paths import SuiteLayout, files_in_test_dirs, suite_layout
 from jpcheck.mutmut_paths import is_suite as _is_suite
 from jpcheck.mutmut_paths import module as _module
@@ -373,7 +381,9 @@ def _mutmut_run(root: Path, children: int, plan: mutmut_log.Plan) -> None:
     the tests that reach them instead of the whole suite. Its clean run runs
     across CHILDREN workers (mutmut-clean.py). Its output goes through
     mutmut_log's relay (THE LOG), unbuffered, so mutmut's own lines reach it
-    as they are printed.
+    as they are printed. Each child's share of the cores is in
+    PYTHON_CPU_COUNT (jpcheck.cores); the stats pass, the clean run and every
+    mutant's run inherit it.
 
     Every worker shares one mypy cache, made for this run and removed after
     it: tests that run real mypy otherwise start it cold for each mutant, and
@@ -383,6 +393,7 @@ def _mutmut_run(root: Path, children: int, plan: mutmut_log.Plan) -> None:
         env = dict(os.environ, PYTHONUNBUFFERED="1", MUTMUT_CLEAN_WORKERS=str(children),
                    MYPY_CACHE_DIR=mypy_cache,
                    PATH=os.pathsep.join([str(Path(sys.executable).parent), os.environ.get("PATH", "")]))
+        env = child_cpu_count(env, children, cpu_cores())
         rc = mutmut_log.run_relayed(
             [sys.executable, str(Path(__file__).resolve().parent / "mutmut-clean.py"), "run",
              "--max-children", str(children), *plan.names],
@@ -602,7 +613,7 @@ def _parser() -> _Parser:
     sub.add_parser("prepare", help="make mutants/ ready for mutmut")
     r = sub.add_parser("run", help="prepare, then mutmut run")
     r.add_argument("--full", action="store_true", help="start from nothing, not the kept state")
-    r.add_argument("--max-children", type=int, default=os.cpu_count() or 1)
+    r.add_argument("--max-children", type=int, default=cpu_cores())
     r.add_argument("--pr", action="store_true",
                    help="a pull request's run: add what it judges to the record gate --pr holds")
     for name, what in (("record", "write per-function counts to OUT"),

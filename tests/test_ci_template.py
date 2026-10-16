@@ -592,10 +592,10 @@ def test_the_mutation_jobs_use_the_repos_own_volume() -> None:
     check("the state job: pushes, with a volume named", push.get("if"),
           "github.event_name == 'push' && vars.MUTMUT_STATE_VOLUME != ''")
     check("the nightly: with a volume named", night.get("if"), "vars.MUTMUT_STATE_VOLUME != ''")
-    check("the PR job mounts it read-only", pr.get("container"),
-          {"image": "fleet-ci:current", "options": f"-v {VOLUME}:/mutmut-state:ro"})
-    check("the state job mounts it read-write", push.get("container"),
-          {"image": "fleet-ci:current", "options": f"-v {VOLUME}:/mutmut-state"})
+    check("the PR job mounts it read-only, held to its share of the host as the nightly is", pr.get("container"),
+          {"image": "fleet-ci:current", "options": f"--cpus {WORKERS} --memory {MEMORY} -v {VOLUME}:/mutmut-state:ro"})
+    check("the state job mounts it read-write, held the same way", push.get("container"),
+          {"image": "fleet-ci:current", "options": f"--cpus {WORKERS} --memory {MEMORY} -v {VOLUME}:/mutmut-state"})
     check("the nightly read-write, held to its share of the host: cores and memory each from a variable",
           night.get("container"),
           {"image": "fleet-ci:current", "options": f"--cpus {WORKERS} --memory {MEMORY} -v {VOLUME}:/mutmut-state"})
