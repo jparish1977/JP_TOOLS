@@ -741,7 +741,7 @@ def test_cpu_cores_holds_the_affinity_to_the_quota() -> None:
             if text is None:
                 cpu_max.unlink(missing_ok=True)
             else:
-                cpu_max.write_text(text, encoding="ascii")
+                cpu_max.write_text(text, encoding="utf-8")
             with mock.patch.object(os, "sched_getaffinity", return_value=set(range(affinity)), create=True):
                 return cores_mod.cpu_cores(cpu_max)
 
@@ -753,6 +753,8 @@ def test_cpu_cores_holds_the_affinity_to_the_quota() -> None:
         check("no quota file (no cgroup v2): the affinity", cores(None), 32)
         check("a file this cannot read as a quota: the affinity", cores("garbage\n"), 32)
         check("a zero period: the affinity", cores("100000 0\n"), 32)
+        check("digits that are not ASCII (fullwidth, which str's int() reads) are no quota: the affinity",
+              cores("".join(map(chr, (0xFF18, 0xFF10, 0xFF10))) + "000 100000\n"), 32)
         check("the default reads cgroup v2's own file", cores_mod.CPU_MAX, Path("/sys/fs/cgroup/cpu.max"))
         cpu_max.unlink()
         with mock.patch.object(os, "sched_getaffinity", side_effect=AttributeError, create=True), \

@@ -25,7 +25,9 @@ def cpu_cores(cpu_max: Path = CPU_MAX) -> int:
     except AttributeError:  # reason: no affinity on this platform; cpu_count is all it has
         cores = os.cpu_count() or 1
     try:
-        quota, period = cpu_max.read_text(encoding="ascii").split()
+        # Bytes, as the kernel writes it: int() reads ASCII digits from bytes,
+        # and nothing else is a quota.
+        quota, period = cpu_max.read_bytes().split()
         return max(1, min(cores, -(-int(quota) // int(period))))
     except (OSError, ValueError, ZeroDivisionError):  # reason: no quota file, "max" (no quota) or one this cannot read: the affinity stands
         return cores
