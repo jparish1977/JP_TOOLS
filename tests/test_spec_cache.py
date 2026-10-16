@@ -135,9 +135,11 @@ def test_kept_refuses_what_it_cannot_read() -> None:
                                                encoding="utf-8")
         check("an entry it cannot read does not stop it finding one that matches",
               spec_cache.kept(td, "s", td, {}), "V")
+        (Path(td) / "s" / "a.json").write_text("{ not json", encoding="utf-8")
         entries = [Path(td) / "s" / "a.json", Path(td) / "s" / "b.json"]
         with mock.patch.object(Path, "glob", lambda _self, _pattern: iter(entries)):
-            check("  the unreadable one met first", spec_cache.kept(td, "s", td, {}), "V")
+            check("  an entry that does not parse, met first, is passed over",
+                  spec_cache.kept(td, "s", td, {}), "V")
 
 
 def test_entries_per_state_newest_kept() -> None:

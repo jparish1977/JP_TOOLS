@@ -1,0 +1,148 @@
+# JP_TOOLS CI -- drop this into .github/workflows/check.yml
+# (Forgejo Actions reads the same syntax from .forgejo/workflows/.)
+# Runs check.py on every push and PR.
+#
+# Install: python JP_TOOLS/init-ci.py  (copies this into your repo)
+#
+# --- Private Composer dependencies ---
+# If your project requires private GitHub repos via VCS repositories in
+# composer.json, the default GITHUB_TOKEN only has access to the current repo.
+#
+# Setup:
+#   1. Create a fine-grained PAT at github.com/settings/personal-access-tokens/new
+#      Scope: read-only "Contents" access to the private dependency repos
+#   2. Add as a repo secret:
+#        gh secret set COMPOSER_TOKEN -R owner/repo
+#   3. In the PHP job below, add this env var:
+#        env:
+#          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.COMPOSER_TOKEN }}"}}'
+#   4. If composer.json uses path repos for local dev, swap to VCS in CI:
+#        - name: Switch to VCS repos for CI
+#          run: |
+#            sed -i 's|"type": "path"|"type": "vcs"|g' composer.json
+#            sed -i 's|"url": "../shared-lib"|"url": "https://github.com/owner/shared-lib.git"|g' composer.json
+
+name: Code Quality
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every language check.py covers here. One this repo has no files of
+        # is detected and skipped, with a message, so nothing needs deleting.
+        # That matters because check.py exits 2 when a check could not run:
+        # an entry left running over a language with no files would go red.
+        lang: [python, js, php, shell]
+
+    steps:
+      # Full history: the smells arm reads the PR's base commit, and a shallow
+      # clone does not have it.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Does this repo have ${{ matrix.lang }} files?
+        id: present
+        run: |
+          set -f   # the patterns are for git, not for this shell to expand
+          case "${{ matrix.lang }}" in
+            python) pats='*.py' ;;
+            js)     pats='*.js *.mjs *.cjs *.jsx *.ts *.tsx' ;;
+            php)    pats='*.php' ;;
+            # By suffix only: an extensionless shell script is found by its #!
+            # when check.py is handed it, but a glob cannot see a shebang.
+            shell)  pats='*.sh *.bash' ;;
+          esac
+          if [ -n "$(git ls-files -- $pats | head -n 1)" ]; then
+            echo "found=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=no" >> "$GITHUB_OUTPUT"
+            echo "No ${{ matrix.lang }} files in this repo: nothing to check for it."
+          fi
+
+      - name: Set up Python
+        if: steps.present.outputs.found == 'yes'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        if: steps.present.outputs.found == 'yes' && matrix.lang == 'js'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Set up PHP
+        if: steps.present.outputs.found == 'yes' && matrix.lang == 'php'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+
+      # BESIDE the checkout, not in /tmp. A project ruff.toml that extends
+      # ../JP_TOOLS/configs/ruff.toml loads only from here; cloned to /tmp,
+      # the config failed to load and ruff read "pass".
+      - name: Clone JP_TOOLS
+        if: steps.present.outputs.found == 'yes'
+        run: git clone --depth 1 https://github.com/jparish1977/JP_TOOLS.git ../JP_TOOLS
+
+      # From JP_TOOLS' own manifests, because that is where check.py looks:
+      #   requirements-dev.txt  pinned ruff, mypy, pip-audit and coverage
+      #   package.json          eslint and its plugins, prettier, stylelint.
+      #                         jp_eslint.mjs imports them from
+      #                         ../JP_TOOLS/node_modules; a global npm install
+      #                         does not satisfy an ES module import.
+      #   composer.json         phpstan, phpcs, rector, found in vendor/bin
+      #   requirements-system.txt  shellcheck (and cppcheck): apt, not a
+      #                         language package manager
+      # One declaration each, instead of a second copy of the pins here.
+      - name: Install tool dependencies
+        if: steps.present.outputs.found == 'yes'
+        run: |
+          case "${{ matrix.lang }}" in
+            python) pip install -r ../JP_TOOLS/requirements-dev.txt ;;
+            js)     npm --prefix ../JP_TOOLS install ;;
+            php)    composer --working-dir=../JP_TOOLS install --no-interaction --no-progress ;;
+            shell)
+              if ! command -v shellcheck >/dev/null 2>&1; then
+                SUDO=$(command -v sudo || true)
+                $SUDO apt-get update -q
+                $SUDO apt-get install -y -q shellcheck
+              fi
+              shellcheck --version ;;
+          esac
+
+      # Shell is checked one file at a time: --lang has no shell choice (a
+      # directory run detects shell on its own, alongside every other
+      # language), so each .sh/.bash file is handed to check.py by name.
+      - name: Run check
+        if: steps.present.outputs.found == 'yes'
+        env:
+          SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # The smells arm fails a smell that is NEW against --smells-base
+          # and warns on one that existed. Its default, HEAD, is the commit under
+          # test here, so without this a new smell only ever warned. The base is
+          # the PR's, or on a push the commit before it; a first push has none
+          # (all zeros), which falls back to HEAD and says so.
+          base="$SMELLS_BASE"
+          case "$base" in *[!0]*) ;; *) base="" ;; esac
+          if [ -z "$base" ]; then
+            echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
+            base=HEAD
+          fi
+          if [ "${{ matrix.lang }}" = shell ]; then
+            rc=0
+            for f in $(git ls-files -- '*.sh' '*.bash'); do
+              python ../JP_TOOLS/check.py "$f" --pretty --smells-base "$base" || rc=1
+            done
+            exit $rc
+          fi
+          python ../JP_TOOLS/check.py . --lang ${{ matrix.lang }} --pretty --smells-base "$base"

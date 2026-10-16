@@ -1,0 +1,208 @@
+# JP_TOOLS CI -- drop this into .github/workflows/check.yml
+# (Forgejo Actions reads the same syntax from .forgejo/workflows/.)
+# Runs check.py on every push and PR.
+#
+# Install: python JP_TOOLS/init-ci.py  (copies this into your repo)
+#
+# --- Where JP_TOOLS comes from ---
+# On GitHub, the public copy, unless the repository variable
+# JP_TOOLS_REPOSITORY names another. Anywhere else the variable is REQUIRED:
+# actions/checkout fetches from the forge the workflow runs on, so the default
+# name would be looked up there, not on GitHub. Set it to JP_TOOLS' owner/name
+# on your forge, and the secret JP_TOOLS_TOKEN to a token that can read it; the
+# workflow stops with this message if it is missing.
+#
+# --- Private Composer dependencies ---
+# If your project requires private GitHub repos via VCS repositories in
+# composer.json, the default GITHUB_TOKEN only has access to the current repo.
+#
+# Setup:
+#   1. Create a fine-grained PAT at github.com/settings/personal-access-tokens/new
+#      Scope: read-only "Contents" access to the private dependency repos
+#   2. Add as a repo secret:
+#        gh secret set COMPOSER_TOKEN -R owner/repo
+#   3. In the PHP job below, add this env var:
+#        env:
+#          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.COMPOSER_TOKEN }}"}}'
+#   4. If composer.json uses path repos for local dev, swap to VCS in CI:
+#        - name: Switch to VCS repos for CI
+#          run: |
+#            sed -i 's|"type": "path"|"type": "vcs"|g' composer.json
+#            sed -i 's|"url": "../shared-lib"|"url": "https://github.com/owner/shared-lib.git"|g' composer.json
+
+name: Code Quality
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every language check.py covers here. One this repo has no files of
+        # is detected and skipped, with a message, so nothing needs deleting.
+        # That matters because check.py exits 2 when a check could not run:
+        # an entry left running over a language with no files would go red.
+        lang: [python, js, php, shell]
+
+    steps:
+      # Full history: the smells arm reads the PR's base commit, and a shallow
+      # clone does not have it.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Does this repo have ${{ matrix.lang }} files?
+        id: present
+        shell: bash
+        run: |
+          # Quoted patterns in an array: they are for git to match, not for
+          # this shell to expand or split.
+          case "${{ matrix.lang }}" in
+            python) pats=('*.py') ;;
+            js)     pats=('*.js' '*.mjs' '*.cjs' '*.jsx' '*.ts' '*.tsx') ;;
+            php)    pats=('*.php') ;;
+            # By suffix only: an extensionless shell script is found by its #!
+            # when check.py is handed it, but a glob cannot see a shebang.
+            shell)  pats=('*.sh' '*.bash') ;;
+          esac
+          if [ -n "$(git ls-files -- "${pats[@]}" | head -n 1)" ]; then
+            echo "found=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=no" >> "$GITHUB_OUTPUT"
+            echo "No ${{ matrix.lang }} files in this repo: nothing to check for it."
+          fi
+
+      - name: Set up Python
+        if: steps.present.outputs.found == 'yes'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        if: steps.present.outputs.found == 'yes' && matrix.lang == 'js'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      # From apt when the runner has no composer, not from an action: a Forgejo
+      # runner resolves every `uses:` through its own action mirror, which does
+      # not carry shivammathur/setup-php, so the PHP job could not start there.
+      # 8.3 is what Ubuntu 24.04 ships. GitHub's ubuntu-latest already has both.
+      - name: Set up PHP
+        if: steps.present.outputs.found == 'yes' && matrix.lang == 'php'
+        run: |
+          if ! command -v composer >/dev/null 2>&1; then
+            SUDO=$(command -v sudo || true)
+            $SUDO apt-get update -q
+            $SUDO apt-get install -y -q php-cli php-xml php-mbstring php-curl unzip composer
+          fi
+          php --version
+          composer --version
+
+      # WHICH JP_TOOLS: the repository variable JP_TOOLS_REPOSITORY (owner/name
+      # on the forge running this workflow), or on GitHub the public copy when
+      # it is unset. actions/checkout fetches from the forge it runs on, so off
+      # GitHub the default would be looked up on the wrong forge: the variable
+      # is required there, and its absence stops the job with a message rather
+      # than a checkout failure that does not say why. The secret
+      # JP_TOOLS_TOKEN reads a copy that is not public.
+      - name: JP_TOOLS_REPOSITORY is set, off GitHub
+        if: >-
+          steps.present.outputs.found == 'yes' && !vars.JP_TOOLS_REPOSITORY
+          && github.server_url != 'https://github.com'
+        run: |
+          echo "Set the repository variable JP_TOOLS_REPOSITORY to JP_TOOLS' owner/name on this forge" >&2
+          echo "(and the secret JP_TOOLS_TOKEN if it is not public): the default names the copy" >&2
+          echo "on GitHub, and actions/checkout fetches from ${{ github.server_url }}." >&2
+          exit 1
+
+      - name: Check out JP_TOOLS
+        if: steps.present.outputs.found == 'yes'
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}
+          token: ${{ secrets.JP_TOOLS_TOKEN || github.token }}
+          path: _jp_tools
+
+      # BESIDE the checkout, not in /tmp. A project ruff.toml that extends
+      # ../JP_TOOLS/configs/ruff.toml loads only from here; cloned to /tmp,
+      # the config failed to load and ruff read "pass". actions/checkout
+      # writes only inside the workspace, so the copy is moved out after.
+      - name: Put JP_TOOLS beside the checkout
+        if: steps.present.outputs.found == 'yes'
+        run: mv _jp_tools ../JP_TOOLS
+
+      # From JP_TOOLS' own manifests, because that is where check.py looks:
+      #   requirements-dev.txt  pinned ruff, mypy, pip-audit and coverage
+      #   package.json          eslint and its plugins, prettier, stylelint.
+      #                         jp_eslint.mjs imports them from
+      #                         ../JP_TOOLS/node_modules; a global npm install
+      #                         does not satisfy an ES module import.
+      #   composer.json         phpstan, phpcs, rector, found in vendor/bin.
+      #                         Only the dev packages its extra.jp-tools-gate
+      #                         names: the rest are libraries JP_TOOLS' own
+      #                         scripts use, which this runner may not be able
+      #                         to read, and the gate does not need them.
+      #   requirements-system.txt  shellcheck (and cppcheck): apt, not a
+      #                         language package manager. The shell job also
+      #                         takes requirements-dev.txt's shfmt-py line.
+      # One declaration each, instead of a second copy of the pins here.
+      - name: Install tool dependencies
+        if: steps.present.outputs.found == 'yes'
+        shell: bash
+        run: |
+          case "${{ matrix.lang }}" in
+            python) pip install -r ../JP_TOOLS/requirements-dev.txt ;;
+            js)     npm --prefix ../JP_TOOLS install ;;
+            php)
+              # Assigned first: a failing python inside `read <<<` would not stop
+              # the step, and the job would die later at install, misleadingly.
+              non_gate=$(python -c 'import json, sys; c = json.load(open(sys.argv[1])); print(" ".join(p for p in c["require-dev"] if p not in c["extra"]["jp-tools-gate"]))' ../JP_TOOLS/composer.json)
+              read -ra drop <<< "$non_gate"
+              if [ "${#drop[@]}" -gt 0 ]; then
+                composer --working-dir=../JP_TOOLS remove --dev --no-update --no-interaction "${drop[@]}"
+              fi
+              composer --working-dir=../JP_TOOLS install --no-interaction --no-progress
+              # The project's own dependencies too, so phpstan loads what its
+              # code uses (PHPUnit, for tests) from the project's autoloader.
+              # check.py does not analyse vendor/ itself.
+              if [ -f composer.json ]; then
+                composer install --no-interaction --no-progress
+              fi ;;
+            shell)
+              if ! command -v shellcheck >/dev/null 2>&1; then
+                SUDO=$(command -v sudo || true)
+                $SUDO apt-get update -q
+                $SUDO apt-get install -y -q shellcheck
+              fi
+              # shfmt too: the smells check measures shell through its parser.
+              # At requirements-dev.txt's pin, read from there, not restated.
+              shfmt_pin=$(python -c 'import sys; print(next(ln.split("#")[0].strip() for ln in open(sys.argv[1]) if ln.startswith("shfmt-py==")))' ../JP_TOOLS/requirements-dev.txt)
+              pip install "$shfmt_pin"
+              shellcheck --version
+              shfmt --version ;;
+          esac
+
+      - name: Run check
+        if: steps.present.outputs.found == 'yes'
+        env:
+          SMELLS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # The smells arm fails a smell that is NEW against --smells-base
+          # and warns on one that existed. Its default, HEAD, is the commit under
+          # test here, so without this a new smell only ever warned. The base is
+          # the PR's, or on a push the commit before it; a first push has none
+          # (all zeros), which falls back to HEAD and says so.
+          base="$SMELLS_BASE"
+          case "$base" in *[!0]*) ;; *) base="" ;; esac
+          if [ -z "$base" ]; then
+            echo "No base commit to judge smells against: HEAD is used, so a new smell only warns."
+            base=HEAD
+          fi
+          python ../JP_TOOLS/check.py . --lang ${{ matrix.lang }} --pretty --smells-base "$base"

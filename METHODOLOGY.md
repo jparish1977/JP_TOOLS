@@ -90,6 +90,8 @@ These gates are not tech-debt mitigation. They are architectural enforcement: if
 
 **Assert the whole output, not a phrase in it.** A check that a report contains a phrase still passes when every other word, field, separator and number around that phrase is wrong; mutation testing shows it as survivors in format strings and literals that no test reads. Compare the whole result against an expected value written out in full: the whole message, the whole report, the whole response (status, headers and body). Where part of it varies, such as a time or a temporary path, replace that part with a fixed placeholder before comparing, rather than checking around it.
 
+**Test the code in the checkout, with inputs in the checkout.** A test, a control or a gate judges the tree it runs in. It never reads its own repository's history (`git show SHA:file`, a pinned commit, a tag) for an input: a squash, a rewrite or a shallow clone breaks it, and it is not about this code. An input showing a fault the code must catch is a fixture file in the tree. A verdict a gate reports is measured on the commit under test; one reused from an earlier run stands only when everything that run read is byte-identical to the tree now.
+
 ### 2.6 IO leaves are allowed to be untested
 
 At the boundary between your code and the OS, there's always a line that actually opens the file / dispatches the HTTP request / invokes the subprocess / writes to the GPU. Don't chase 100% coverage through that line with brittle mocks. Instead, factor the adapter so the IO-touching method is a thin `protected` wrapper tagged `@codeCoverageIgnore` (`pragma: no cover` in Python), and unit-test subclasses that fake it.
