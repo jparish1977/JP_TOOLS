@@ -15,9 +15,13 @@
 # (oob/chdman-hangs/CHDMAN-NOTE.md); whether a later release does is measured
 # with tools/lab/chdman-delta-hang.sh, which takes the chdman to run as CHDMAN.
 #
-# Tested: not yet run when written. NOT tested: any tag but the default; any
-# box but one with the build tools MAME needs (a C++17 compiler, python3,
-# make); whether the tools build wants SDL headers.
+# USE_QTDEBUG=0: the makefile otherwise looks for Qt (qmake6, moc) for
+# MAME's debugger window, which no tool uses; without Qt installed it stops
+# before compiling anything ("Qt's Meta Object Compiler (moc) wasn't found!").
+#
+# Tested: mame0289 on Ubuntu 24.04 (g++ 13.3, SDL2 headers installed, no Qt):
+# without USE_QTDEBUG=0 it stopped as above. NOT tested: any other tag; a box
+# without SDL2 headers.
 printf '%s' chdman-build > /proc/$$/comm 2>/dev/null || true
 set -eu
 tag=${1:-mame0289}
@@ -29,7 +33,7 @@ if [ ! -d "$src/.git" ]; then
 fi
 cd "$src"
 git log --oneline -1
-make -s TOOLS=1 EMULATOR=0 NOWERROR=1 -j"$jobs" > "$src/build.log" 2>&1 || {
+make -s TOOLS=1 EMULATOR=0 USE_QTDEBUG=0 NOWERROR=1 -j"$jobs" > "$src/build.log" 2>&1 || {
     echo "chdman-build: the build failed; the end of $src/build.log:"
     tail -n 30 "$src/build.log"
     exit 1
