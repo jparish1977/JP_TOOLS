@@ -10,9 +10,7 @@ mutmut-gate.py holds each function to its baseline, and gets mutants/ ready.
     - A status that is no verdict ("suspicious", "not checked") in a number
       the baseline does not hold is NOT_RUN (2), naming it; a finding wins.
     - Results are counted per function, the name before `__mutmut_`.
-    - prepare makes mutants/ a worktree of HEAD whose index lists the tracked
-      files while none is checked out, links node_modules/ and vendor/, follows
-      a new HEAD, and rebuilds the link when the state came from elsewhere.
+    - prepare and _git: tests/test_mutmut_gate_prepare.py.
     - A run that cannot be read is NOT_RUN (2), never a pass.
 
     python3 tests/test_mutmut_gate.py
@@ -149,81 +147,6 @@ def test_what_the_gate_prints() -> None:
           _printed(BASE, odd), (2, [
               "NOT RUN m.x_f: 1 mutant(s) 'suspicious', which is no verdict (the baseline has 0)",
               "mutmut-gate: could not judge 1 function(s)"]))
-
-
-def test_prepare() -> None:
-    if not shutil.which("git"):
-        print("SKIP: git not found")
-        return
-    with tempfile.TemporaryDirectory() as td:
-        root = _repo(Path(td))
-        mutants = gate.prepare(root)
-        check("git in mutants/ lists the tracked files", _ls(mutants), "a.py\n")
-        check_true("  with none checked out (mutmut writes them)", not (mutants / "a.py").exists())
-        check_true("  node_modules/ and vendor/ linked, not copied",
-                   all((mutants / n).is_symlink() for n in ("node_modules", "vendor")))
-        check("  at the checkout's HEAD", _head(mutants), _head(root))
-
-        first = _head(root)
-        (root / "a.py").write_text("x = 2\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(root), "commit", "-q", "--no-verify", "-am", "two"],
-                       check=True, env=_ENV)
-        check_true("CONTROL: the checkout's HEAD moved", _head(root) != first)
-        (mutants / "a.py").write_text("x = 'mutated'\n", encoding="utf-8")
-        gate.prepare(root)
-        check("a new HEAD is followed", _head(mutants), _head(root))
-        check("  and a file mutmut wrote is left as it is",
-              (mutants / "a.py").read_text(encoding="utf-8"), "x = 'mutated'\n")
-
-        # A state restored from another checkout: its .git link points nowhere.
-        (mutants / ".git").write_text("gitdir: /nonexistent/worktrees/mutants\n", encoding="utf-8")
-        gate.prepare(root)
-        check("a restored state's broken link is rebuilt", _ls(mutants), "a.py\n")
-        check("  and mutmut's files survive the rebuild",
-              (mutants / "a.py").read_text(encoding="utf-8"), "x = 'mutated'\n")
-        check("  leaving no scratch worktree behind",
-              sorted(p.name for p in root.iterdir() if p.name.startswith(".mutants-wt-")), [])
-
-
-def test_a_failed_git_is_named_with_its_error() -> None:
-    if not shutil.which("git"):
-        print("SKIP: git not found")
-        return
-    nowhere = "/nonexistent/" + "d" * 400  # git's error quotes the path: longer than 300
-    args = ("-C", nowhere, "status")
-    said = subprocess.run(["git", *args], capture_output=True, text=True, check=False).stderr.strip()
-    check_true("CONTROL: git's own error is longer than the 300 characters kept", len(said) > 300)
-    try:
-        gate._git(*args)
-        raised = ""
-    except gate.GateError as e:
-        raised = str(e)
-    check("a GateError naming the command and the first 300 characters of git's error",
-          raised, f"git -C {nowhere} status: {said[:300]}")
-
-
-def test_is_worktree_of() -> None:
-    """Asked directly: prepare() rebuilds whenever this says no, so a wrong
-    "no" never shows through prepare alone."""
-    if not shutil.which("git"):
-        print("SKIP: git not found")
-        return
-    with tempfile.TemporaryDirectory() as td:
-        root = _repo(Path(td))
-        mutants = gate.prepare(root)
-        check("a worktree of ROOT's repository: yes", gate._is_worktree_of(mutants, root), True)
-        check("  asked from either end's path as given, relative to another cwd",
-              gate._is_worktree_of(Path(os.path.relpath(mutants)), Path(os.path.relpath(root))), True)
-        check("ROOT itself (a .git directory, not a link): no", gate._is_worktree_of(root, root), False)
-        plain = Path(td) / "plain"
-        plain.mkdir()
-        check("a directory with no .git: no", gate._is_worktree_of(plain, root), False)
-        (Path(td) / "elsewhere").mkdir()
-        other = _repo(Path(td) / "elsewhere")
-        check("a worktree of ROOT asked about another repository: no",
-              gate._is_worktree_of(mutants, other), False)
-        (mutants / ".git").write_text("gitdir: /nonexistent/worktrees/mutants\n", encoding="utf-8")
-        check("a .git link git cannot follow: no, not an error", gate._is_worktree_of(mutants, root), False)
 
 
 def test_run_traces_reach_afresh_and_keeps_results() -> None:
