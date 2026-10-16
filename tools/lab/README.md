@@ -30,6 +30,7 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `i8-proof.sh` | nothing: forwards to the promoted `prove-head.sh` at the repo root |
 | `chdman-delta-hang.sh` | how often chdman hangs making a child CHD against a parent |
 | `chdman-build.sh` | nothing alone: builds a MAME release's chdman beside the packaged one, for the comparison |
+| `chdman-hang-backtrace.sh` | where a hung chdman is: every thread's stack, for a report or a fix upstream |
 | `test-against-ref.sh` | does a new test fail on the code before the fix |
 | `ci-job-fields.py` | what did check.py report inside a CI job, per file; exits 1 on an empty log |
 | `file-sizes.py` | how many source files pass a line threshold, and how much of each is prose |
