@@ -143,27 +143,29 @@ def test_drain() -> None:
     class Proc:
         stderr = _Pipe(b"died")
 
-        def __init__(self, terminate: Exception | None, wait: Exception | None) -> None:
-            self.t, self.w = terminate, wait
+        def __init__(self, slow: bool) -> None:
+            self.slow = slow
 
         def terminate(self) -> None:
             calls.append("terminate")
-            if self.t:
-                raise self.t
 
-        def wait(self, timeout: int) -> None:
+        def kill(self) -> None:
+            calls.append("kill")
+
+        def wait(self, timeout: int | None = None) -> None:
             calls.append(("wait", timeout))
-            if self.w:
-                raise self.w
+            if self.slow and timeout is not None:
+                raise subprocess.TimeoutExpired("q", timeout)
 
-    check("a live qemu: stopped, waited 5 s, then read", (vm.drain_nonblocking(Proc(None, None)), calls),
+    check("a live qemu: stopped, waited 5 s, then read", (vm.drain_nonblocking(Proc(False)), calls),
           ("died", ["terminate", ("wait", 5)]))
     calls.clear()
-    check("already gone (terminate fails): still read",
-          (vm.drain_nonblocking(Proc(ProcessLookupError(), None)), calls), ("died", ["terminate"]))
-    calls.clear()
-    check("too slow to stop: still read",
-          vm.drain_nonblocking(Proc(None, subprocess.TimeoutExpired("q", 5))), "died")
+    check("one TERM does not stop in 5 s: killed and waited for, then read (a live pipe never ends)",
+          (vm.drain_nonblocking(Proc(True)), calls), ("died", ["terminate", ("wait", 5), "kill", ("wait", None)]))
+    gone = subprocess.Popen([sys.executable, "-c", "import sys; sys.stderr.write('bye')"], stderr=subprocess.PIPE)
+    gone.wait()
+    check("a qemu already gone, a real process: terminate does nothing, what it said is read",
+          vm.drain_nonblocking(gone), "bye")
 
 
 class _Clock:
@@ -202,9 +204,12 @@ class _Sock:
 
     def recv(self, n: int) -> bytes:
         self.calls.append(("recv", n))
-        if not self.banner:
-            raise TimeoutError
         return b"QEMU monitor"
+
+    def ready(self, r: list[Any], w: list[Any], x: list[Any], t: float) -> tuple[list[Any], list[Any], list[Any]]:
+        """select.select: the socket readable when the monitor sent a banner."""
+        self.calls.append(("select", r == [self], t))
+        return ([self] if self.banner else [], [], [])
 
     def sendall(self, b: bytes) -> None:
         self.calls.append(("sendall", b))
@@ -221,7 +226,7 @@ def _screendump(ppm: Path, banner: bool, write_at: int | None, content: bytes = 
 
     clock, sock = _Clock(qemu_writes), _Sock(banner)
     with mock.patch.object(vm.time, "time", clock.time), mock.patch.object(vm.time, "sleep", clock.sleep), \
-            mock.patch.object(vm.socket, "socket", sock):
+            mock.patch.object(vm.socket, "socket", sock), mock.patch.object(vm.select, "select", sock.ready):
         ok = vm.screendump("/w/mon.sock", str(ppm), timeout)
     return ok, sock.calls, clock.slept
 
@@ -229,30 +234,44 @@ def _screendump(ppm: Path, banner: bool, write_at: int | None, content: bytes = 
 def test_screendump() -> None:
     with tempfile.TemporaryDirectory() as td:
         ppm = Path(td) / "s.ppm"
-        ok, calls, slept = _screendump(ppm, banner=True, write_at=2)
+        ok, calls, slept = _screendump(ppm, banner=True, write_at=1)
         check("the dump appears: True", ok, True)
-        check("  the monitor asked, its banner read, the command sent, the socket closed", calls, [
-            ("socket", vm.socket.AF_UNIX), ("settimeout", 2), ("connect", "/w/mon.sock"), ("recv", 65536),
-            ("sendall", b"screendump " + str(ppm).encode() + b"\n"), ("close",)])
-        check("  a second for the banner, half-seconds until the dump, a second to finish",
-              slept, [1, 0.5, 1])
+        check("  the monitor asked, a second given for its banner, the banner read, the command sent, the socket "
+              "closed", calls, [
+                  ("socket", vm.socket.AF_UNIX), ("settimeout", 2), ("connect", "/w/mon.sock"),
+                  ("select", True, 1), ("recv", 65536),
+                  ("sendall", b"screendump " + str(ppm).encode() + b"\n"), ("close",)])
+        check("  half-seconds until the dump, a second to finish", slept, [0.5, 1])
         ppm.unlink()
         ok, calls, slept = _screendump(ppm, banner=False, write_at=None)
-        check("no banner and no dump: False after the timeout, the command still sent",
-              (ok, ("sendall", b"screendump " + str(ppm).encode() + b"\n") in calls, slept),
-              (False, True, [1, 0.5, 0.5, 0.5, 0.5]))
-        ok, _, slept = _screendump(ppm, banner=True, write_at=2, content=b"")
-        check("an empty dump is not a dump: waited out, False", (ok, slept), (False, [1, 0.5, 0.5, 0.5, 0.5]))
+        check("no banner and no dump: nothing read for a banner, the command still sent, False after the timeout",
+              (ok, ("recv", 65536) in calls, ("sendall", b"screendump " + str(ppm).encode() + b"\n") in calls,
+               slept), (False, False, True, [0.5, 0.5, 0.5, 0.5]))
+        ok, _, slept = _screendump(ppm, banner=True, write_at=1, content=b"")
+        check("an empty dump is not a dump: waited out, False", (ok, slept), (False, [0.5, 0.5, 0.5, 0.5]))
         ppm.unlink()
-        ok, _, slept = _screendump(ppm, banner=True, write_at=2, content=b"x")
-        check("one byte is: the wait ends there", (ok, slept), (True, [1, 0.5, 1]))
+        ok, _, slept = _screendump(ppm, banner=True, write_at=1, content=b"x")
+        check("one byte is: the wait ends there", (ok, slept), (True, [0.5, 1]))
+
+        class Reset(_Sock):
+            def recv(self, n: int) -> bytes:
+                raise ConnectionResetError("monitor gone")
+
+        reset = Reset(True)
+        with mock.patch.object(vm.socket, "socket", reset), mock.patch.object(vm.select, "select", reset.ready):
+            try:
+                vm.screendump("/w/mon.sock", str(ppm), 2)
+                raised = ""
+            except ConnectionResetError as e:
+                raised = str(e)
+        check("a monitor that fails when read: raised, not passed over", raised, "monitor gone")
     with tempfile.TemporaryDirectory() as td:
         clock, sock = _Clock(), _Sock(True)
         with mock.patch.object(vm.time, "time", clock.time), mock.patch.object(vm.time, "sleep", clock.sleep), \
-                mock.patch.object(vm.socket, "socket", sock):
+                mock.patch.object(vm.socket, "socket", sock), mock.patch.object(vm.select, "select", sock.ready):
             ok = vm.screendump("/w/mon.sock", str(Path(td) / "never.ppm"))
         check("no timeout given: 20 s, on the socket and for the dump",
-              (ok, ("settimeout", 20) in sock.calls, clock.slept), (False, True, [1] + [0.5] * 40))
+              (ok, ("settimeout", 20) in sock.calls, clock.slept), (False, True, [0.5] * 40))
 
 
 def _args(*argv: str) -> argparse.Namespace:

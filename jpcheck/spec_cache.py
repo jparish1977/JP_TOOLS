@@ -39,7 +39,8 @@ when that copy was made, and outside paths as they were then, while the
 fingerprints are taken once every run has ended. So a verdict is kept only
 when nothing moved in between (start(), keep()): the checkout, .git aside,
 must be as it was before the first run began (each path's type, size, mtime
-and status-change time); and every other path a run read, outside paths and
+and status-change time, and a file changed within a second of the start by
+its content too); and every other path a run read, outside paths and
 the checkout's .git, must not have changed status since then (its ctime, a
 link's own and its target's; a directory only resolved through, whatever it
 holds, aside) nor be gone when a run found it. ctime is compared less one
@@ -359,11 +360,19 @@ def kept(cache: str, stem: str, root: str, want: dict[str, str]) -> str | None:
     return None
 
 
-def snapshot(root: str) -> dict[str, tuple[int, int, int, int]]:
+Status = tuple[int, int, int, int, str]
+
+
+def snapshot(root: str, racy: int) -> dict[str, Status]:
     """Every path in ROOT but .git (what a copy holds; its vendor/ and
     node_modules/ are read through links, so as ROOT holds them), by type,
-    size, mtime and ctime, links not followed; a tool's cache (CACHES) aside."""
-    out: dict[str, tuple[int, int, int, int]] = {}
+    size, mtime and ctime, links not followed; a tool's cache (CACHES) aside.
+
+    A file whose mtime or ctime is at or after RACY is also hashed: two
+    writes inside one tick of the file system's clock, of one size, leave the
+    same status, so for a file that new the status cannot say it is unchanged
+    (git's "racily clean" index entries, the same cure)."""
+    out: dict[str, Status] = {}
     for d, dirs, files in os.walk(root):
         if d == root and ".git" in dirs:
             dirs.remove(".git")
@@ -372,21 +381,25 @@ def snapshot(root: str) -> dict[str, tuple[int, int, int, int]]:
             p = os.path.join(d, n)
             try:
                 st = os.lstat(p)
+                digest = (hashlib.sha256(Path(p).read_bytes()).hexdigest()
+                          if stat.S_ISREG(st.st_mode) and max(st.st_mtime_ns, st.st_ctime_ns) >= racy else "")
             except FileNotFoundError:  # reason: gone since it was listed: absent, as a later snapshot will find it
                 continue
-            out[os.path.relpath(p, root)] = (st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+            out[os.path.relpath(p, root)] = (st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns, digest)
     return out
 
 
 class Start(NamedTuple):
     """The clock and the checkout before any run began (AS IT WAS)."""
     since: int
-    tree: dict[str, tuple[int, int, int, int]]
+    tree: dict[str, Status]
 
 
 def start(root: str) -> Start:
-    """Now, then ROOT's snapshot: the clock first, so the window only widens."""
-    return Start(time.time_ns(), snapshot(root))
+    """Now, then ROOT's snapshot: the clock first, so the window only widens.
+    Files changed within MARGIN_NS of now are hashed (snapshot)."""
+    since = time.time_ns()
+    return Start(since, snapshot(root, since - MARGIN_NS))
 
 
 def _changed_since(path: str, opened: bool, since: int) -> bool:
@@ -413,7 +426,7 @@ def moved(root: str, repo: dict[str, bool], ext: dict[str, bool], found: set[str
     """Why what the runs read may differ from what is fingerprinted now, or
     None (AS IT WAS). FOUND holds the checkout's paths relative and others
     absolute, as REPO and EXT do."""
-    if snapshot(root) != begun.tree:
+    if snapshot(root, begun.since - MARGIN_NS) != begun.tree:
         return "the checkout changed while its runs ran"
     others = [(os.path.join(root, r), r, o) for r, o in repo.items() if Path(r).parts[:1] == (".git",)]
     others += [(p, p, o) for p, o in ext.items()]

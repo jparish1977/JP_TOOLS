@@ -153,8 +153,13 @@ def test_nothing_exempt_and_nothing_there() -> None:
 
 def test_help() -> None:
     out = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.suppress(SystemExit):  # reason: --help prints, then argparse exits 0; the printed text is what is checked
-        le.main(["--help"])
+    code: object = "did not exit"
+    with contextlib.redirect_stdout(out):
+        try:
+            le.main(["--help"])
+        except SystemExit as e:
+            code = e.code
+    check("--help exits 0", code, 0)
     text = " ".join(out.getvalue().split())
     for want in ("Inventory every `# pragma: no cover` in a file or tree, and what it claims.",
                  "file or directory", "machine-readable output",

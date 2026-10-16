@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 from _harness import check, check_true, load_script, run
 from fake_tools import calls, env, fake_tools, run_main
@@ -190,6 +191,45 @@ def test_extract() -> None:
         check("deep file", (dest / "docs" / "deep" / "b.txt").read_text(), "abcdef")
         check("no partial files left", sorted(p.name for p in dest.rglob("*.part")), [])
         check("present file not re-read", [c for c in calls(log) if c[-1] == "/top.txt" and c[0] == "ntfscat"], [])
+
+
+def test_discard() -> None:
+    """A failed file's .part is removed: one never made is already gone; one
+    that cannot be removed is said, and the file still fails."""
+    with tempfile.TemporaryDirectory() as td:
+        part = Path(td) / "f.part"
+
+        def discard() -> tuple[bool, list[str]]:
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                r = EXTRACT._discard(str(part), "short read")
+            return r, err.getvalue().splitlines()
+
+        check("a .part never made: the reason said, False", discard(), (False, ["  ! short read"]))
+        part.write_text("x")
+        check("a .part made: removed, False", (discard(), part.exists()), ((False, ["  ! short read"]), False))
+        part.mkdir()
+        r, lines = discard()
+        check("one it cannot remove (a directory): said as well, still False",
+              (r, lines[0], lines[1].startswith(f"  ! could not remove {part}: ")), (False, "  ! short read", True))
+
+
+def test_restore_owner() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        f = Path(td) / "inv.tsv"
+        f.write_text("")
+        calls: list[tuple[str, int, int]] = []
+        with mock.patch.dict("os.environ", {"SUDO_UID": "7", "SUDO_GID": "8"}), \
+                mock.patch.object(INVENTORY.os, "chown", lambda p, u, g: calls.append((p, u, g))):
+            INVENTORY.restore_owner(str(f))
+        check("under sudo: handed back to the invoking user", calls, [(str(f), 7, 8)])
+        err = io.StringIO()
+        with mock.patch.dict("os.environ", {"SUDO_UID": "7", "SUDO_GID": "8"}), \
+                mock.patch.object(INVENTORY.os, "chown", side_effect=PermissionError("not permitted")), \
+                contextlib.redirect_stderr(err):
+            INVENTORY.restore_owner(str(f))
+        check("  a chown refused: the inventory stands, and who owns it is said",
+              err.getvalue(), f"warning: {f} is left owned by root: not permitted\n")
 
 
 def test_containment() -> None:

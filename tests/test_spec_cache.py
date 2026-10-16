@@ -319,7 +319,8 @@ def test_matches() -> None:
 def _begun(root: Path | str) -> spec_cache.Start:
     """A start late enough that every file written so far is older than it,
     less MARGIN_NS, with ROOT as it is now."""
-    return spec_cache.Start(time.time_ns() + spec_cache.MARGIN_NS + 1, spec_cache.snapshot(str(root)))
+    since = time.time_ns() + spec_cache.MARGIN_NS + 1
+    return spec_cache.Start(since, spec_cache.snapshot(str(root), since - spec_cache.MARGIN_NS))
 
 
 def test_snapshot() -> None:
@@ -330,15 +331,39 @@ def test_snapshot() -> None:
         for f in (".git/HEAD", "sub/a.py", "sub/.mypy_cache/x.db", "node_modules/p/i.js", "top"):
             (root / f).write_text("x", encoding="utf-8")
         (root / "sub" / ".git").write_text("gitdir: elsewhere", encoding="utf-8")
-        snap = spec_cache.snapshot(td)
+        old = 10**30
+        snap = spec_cache.snapshot(td, old)
         check("every path but the top .git and tools' caches, a nested .git file included",
               sorted(snap), ["node_modules", "node_modules/p", "node_modules/p/i.js", "sub", "sub/.git", "sub/a.py", "top"])
         st = os.lstat(root / "top")
-        check("  each by type, size, mtime, ctime", snap["top"], (st.st_mode, 1, st.st_mtime_ns, st.st_ctime_ns))
+        check("  each by type, size, mtime, ctime; older than RACY, not hashed", snap["top"],
+              (st.st_mode, 1, st.st_mtime_ns, st.st_ctime_ns, ""))
+        x = hashlib.sha256(b"x").hexdigest()
+        st = os.lstat(root / "top")
+        check("  a file changed at or after RACY: its content hashed as well; a directory never",
+              (spec_cache.snapshot(td, max(st.st_mtime_ns, st.st_ctime_ns))["top"][4],
+               spec_cache.snapshot(td, max(st.st_mtime_ns, st.st_ctime_ns) + 1)["top"][4],
+               spec_cache.snapshot(td, 0)["sub"][4]), (x, "", ""))
         real = os.lstat
         with mock.patch("os.lstat", side_effect=lambda p, *a: (_ for _ in ()).throw(FileNotFoundError(p))
                         if str(p).endswith("top") else real(p, *a)):
-            check("  a path gone between the listing and its status: left out", "top" in spec_cache.snapshot(td), False)
+            check("  a path gone between the listing and its status: left out", "top" in spec_cache.snapshot(td, old),
+                  False)
+
+
+def test_an_edit_the_status_cannot_show() -> None:
+    """Two writes of one size inside one tick of the file system's clock
+    leave the same status: a file that new is compared by content."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "f").write_text("b", encoding="utf-8")
+        begun = spec_cache.start(td)
+        check("CONTROL: as it is now, with the file new enough to be hashed: None",
+              (spec_cache.moved(td, {}, {}, set(), begun), begun.tree["f"][4] != ""), (None, True))
+        before = (*begun.tree["f"][:4], hashlib.sha256(b"a").hexdigest())
+        check("the same status, other content before the start: the checkout changed",
+              spec_cache.moved(td, {}, {}, set(), begun._replace(tree={"f": before})),
+              "the checkout changed while its runs ran")
 
 
 def test_moved() -> None:
@@ -433,7 +458,7 @@ def test_keep_refuses_what_moved() -> None:
         root = Path(td) / "root"
         root.mkdir()
         (root / "f").write_text("a", encoding="utf-8")
-        start = spec_cache.Start(time.time_ns(), spec_cache.snapshot(str(root)))
+        start = spec_cache.start(str(root))
         (root / "f").write_text("b", encoding="utf-8")
         why = spec_cache.keep(td, "s", str(root), {}, {"f": False}, {}, "V", found=set(), begun=start)
         check("the checkout moved: the reason, and no entry",
