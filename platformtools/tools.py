@@ -5,8 +5,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import IO
 
 
 class ToolMissingError(Exception):
@@ -62,3 +65,68 @@ def require(name: str, hint: str, windows_paths: Sequence[Path] = ()) -> list[st
 def run(prefix: list[str], args: list[str], *, capture: bool = True) -> subprocess.CompletedProcess[str]:
     """Run a tool. The caller reads the exit status; a failure is not an exception."""
     return subprocess.run([*prefix, *args], capture_output=capture, text=True, check=False)
+
+
+class StalledError(Exception):
+    """A tool killed for doing nothing: the file it writes stopped growing,
+    or it ran past its limit. The message says which."""
+
+
+def _size(path: Path) -> int:
+    """PATH's size; -1 while it does not exist yet."""
+    try:
+        return path.stat().st_size
+    except FileNotFoundError:  # reason: a tool that has not opened its output yet: -1, a size of its own
+        return -1
+
+
+def _drain(stream: IO[str], into: list[str]) -> None:
+    with stream:
+        into.extend(stream)
+
+
+def run_watched(prefix: list[str], args: list[str], *, watch: Path | None, stall: float, limit: float,
+                poll: float = 1.0) -> subprocess.CompletedProcess[str]:
+    """Run a tool as run() does, captured, but never wait on it forever: one
+    whose WATCH file does not grow (or appear) for STALL seconds, or that
+    runs past LIMIT seconds, is killed and StalledError raised, saying which.
+    Without WATCH only LIMIT applies. Checked every POLL seconds.
+
+    Both pipes are drained while it runs: a tool that filled one would
+    block writing while this waited on it, a hang of this function's own."""
+    cmd = [*prefix, *args]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    out: list[str] = []
+    err: list[str] = []
+    pumps = [threading.Thread(target=_drain, args=(proc.stdout, out), daemon=True),
+             threading.Thread(target=_drain, args=(proc.stderr, err), daemon=True)]
+    for t in pumps:
+        t.start()
+    # Set when the tool exits, so a quick one is not held to a poll.
+    ended = threading.Event()
+
+    def wait() -> None:
+        proc.wait()
+        ended.set()
+
+    threading.Thread(target=wait, daemon=True).start()
+    start = grew = time.monotonic()
+    size = _size(watch) if watch is not None else -1
+    why = ""
+    while not ended.wait(poll):
+        now = time.monotonic()
+        if watch is not None and (current := _size(watch)) != size:
+            size, grew = current, now
+        elif watch is not None and now - grew >= stall:
+            why = f"{watch} did not grow for {stall:g} s"
+        if not why and now - start >= limit:
+            why = f"it ran past {limit:g} s"
+        if why:
+            proc.kill()
+            break
+    proc.wait()
+    for t in pumps:
+        t.join()
+    if why:
+        raise StalledError(f"{Path(cmd[0]).name} {args[0] if args else ''} killed: {why}")
+    return subprocess.CompletedProcess(cmd, proc.returncode, "".join(out), "".join(err))

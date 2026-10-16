@@ -51,4 +51,4 @@ for n in $(seq 1 "$runs"); do
         echo "run $n: $what failed rc=$rc"
     fi
 done
-echo "chdman $(chdman --help 2>&1 | head -1 | cut -d' ' -f8): $runs runs, $hung hung, $failed failed, nproc $(nproc)"
+echo "chdman $(chdman --help 2>&1 | head -1 | cut -d' ' -f10): $runs runs, $hung hung, $failed failed, nproc $(nproc)"
