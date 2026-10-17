@@ -31,18 +31,18 @@ def _git(repo: Path, *args: str) -> str:
                           check=True).stdout.strip()
 
 
-def _project(work: Path, pages: bool = True) -> Path:
-    """A repo on main, pushed to a bare remote, with a gh-pages branch when PAGES."""
+def _project(work: Path, pages: bool = True, branch: str = "main") -> Path:
+    """A repo on BRANCH, pushed to a bare remote, with a gh-pages branch when PAGES."""
     remote, repo = work / "remote.git", work / "site"
     subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
-    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", branch, str(repo)], check=True)
     _git(repo, "config", "user.email", "t@example.com")
     _git(repo, "config", "user.name", "t")
     (repo / "index.html").write_text("v1\n")
     _git(repo, "add", "index.html")
     _git(repo, "commit", "-q", "-m", "v1")
     _git(repo, "remote", "add", "origin", str(remote))
-    _git(repo, "push", "-q", "-u", "origin", "main")
+    _git(repo, "push", "-q", "-u", "origin", branch)
     if pages:
         _git(repo, "branch", "gh-pages")
         _git(repo, "push", "-q", "-u", "origin", "gh-pages")
@@ -55,11 +55,22 @@ def test_refusals() -> None:
     with fake_tools(keep_path=True, aws=FAKE_AWS) as (w, log):
         repo = _project(w)
         (repo / "index.html").write_text("dirty\n")
-        check("dirty tree", run_main(DEPLOY_ALL.main, str(repo), "b")[0], 1)
+        check("dirty tree: refused, naming what is not clean, before anything ran",
+              (run_main(DEPLOY_ALL.main, str(repo), "b"), calls(log)),
+              ((1, "Error: working directory not clean:\nM index.html\n"), []))
         _git(repo, "checkout", "-q", "--", "index.html")
         _git(repo, "checkout", "-q", "gh-pages")
         check("wrong branch", run_main(DEPLOY_ALL.main, str(repo), "b")[0], 1)
         check("nothing ran", calls(log), [])
+
+
+def test_master_is_deployed_as_main_is() -> None:
+    with fake_tools(keep_path=True, aws=FAKE_AWS) as (w, log):
+        repo = _project(w, branch="master")
+        check("a clean master: not refused", run_main(DEPLOY_ALL.main, str(repo), "b", "--dry-run"),
+              (0, ("Deploying site from master\n  [dry-run] Would sync gh-pages to master\n"
+                   "  [dry-run] Would deploy to s3://b/\n")))
+        check("  and nothing ran", calls(log), [])
 
 
 def test_pages_and_s3() -> None:

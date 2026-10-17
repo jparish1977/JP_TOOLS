@@ -9,14 +9,39 @@ real chdman.
     python tests/test_chd_cli.py
 """
 
+import contextlib
+import io
 import sys
+import tempfile
 import zipfile
+from pathlib import Path
 
 from _harness import check, check_true, run
 from chd_support import FAKE_7Z, FAKE_CHDMAN, FAKE_COPIER, cli
+from chdtool.commands import _report_ratio
 from fake_tools import calls, env, fake_tools
 
 CUE = 'FILE "game.bin" BINARY\n  TRACK 01 MODE1/2048\n    INDEX 01 00:00:00\n'
+
+
+def _ratio(size: int, written: int) -> str:
+    """What _report_ratio prints for an input of SIZE bytes and a CHD of WRITTEN."""
+    with tempfile.TemporaryDirectory() as td:
+        dst = Path(td) / "a.chd"
+        dst.write_bytes(b"x" * written)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _report_ratio(size, dst)
+        return out.getvalue().replace(str(dst), "DST")
+
+
+def test_the_ratio_report() -> None:
+    check("sizes in MB, the ratio to one place, what was saved",
+          _ratio(3_000_000, 1_234_567),
+          "\nCreated: DST\n  Input:  2.9 MB\n  Output: 1.2 MB\n  Ratio:  41.2% (1.7 MB saved)\n")
+    check("a one-byte input is a ratio too", _ratio(1, 1).splitlines()[-1], "  Ratio:  100.0% (0.0 MB saved)")
+    check("an empty input: a ratio of 0, not a division by zero", _ratio(0, 0).splitlines()[-1],
+          "  Ratio:  0% (0.0 MB saved)")
 
 
 def test_create_and_verify() -> None:
