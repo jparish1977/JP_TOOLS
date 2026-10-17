@@ -180,8 +180,8 @@ def test_the_stats_pass_goes_across_the_workers() -> None:
     [(path, out, on_path)] = runner.seen_env
     check("  the plugin's directory first on the workers' PYTHONPATH, then what was there",
           path, os.pathsep.join([str(clean.PLUGIN_DIR), "/kept"]))
-    check("  and on this process's import path, with somewhere for the workers to write, named as ours",
-          (on_path, Path(str(out)).name.startswith("mutmut-clean-stats-")), (True, True))
+    check("  somewhere for the workers to write, named as ours; this process's import path left to main",
+          (on_path, Path(str(out)).name.startswith("mutmut-clean-stats-")), (False, True))
     check("  after it, the environment and import path as they were",
           (after["PYTHONPATH"], after["out"], after["plugin on sys.path"]), ("/kept", None, False))
     check("every worker's reach added to what mutmut already had", after["tests_by"],
@@ -214,31 +214,44 @@ def test_with_no_workers_the_stats_pass_is_mutmut_s() -> None:
         check(f"{env or 'unset'}: mutmut's own, its code", (got, asked, runner.ran), (7, [(runner, ["t"])], []))
 
 
-def test_main_runs_mutmut_with_the_clean_run_replaced() -> None:
+def _main(env: dict[str, str]) -> tuple[list[object], object, list[tuple[int, tuple[int, int]]]]:
+    """(what mutmut's command line saw, main's exit code, the limits set) with ENV."""
     original = clean.ForkRunner.run_clean_tests
     original_stats = clean.PytestRunner.run_stats
+    path = list(sys.path)
     seen: list[object] = []
 
     def cli() -> int:
-        seen.extend([clean.ForkRunner.run_clean_tests, clean.PytestRunner.run_stats])
+        seen.extend([clean.ForkRunner.run_clean_tests, clean.PytestRunner.run_stats,
+                     str(clean.PLUGIN_DIR) in sys.path])
         return 3
 
     limits: list[tuple[int, tuple[int, int]]] = []
+    code: object = None
     try:
-        with mock.patch.object(clean.mutmut_main, "cli", cli), \
+        with mock.patch.object(clean.mutmut_main, "cli", cli), mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(clean.resource, "setrlimit", lambda r, v: limits.append((r, v))):
             try:
                 clean.main()
-                code: object = None
             except SystemExit as e:
                 code = e.code
     finally:
         clean.ForkRunner.run_clean_tests = original
         clean.PytestRunner.run_stats = original_stats
-    check("mutmut's command line run with the clean run and the stats pass replaced, and its code the exit",
-          (seen, code), ([clean.run_clean_tests, clean.run_stats], 3))
+        sys.path[:] = path
+    return seen, code, limits
+
+
+def test_main_runs_mutmut_with_the_clean_run_replaced() -> None:
+    seen, code, limits = _main({clean.WORKERS: "4"})
+    check("mutmut's command line run with the clean run and the stats pass replaced, the plugin's directory "
+          "on the import path before it, and its code the exit",
+          (seen, code), ([clean.run_clean_tests, clean.run_stats, True], 3))
     check("  under a 1-byte core limit, set before it", (limits, clean.CORE_LIMIT),
           ([(clean.resource.RLIMIT_CORE, (1, 1))], 1))
+    for env in ({}, {clean.WORKERS: ""}):
+        seen, code, _ = _main(env)
+        check(f"{env or 'unset'}: no workers, the import path left alone", (seen[2:], code), ([False], 3))
 
 
 if __name__ == "__main__":

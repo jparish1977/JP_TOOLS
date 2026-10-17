@@ -14,6 +14,10 @@ of them (--dist loadfile, as the suites run apart).
 The stats pass replaces PytestRunner's: each worker records with
 mutmut-plugin/jpt_mutmut_stats.py, mutmut's own recording hooks, and writes
 what it saw; this merges it into mutmut's state, as mutmut merges a child's.
+The plugin's directory goes on this process's import path before mutmut
+runs (main): pytest-xdist gives a local worker a copy of sys.path frozen
+when xdist is first imported, and with stats already kept mutmut first lists
+the tests in-process, which imports it, before any stats pass begins.
 The clean run replaces ForkRunner's (process_isolation = "fork", mutmut's
 default and JP_TOOLS'), then collects the same tests in mutmut's process
 without running them, which is what the serial run also did for the mutants:
@@ -82,13 +86,11 @@ def run_stats(self: PytestRunner, *, tests: Iterable[str]) -> int:
     with tempfile.TemporaryDirectory(prefix="mutmut-clean-stats-") as out:
         os.environ["PYTHONPATH"] = os.pathsep.join(p for p in (str(PLUGIN_DIR), before["PYTHONPATH"]) if p)
         os.environ[STATS_DIR] = out
-        sys.path.append(str(PLUGIN_DIR))
         try:
             with change_cwd("mutants"):
                 rc = int(runner.execute_pytest([*runner._pytest_args_regular_run(list(tests)), "-n", workers,
                                                 "--dist", "loadfile", "-p", PLUGIN]))
         finally:
-            sys.path.remove(str(PLUGIN_DIR))
             for k, v in before.items():
                 if v is None:
                     del os.environ[k]
@@ -123,6 +125,9 @@ def main() -> None:
     # A 1-byte limit is the one such a handler takes as "no dump"; the mutant
     # still exits as a timeout. Every worker mutmut forks inherits it.
     resource.setrlimit(resource.RLIMIT_CORE, (CORE_LIMIT, CORE_LIMIT))
+    # Before mutmut imports pytest-xdist, which freezes the workers' import path.
+    if os.environ.get(WORKERS):
+        sys.path.append(str(PLUGIN_DIR))
     # mypy sees a method assigned when mutmut's types are installed, and nothing when they are not.
     ForkRunner.run_clean_tests = run_clean_tests  # type: ignore[method-assign, unused-ignore]  # reason: a phase replaced
     PytestRunner.run_stats = run_stats  # type: ignore[method-assign, unused-ignore]  # reason: a phase replaced
