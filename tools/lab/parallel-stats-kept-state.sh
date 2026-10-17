@@ -20,6 +20,12 @@
 #   said it reran stats for new tests, and any "Error importing plugin" line.
 #   Exit 0 only when both runs exit 0 and run 2 did rerun stats.
 #
+# TESTED AGAINST: 8 workers, "mutmut-clean.x_merge_stats*",
+#   tests/test_mutmut_clean.py (5 tests taken out), on a 32-thread box. At
+#   eb821b5 (run_stats put the directory on sys.path): run 1 rc=0, run 2
+#   rc=1 with CI run 457's ImportError. At c1f4ec9 (main() puts it there
+#   first): both rc=0, run 2 reran stats for the new tests.
+#
 # NOT TESTED AGAINST: a kept state restored from CI's volume (this makes its
 #   own), or WORKERS above the box's cores.
 printf '%s' jpt-ps-kept > /proc/$$/comm 2>/dev/null || true
