@@ -24,6 +24,10 @@
 #   clock under mutmut, so the stall must be short; too short and a slow call
 #   on a busy box fails the test instead.
 #
+# TESTED, chdman 0.264, 32-thread box, STALL 2 s: CONTROL=1, 1 copy, 2 runs:
+#   0 failed, 2 reruns in 2 runs, slowest 4.1 s (0.8 s without). 16 copies,
+#   50 runs each: 800 runs, 0 failed, 1 rerun (a real hang), slowest 3.9 s.
+#
 # NOT TESTED AGAINST: a box loaded by something other than these copies.
 printf '%s' chdman-suite > /proc/$$/comm 2>/dev/null || true
 set -u

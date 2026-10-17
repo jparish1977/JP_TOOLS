@@ -32,7 +32,7 @@ from unittest import mock
 
 from mutmut.state import MutmutState
 
-from _harness import check, check_true, load_script, run
+from _harness import check, load_script, run
 
 clean = load_script("mutmut-clean.py")
 
@@ -180,8 +180,8 @@ def test_the_stats_pass_goes_across_the_workers() -> None:
     [(path, out, on_path)] = runner.seen_env
     check("  the plugin's directory first on the workers' PYTHONPATH, then what was there",
           path, os.pathsep.join([str(clean.PLUGIN_DIR), "/kept"]))
-    check_true("  and on this process's import path, with somewhere for the workers to write",
-               on_path and out is not None)
+    check("  and on this process's import path, with somewhere for the workers to write, named as ours",
+          (on_path, Path(str(out)).name.startswith("mutmut-clean-stats-")), (True, True))
     check("  after it, the environment and import path as they were",
           (after["PYTHONPATH"], after["out"], after["plugin on sys.path"]), ("/kept", None, False))
     check("every worker's reach added to what mutmut already had", after["tests_by"],

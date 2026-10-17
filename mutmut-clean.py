@@ -62,7 +62,7 @@ def merge_stats(out: Path) -> None:
     each function and each function's callers, added to; each test's time."""
     s = state()
     for record_file in sorted(out.glob("*.json")):
-        record = json.loads(record_file.read_text(encoding="utf-8"))
+        record = json.loads(record_file.read_bytes())
         for function, tests in record["tests_by_mangled_function_name"].items():
             s.tests_by_mangled_function_name[function].update(tests)
         s.duration_by_test.update(record["duration_by_test"])
@@ -82,7 +82,7 @@ def run_stats(self: PytestRunner, *, tests: Iterable[str]) -> int:
     with tempfile.TemporaryDirectory(prefix="mutmut-clean-stats-") as out:
         os.environ["PYTHONPATH"] = os.pathsep.join(p for p in (str(PLUGIN_DIR), before["PYTHONPATH"]) if p)
         os.environ[STATS_DIR] = out
-        sys.path.insert(0, str(PLUGIN_DIR))
+        sys.path.append(str(PLUGIN_DIR))
         try:
             with change_cwd("mutants"):
                 rc = int(runner.execute_pytest([*runner._pytest_args_regular_run(list(tests)), "-n", workers,
@@ -91,7 +91,7 @@ def run_stats(self: PytestRunner, *, tests: Iterable[str]) -> int:
             sys.path.remove(str(PLUGIN_DIR))
             for k, v in before.items():
                 if v is None:
-                    os.environ.pop(k, None)
+                    del os.environ[k]
                 else:
                     os.environ[k] = v
         merge_stats(Path(out))
