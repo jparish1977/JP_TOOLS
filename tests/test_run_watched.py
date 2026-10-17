@@ -134,6 +134,17 @@ def test_sizes() -> None:
         with mock.patch("platformtools.tools.os.scandir", return_value=entries):
             check("  a file gone between the listing and its size: left out, the rest kept",
                   _sizes(d / "out.cue"), (("out.bin", 3), ("out.cue", 1)))
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        names = ("Sonic.cue", "Sonic.bin", "Sonic01.bin", "Sonic03.raw", "Sonic (Track 1).bin",
+                 "Sonic (Track 12).bin", "Sonic 2.cue", "Sonic 2.bin", "Sonic & Knuckles.cue", "Sonic2.bin",
+                 "Sonic123.bin", "Sonic01.iso", "Sonic (Track 1).iso", "Sonic.bin.part")
+        for name in names:
+            (d / name).write_text("x", encoding="utf-8")
+        check("chdman's names for a disc's data, and no other disc's that only begins the same way: "
+              "STEM.ext, a gdi's STEMNN.bin or .raw, a split cue's 'STEM (Track N).bin'",
+              [n for n, _ in _sizes(d / "Sonic.cue")],
+              ["Sonic (Track 1).bin", "Sonic (Track 12).bin", "Sonic.bin", "Sonic.cue", "Sonic01.bin", "Sonic03.raw"])
 
 
 class _Clock:

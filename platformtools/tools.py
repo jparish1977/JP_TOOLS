@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -74,17 +75,20 @@ class StalledError(Exception):
 
 
 def _sizes(path: Path) -> tuple[tuple[str, int], ...]:
-    """PATH and every file beside it whose name begins with PATH's stem, by
-    name and size, sorted; empty while there are none. A tool may write its
-    output's data into files of its own beside it: chdman extracting a CD
-    writes the cue whole, then the bin (or a gdi's track files)."""
+    """PATH and the files a tool writes beside it under its name, by name
+    and size, sorted; empty while there are none. chdman extracting a CD
+    writes the cue (or toc, gdi) whole, then its data, named as chdman.cpp
+    names it with no --outputbin: STEM.bin; a gdi's STEMNN.bin or .raw; a
+    split cue's "STEM (Track N).bin". Not any name that only begins with
+    STEM: "Sonic 2.cue" is another disc beside "Sonic.cue"."""
+    data = re.compile(re.escape(path.stem) + r"(\.[^.]+|\d{2}\.(bin|raw)| \(Track \d{1,2}\)\.bin)")
     try:
         entries = list(os.scandir(path.parent))
     except FileNotFoundError:  # reason: no directory yet: nothing written, an empty state of its own
         return ()
     out = []
     for e in entries:
-        if e.name.startswith(path.stem):
+        if e.name == path.name or data.fullmatch(e.name):
             try:
                 out.append((e.name, e.stat().st_size))
             except FileNotFoundError:  # reason: gone since it was listed: not written, as a later look will find
