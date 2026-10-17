@@ -34,7 +34,7 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `spec-cache-fresh-clone.sh` | does mutate-spec keep spec verdicts on a fresh clone, as CI checks one out, and on one whose .git/worktrees already exists |
 | `test-against-ref.sh` | does a new test fail on the code before the fix |
 | `trace-compare.sh` | does mutmut's stats pass across workers record the same reach and callers as mutmut's serial pass, and how long each takes |
-| `verdict-compare.sh` | does a test the stats pass across workers lost for a function change any of that function's mutant verdicts |
+| `verdict-compare.sh` | does the stats pass across workers change any verdict of these functions' mutants, against mutmut's serial pass |
 | `xdist-measure.sh` | how long the whole suite takes as mutmut's clean run runs it, serially and across pytest-xdist workers, in a throwaway venv |
 | `ci-job-fields.py` | what did check.py report inside a CI job, per file; exits 1 on an empty log |
 | `file-sizes.py` | how many source files pass a line threshold, and how much of each is prose |

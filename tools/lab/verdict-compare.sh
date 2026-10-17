@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
-# tools/lab/verdict-compare.sh -- one function's mutant verdicts with mutmut's
+# tools/lab/verdict-compare.sh -- functions' mutant verdicts with mutmut's
 # serial stats pass and with the stats pass across workers, compared.
 #
-#   tools/lab/verdict-compare.sh WORKERS PATTERN OUTDIR    (from a checkout to test)
+#   tools/lab/verdict-compare.sh WORKERS OUTDIR PATTERN...    (from a checkout to test)
 #
-# ANSWERS: when trace-compare.sh says the stats pass across WORKERS lost a test
-#   for a function, does that change any of that function's verdicts? PATTERN
-#   is a mutmut mutant pattern for the function, ending in `*` (for a method,
-#   `module.xǁClassǁname*`). Exit 0 only when both runs exited 0, both judged
-#   at least one mutant, and every mutant's verdict is the same; the last line
-#   says so. The lost test then cost nothing for this function; a different
-#   verdict means the parallel trace is wrong for it.
+# ANSWERS: does the stats pass across WORKERS change any verdict of these
+#   functions' mutants (a test trace-compare.sh says it lost, or survivors CI
+#   counted above the baseline)? Each PATTERN is a mutmut mutant pattern for a
+#   function, ending in `*` (for a method, `module.xǁClassǁname*`). Exit 0 only
+#   when both runs exited 0, both judged at least one mutant, and every
+#   mutant's verdict is the same; the last line says so. A different verdict
+#   means the parallel trace is wrong for that function, or the verdict is not
+#   stable run to run: the log says which (a timeout is the usual second).
 #
 # HOW: for each mode, mutmut-gate.py's prepare() makes mutants/ fresh, then
-#   mutmut-clean.py runs PATTERN's mutants: serial with MUTMUT_CLEAN_WORKERS
+#   mutmut-clean.py runs the PATTERNs' mutants: serial with MUTMUT_CLEAN_WORKERS
 #   unset (mutmut's own stats pass), parallel with it set to WORKERS. Each
-#   mode's `mutmut results --all true` lines for PATTERN are kept in OUTDIR
-#   with its log, then the two are compared mutant by mutant.
+#   mode's `mutmut results --all true` lines for the PATTERNs are kept in
+#   OUTDIR with its log, then the two are compared mutant by mutant.
 #
-# TESTED AGAINST: nothing yet beyond its own runs.
+# TESTED AGAINST: Directive.__init__, the one function trace-compare.sh found
+#   a test lost for: 5 mutants, killed in both modes, PASS.
 #
 # NOT TESTED AGAINST: a function whose tests are slow enough to time out in
 #   one mode and not the other: a timeout counts as a different verdict, so
@@ -26,10 +28,12 @@
 printf '%s' jpt-verdict-cmp > /proc/$$/comm 2>/dev/null || true
 set -u
 workers=${1:?WORKERS}
-pattern=${2:?PATTERN}
-out=${3:?OUTDIR}
+out=${2:?OUTDIR}
+shift 2
+[ $# -gt 0 ] || { echo "usage: verdict-compare.sh WORKERS OUTDIR PATTERN..." >&2; exit 2; }
 mkdir -p "$out"
-prefix=${pattern%\*}
+prefixes=()
+for p in "$@"; do prefixes+=("${p%\*}"); done
 
 prepare() {
   rm -rf mutants
@@ -50,23 +54,23 @@ PY
 for mode in serial parallel; do
   prepare
   if [ "$mode" = serial ]; then
-    env -u MUTMUT_CLEAN_WORKERS python mutmut-clean.py run "$pattern" > "$out/$mode.log" 2>&1
+    env -u MUTMUT_CLEAN_WORKERS python mutmut-clean.py run "$@" > "$out/$mode.log" 2>&1
   else
-    MUTMUT_CLEAN_WORKERS=$workers python mutmut-clean.py run "$pattern" > "$out/$mode.log" 2>&1
+    MUTMUT_CLEAN_WORKERS=$workers python mutmut-clean.py run "$@" > "$out/$mode.log" 2>&1
   fi
   echo "$?" > "$out/$mode.rc"
   python -m mutmut results --all true > "$out/$mode-results.txt" 2>&1
 done
 
-python - "$out" "$prefix" <<'PY'
+python - "$out" "${prefixes[@]}" <<'PY'
 import sys
 from pathlib import Path
 
-out, prefix = Path(sys.argv[1]), sys.argv[2]
+out, prefixes = Path(sys.argv[1]), tuple(sys.argv[2:])
 verdicts = {}
 for mode in ("serial", "parallel"):
     lines = (out / f"{mode}-results.txt").read_text().splitlines()
-    pairs = (line.strip().rsplit(": ", 1) for line in lines if line.strip().startswith(prefix))
+    pairs = (line.strip().rsplit(": ", 1) for line in lines if line.strip().startswith(prefixes))
     verdicts[mode] = {name: verdict for name, verdict in pairs}
 rcs = {m: (out / f"{m}.rc").read_text().strip() for m in ("serial", "parallel")}
 s, p = verdicts["serial"], verdicts["parallel"]
