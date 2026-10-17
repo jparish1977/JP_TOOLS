@@ -31,7 +31,8 @@ See `METHODOLOGY.md` section 2.9. The contract, in short:
 | `chdman-delta-hang.sh` | how often chdman hangs making a child CHD against a parent |
 | `chdman-build.sh` | nothing alone: builds a MAME release's chdman beside the packaged one, for the comparison |
 | `chdman-hang-backtrace.sh` | where a hung chdman is: every thread's stack, for a report or a fix upstream |
-| `spec-cache-fresh-clone.sh` | does mutate-spec keep spec verdicts on a fresh clone, as CI checks one out, and on one whose .git/worktrees already exists |
+| `chdman-suite-under-load.sh` | does test_chd_chdman.py's short stall rerun a chdman hang inside a run, and kill no call that is only slow, with several copies at once |
+| `spec-cache-fresh-clone.sh` | does mutate-spec keep spec verdicts on a fresh clone, as CI checks one out, on one whose .git/worktrees already exists, and on one whose index is refreshed first; and what in .git changes while it runs |
 | `test-against-ref.sh` | does a new test fail on the code before the fix |
 | `trace-compare.sh` | does mutmut's stats pass across workers record the same reach and callers as mutmut's serial pass, and how long each takes |
 | `verdict-compare.sh` | does the stats pass across workers change any verdict of these functions' mutants, against mutmut's serial pass |
