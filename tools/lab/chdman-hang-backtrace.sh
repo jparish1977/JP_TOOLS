@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # tools/lab/chdman-hang-backtrace.sh -- every thread's stack in a hung chdman
 #
-#   [CHDMAN=PATH] bash tools/lab/chdman-hang-backtrace.sh OUT [RUNS] [SECONDS]
+#   [CHDMAN=PATH] [DEBUGINFOD=on|off] [STOP=FILE] \
+#       bash tools/lab/chdman-hang-backtrace.sh OUT [RUNS] [SECONDS]
+#
+# DEBUGINFOD=off for a chdman built with its own symbols
+# (SYMBOLS=1 chdman-build.sh): nothing is downloaded.
 #
 # The evidence a report of the child-CHD hang to MAME needs, and where a fix
 # would start: chdman-delta-hang.sh counts the hang, this says where it is.
@@ -29,13 +33,18 @@
 # started, and the totals say which: a "no hang" with no finished runs
 # tested nothing.
 #
-# NOT tested: whether running under gdb changes how often the hang comes.
+# Tested: the packaged chdman 0.264 on Ubuntu 24.04 with debuginfod on: the
+# warm-up never finished in 600 s, every download "Timer expired" (chdman's,
+# the vDSO's, SDL2's), so Ubuntu's server is no route from that box; build
+# with SYMBOLS=1 instead. NOT tested: whether running under gdb changes how
+# often the hang comes.
 printf '%s' chdman-bt > /proc/$$/comm 2>/dev/null || true
 set -u
 out=$1
 runs=${2:-400}
 limit=${3:-20}
 chdman=${CHDMAN:-chdman}
+debuginfod=${DEBUGINFOD:-on}
 export DEBUGINFOD_URLS=${DEBUGINFOD_URLS:-https://debuginfod.ubuntu.com}
 d=$(mktemp -d)
 trap 'rm -rf "$d"' EXIT
@@ -52,7 +61,7 @@ EOF
 "$chdman" createraw --input "$d/a.img" --output "$d/a.chd" --hunksize 2048 --unitsize 512 > /dev/null 2>&1 || {
     echo "chdman-bt: the parent CHD could not be made"; exit 2; }
 # gdb runs chdman making the child; after `run`, every thread's stack.
-gdb_child=(gdb -q -batch -nx -iex 'set debuginfod enabled on' -iex 'set pagination off'
+gdb_child=(gdb -q -batch -nx -iex "set debuginfod enabled $debuginfod" -iex 'set pagination off'
     -iex 'set confirm off' -ex run -ex 'info threads' -ex 'thread apply all bt' -ex kill
     --args "$chdman" createraw --input "$d/b.img" --output "$d/b.chd" --outputparent "$d/a.chd")
 warm_up() {

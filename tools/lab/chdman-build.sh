@@ -2,7 +2,11 @@
 # tools/lab/chdman-build.sh -- build one MAME release's chdman from source,
 # beside the packaged one, to compare them
 #
-#   bash tools/lab/chdman-build.sh [TAG] [JOBS]
+#   [SYMBOLS=1] bash tools/lab/chdman-build.sh [TAG] [JOBS]
+#
+# SYMBOLS=1 builds with MAME's own debug symbols, into ~/src/TAG-sym and
+# ~/.local/opt/TAG-sym, beside the plain build: what a backtrace
+# (chdman-hang-backtrace.sh) needs, with no download.
 #
 # Clones mamedev/mame at TAG (default mame0289) into ~/src/TAG (shallow), builds
 # MAME's tools only (TOOLS=1 EMULATOR=0, JOBS at once, default the CPU count),
@@ -29,15 +33,18 @@ printf '%s' chdman-build > /proc/$$/comm 2>/dev/null || true
 set -eu
 tag=${1:-mame0289}
 jobs=${2:-$(nproc)}
-src=$HOME/src/$tag
-dest=$HOME/.local/opt/$tag
+symbols=${SYMBOLS:-0}
+suffix=""
+if [ "$symbols" = 1 ]; then suffix=-sym; fi
+src=$HOME/src/$tag$suffix
+dest=$HOME/.local/opt/$tag$suffix
 if [ ! -d "$src/.git" ]; then
     git clone -q --depth 1 --branch "$tag" https://github.com/mamedev/mame.git "$src"
 fi
 cd "$src"
 git log --oneline -1
 project=build/projects/sdl/mame/gmake-linux
-{ make -s TOOLS=1 EMULATOR=0 USE_QTDEBUG=0 NOWERROR=1 "$project/Makefile" &&
+{ make -s TOOLS=1 EMULATOR=0 USE_QTDEBUG=0 NOWERROR=1 SYMBOLS="$symbols" "$project/Makefile" &&
   make -s -C "$project" config=release64 -j"$jobs" chdman; } > "$src/build.log" 2>&1 || {
     echo "chdman-build: the build failed; the end of $src/build.log:"
     tail -n 30 "$src/build.log"
