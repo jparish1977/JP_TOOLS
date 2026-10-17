@@ -24,11 +24,16 @@
 # window, which no tool uses, and stops before compiling anything); then
 # the generated makefile builds the chdman target alone. A whole TOOLS=1
 # build also compiles MAME's display layer, which wants SDL2_ttf's headers,
-# and chdman uses none of it.
+# and chdman uses none of it. The first step also makes
+# build/generated/version.cpp, which only the top-level makefile writes and
+# chdman needs: a fresh tree stops without it ("No rule to make target
+# '../../../../generated/version.cpp'").
 #
 # Tested: mame0289 on Ubuntu 24.04 (g++ 13.3, SDL2 headers, no Qt, no
 # SDL2_ttf): a TOOLS=1 build stopped first on Qt, then (with USE_QTDEBUG=0)
-# on SDL2/SDL_ttf.h. NOT tested: any other tag.
+# on SDL2/SDL_ttf.h; the chdman target alone then built, but only because
+# that tree already held version.cpp from the TOOLS=1 attempt, and a fresh
+# SYMBOLS=1 tree stopped on it. NOT tested: any other tag.
 printf '%s' chdman-build > /proc/$$/comm 2>/dev/null || true
 set -eu
 tag=${1:-mame0289}
@@ -44,7 +49,8 @@ fi
 cd "$src"
 git log --oneline -1
 project=build/projects/sdl/mame/gmake-linux
-{ make -s TOOLS=1 EMULATOR=0 USE_QTDEBUG=0 NOWERROR=1 SYMBOLS="$symbols" "$project/Makefile" &&
+{ make -s TOOLS=1 EMULATOR=0 USE_QTDEBUG=0 NOWERROR=1 SYMBOLS="$symbols" "$project/Makefile" \
+    build/generated/version.cpp &&
   make -s -C "$project" config=release64 -j"$jobs" chdman; } > "$src/build.log" 2>&1 || {
     echo "chdman-build: the build failed; the end of $src/build.log:"
     tail -n 30 "$src/build.log"
