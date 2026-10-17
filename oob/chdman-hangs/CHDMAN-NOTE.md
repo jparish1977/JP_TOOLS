@@ -48,3 +48,15 @@ each, on one 32-thread box, one version straight after the other. **0.289:
 13 of 1600 children hung; 0.264: 7 of 1600**, every one stuck at the
 124-byte header. A newer chdman does not remove it, so `chd.py` keeps its
 watchdog (kill, say so, run once more) whichever version is installed.
+
+## Where it hangs
+
+`backtrace-0.289-1.txt` to `-4.txt` are four hangs of chdman 0.289 built
+with symbols, caught by `tools/lab/chdman-hang-backtrace.sh` (sixteen at
+once; the first hung at its 8th run): every thread's stack, all four alike.
+The main thread loops in `compress_common` (`src/tools/chdman.cpp:1513`)
+calling `progress()`, and all 17 workers wait in `worker_thread_entry`
+(`src/osd/osdsync.cpp:686`). They are this project's own output, not
+fetched, so they have no PROVENANCE rows; the home directory in their paths
+is written as `~`. `UPSTREAM-ISSUE-DRAFT.md` is a report built from them,
+not filed.

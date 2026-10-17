@@ -1,0 +1,389 @@
+# chdman-hang-backtrace: run 57 of 600, still running after 20s
+# chdman - MAME Compressed Hunks of Data (CHD) manager 0.289 (mame0289)
+# child at 124 bytes; Linux 6.6.87.2-microsoft-standard-WSL2 x86_64; nproc 32
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+chdman - MAME Compressed Hunks of Data (CHD) manager 0.289 (mame0289)
+Output CHD:   /tmp/tmp.lP68Jh7Z56/b.chd
+Parent CHD:   /tmp/tmp.lP68Jh7Z56/a.chd
+Input file:   /tmp/tmp.lP68Jh7Z56/b.img
+Compression:  lzma (LZMA), zlib (Deflate), huff (Huffman), flac (FLAC)
+Hunk size:    2,048
+Logical size: 131,072
+[New Thread 0x7ffff68a86c0 (LWP 2415200)]
+[New Thread 0x7ffff60a76c0 (LWP 2415201)]
+[New Thread 0x7ffff58a66c0 (LWP 2415202)]
+[New Thread 0x7ffff50a56c0 (LWP 2415205)]
+[New Thread 0x7ffff48a46c0 (LWP 2415206)]
+[New Thread 0x7ffff40a36c0 (LWP 2415207)]
+[New Thread 0x7ffff38a26c0 (LWP 2415209)]
+[New Thread 0x7ffff30a16c0 (LWP 2415211)]
+[New Thread 0x7ffff28a06c0 (LWP 2415212)]
+[New Thread 0x7ffff209f6c0 (LWP 2415213)]
+[New Thread 0x7ffff189e6c0 (LWP 2415216)]
+[New Thread 0x7ffff109d6c0 (LWP 2415217)]
+[New Thread 0x7ffff089c6c0 (LWP 2415218)]
+[New Thread 0x7ffff009b6c0 (LWP 2415219)]
+[New Thread 0x7fffef89a6c0 (LWP 2415220)]
+[New Thread 0x7fffef0996c0 (LWP 2415221)]
+[New Thread 0x7fffee8986c0 (LWP 2415223)]
+Examining parent, 0.0% complete...  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Compressing, 0.0% complete... (ratio=0.0%)  
+Thread 1 "chdman" received signal SIGINT, Interrupt.
+0x00007ffff7fc3b68 in clock_gettime ()
+  Id   Target Id                                    Frame 
+* 1    Thread 0x7ffff6b36e80 (LWP 2414905) "chdman" 0x00007ffff7fc3b68 in clock_gettime ()
+  2    Thread 0x7ffff68a86c0 (LWP 2415200) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=1643222228, cancel=true, abstime=0x7ffff68a7d50, op=137, expected=0, futex_word=0x5555557adb04) at ./nptl/futex-internal.c:57
+  3    Thread 0x7ffff60a76c0 (LWP 2415201) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff60a6d50, op=137, expected=0, futex_word=0x5555557ade20) at ./nptl/futex-internal.c:57
+  4    Thread 0x7ffff58a66c0 (LWP 2415202) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff58a5d50, op=137, expected=0, futex_word=0x5555557adec0) at ./nptl/futex-internal.c:57
+  5    Thread 0x7ffff50a56c0 (LWP 2415205) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff50a4d50, op=137, expected=0, futex_word=0x5555557adf64) at ./nptl/futex-internal.c:57
+  6    Thread 0x7ffff48a46c0 (LWP 2415206) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff48a3d50, op=137, expected=0, futex_word=0x5555557adfe4) at ./nptl/futex-internal.c:57
+  7    Thread 0x7ffff40a36c0 (LWP 2415207) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff40a2d50, op=137, expected=0, futex_word=0x5555557ae060) at ./nptl/futex-internal.c:57
+  8    Thread 0x7ffff38a26c0 (LWP 2415209) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff38a1d50, op=137, expected=0, futex_word=0x5555557ae0e4) at ./nptl/futex-internal.c:57
+  9    Thread 0x7ffff30a16c0 (LWP 2415211) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff30a0d50, op=137, expected=0, futex_word=0x5555557ae164) at ./nptl/futex-internal.c:57
+  10   Thread 0x7ffff28a06c0 (LWP 2415212) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff289fd50, op=137, expected=0, futex_word=0x5555557ae1e4) at ./nptl/futex-internal.c:57
+  11   Thread 0x7ffff209f6c0 (LWP 2415213) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff209ed50, op=137, expected=0, futex_word=0x5555557ae260) at ./nptl/futex-internal.c:57
+  12   Thread 0x7ffff189e6c0 (LWP 2415216) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff189dd50, op=137, expected=0, futex_word=0x5555557ae374) at ./nptl/futex-internal.c:57
+  13   Thread 0x7ffff109d6c0 (LWP 2415217) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=-251015824, cancel=true, abstime=0x7ffff109cd50, op=137, expected=0, futex_word=0x5555557ae3f0) at ./nptl/futex-internal.c:57
+  14   Thread 0x7ffff089c6c0 (LWP 2415218) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff089bd50, op=137, expected=0, futex_word=0x5555557ae470) at ./nptl/futex-internal.c:57
+  15   Thread 0x7ffff009b6c0 (LWP 2415219) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=-267801232, cancel=true, abstime=0x7ffff009ad50, op=137, expected=0, futex_word=0x5555557ae4f4) at ./nptl/futex-internal.c:57
+  16   Thread 0x7fffef89a6c0 (LWP 2415220) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7fffef899d50, op=137, expected=0, futex_word=0x5555557ae574) at ./nptl/futex-internal.c:57
+  17   Thread 0x7fffef0996c0 (LWP 2415221) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=-284586640, cancel=true, abstime=0x7fffef098d50, op=137, expected=0, futex_word=0x5555557ae5f0) at ./nptl/futex-internal.c:57
+  18   Thread 0x7fffee8986c0 (LWP 2415223) "chdman" 0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=-292979344, cancel=true, abstime=0x7fffee897d50, op=137, expected=0, futex_word=0x5555557ae670) at ./nptl/futex-internal.c:57
+
+Thread 18 (Thread 0x7fffee8986c0 (LWP 2415223) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=-292979344, cancel=true, abstime=0x7fffee897d50, op=137, expected=0, futex_word=0x5555557ae670) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=-292979344, abstime=0x7fffee897d50, clockid=32767, expected=0, futex_word=0x5555557ae670) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae670, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7fffee897d50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae620, cond=0x5555557ae648) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae620, cond=0x5555557ae648) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae648, mutex=0x5555557ae620, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 17 (Thread 0x7fffef0996c0 (LWP 2415221) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=-284586640, cancel=true, abstime=0x7fffef098d50, op=137, expected=0, futex_word=0x5555557ae5f0) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=-284586640, abstime=0x7fffef098d50, clockid=32767, expected=0, futex_word=0x5555557ae5f0) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae5f0, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7fffef098d50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae5a0, cond=0x5555557ae5c8) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae5a0, cond=0x5555557ae5c8) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae5c8, mutex=0x5555557ae5a0, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 16 (Thread 0x7fffef89a6c0 (LWP 2415220) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7fffef899d50, op=137, expected=0, futex_word=0x5555557ae574) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7fffef899d50, clockid=0, expected=0, futex_word=0x5555557ae574) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae574, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7fffef899d50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae520, cond=0x5555557ae548) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae520, cond=0x5555557ae548) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae548, mutex=0x5555557ae520, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 15 (Thread 0x7ffff009b6c0 (LWP 2415219) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=-267801232, cancel=true, abstime=0x7ffff009ad50, op=137, expected=0, futex_word=0x5555557ae4f4) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=-267801232, abstime=0x7ffff009ad50, clockid=32767, expected=0, futex_word=0x5555557ae4f4) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae4f4, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff009ad50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae4a0, cond=0x5555557ae4c8) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae4a0, cond=0x5555557ae4c8) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae4c8, mutex=0x5555557ae4a0, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 14 (Thread 0x7ffff089c6c0 (LWP 2415218) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff089bd50, op=137, expected=0, futex_word=0x5555557ae470) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7ffff089bd50, clockid=0, expected=0, futex_word=0x5555557ae470) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae470, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff089bd50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae420, cond=0x5555557ae448) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae420, cond=0x5555557ae448) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae448, mutex=0x5555557ae420, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 13 (Thread 0x7ffff109d6c0 (LWP 2415217) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=-251015824, cancel=true, abstime=0x7ffff109cd50, op=137, expected=0, futex_word=0x5555557ae3f0) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=-251015824, abstime=0x7ffff109cd50, clockid=32767, expected=0, futex_word=0x5555557ae3f0) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae3f0, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff109cd50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae3a0, cond=0x5555557ae3c8) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae3a0, cond=0x5555557ae3c8) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae3c8, mutex=0x5555557ae3a0, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 12 (Thread 0x7ffff189e6c0 (LWP 2415216) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff189dd50, op=137, expected=0, futex_word=0x5555557ae374) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7ffff189dd50, clockid=0, expected=0, futex_word=0x5555557ae374) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae374, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff189dd50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae320, cond=0x5555557ae348) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae320, cond=0x5555557ae348) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae348, mutex=0x5555557ae320, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 11 (Thread 0x7ffff209f6c0 (LWP 2415213) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff209ed50, op=137, expected=0, futex_word=0x5555557ae260) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7ffff209ed50, clockid=0, expected=0, futex_word=0x5555557ae260) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae260, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff209ed50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae210, cond=0x5555557ae238) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae210, cond=0x5555557ae238) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae238, mutex=0x5555557ae210, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 10 (Thread 0x7ffff28a06c0 (LWP 2415212) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff289fd50, op=137, expected=0, futex_word=0x5555557ae1e4) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7ffff289fd50, clockid=0, expected=0, futex_word=0x5555557ae1e4) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae1e4, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff289fd50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae190, cond=0x5555557ae1b8) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae190, cond=0x5555557ae1b8) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae1b8, mutex=0x5555557ae190, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 9 (Thread 0x7ffff30a16c0 (LWP 2415211) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff30a0d50, op=137, expected=0, futex_word=0x5555557ae164) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7ffff30a0d50, clockid=0, expected=0, futex_word=0x5555557ae164) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae164, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff30a0d50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae110, cond=0x5555557ae138) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae110, cond=0x5555557ae138) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae138, mutex=0x5555557ae110, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 8 (Thread 0x7ffff38a26c0 (LWP 2415209) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff38a1d50, op=137, expected=0, futex_word=0x5555557ae0e4) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7ffff38a1d50, clockid=0, expected=0, futex_word=0x5555557ae0e4) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae0e4, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff38a1d50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae090, cond=0x5555557ae0b8) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae090, cond=0x5555557ae0b8) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae0b8, mutex=0x5555557ae090, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 7 (Thread 0x7ffff40a36c0 (LWP 2415207) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff40a2d50, op=137, expected=0, futex_word=0x5555557ae060) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7ffff40a2d50, clockid=0, expected=0, futex_word=0x5555557ae060) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ae060, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff40a2d50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae010, cond=0x5555557ae038) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ae010, cond=0x5555557ae038) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ae038, mutex=0x5555557ae010, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 6 (Thread 0x7ffff48a46c0 (LWP 2415206) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff48a3d50, op=137, expected=0, futex_word=0x5555557adfe4) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7ffff48a3d50, clockid=0, expected=0, futex_word=0x5555557adfe4) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557adfe4, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff48a3d50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557adf90, cond=0x5555557adfb8) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557adf90, cond=0x5555557adfb8) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557adfb8, mutex=0x5555557adf90, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 5 (Thread 0x7ffff50a56c0 (LWP 2415205) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff50a4d50, op=137, expected=0, futex_word=0x5555557adf64) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7ffff50a4d50, clockid=0, expected=0, futex_word=0x5555557adf64) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557adf64, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff50a4d50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557adf10, cond=0x5555557adf38) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557adf10, cond=0x5555557adf38) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557adf38, mutex=0x5555557adf10, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 4 (Thread 0x7ffff58a66c0 (LWP 2415202) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff58a5d50, op=137, expected=0, futex_word=0x5555557adec0) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7ffff58a5d50, clockid=0, expected=0, futex_word=0x5555557adec0) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557adec0, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff58a5d50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ade70, cond=0x5555557ade98) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557ade70, cond=0x5555557ade98) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557ade98, mutex=0x5555557ade70, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 3 (Thread 0x7ffff60a76c0 (LWP 2415201) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x7ffff60a6d50, op=137, expected=0, futex_word=0x5555557ade20) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x7ffff60a6d50, clockid=0, expected=0, futex_word=0x5555557ade20) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557ade20, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff60a6d50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557addd0, cond=0x5555557addf8) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557addd0, cond=0x5555557addf8) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557addf8, mutex=0x5555557addd0, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 2 (Thread 0x7ffff68a86c0 (LWP 2415200) "chdman"):
+#0  0x00007ffff7698e51 in __futex_abstimed_wait_common64 (private=1643222228, cancel=true, abstime=0x7ffff68a7d50, op=137, expected=0, futex_word=0x5555557adb04) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=1643222228, abstime=0x7ffff68a7d50, clockid=-2047755455, expected=0, futex_word=0x5555557adb04) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x5555557adb04, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffff68a7d50, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007ffff769c1f6 in __pthread_cond_wait_common (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557adab0, cond=0x5555557adad8) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_clockwait64 (abstime=<optimized out>, clockid=<optimized out>, mutex=0x5555557adab0, cond=0x5555557adad8) at ./nptl/pthread_cond_wait.c:691
+#5  ___pthread_cond_clockwait64 (cond=0x5555557adad8, mutex=0x5555557adab0, clockid=<optimized out>, abstime=<optimized out>) at ./nptl/pthread_cond_wait.c:679
+#6  0x000055555560a05c in std::__condvar::wait_until () at /usr/include/c++/13/bits/std_mutex.h:185
+#7  std::condition_variable::__wait_until_impl<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:203
+#8  std::condition_variable::wait_until<std::chrono::duration<long, std::ratio<1l, 1000000000l> > > () at /usr/include/c++/13/condition_variable:113
+#9  std::condition_variable::wait_for<long, std::ratio<1l, 1000l> > () at /usr/include/c++/13/condition_variable:165
+#10 osd_event::wait () at ../../../../../src/osd/osdsync.h:91
+#11 worker_thread_entry () at ../../../../../src/osd/osdsync.cpp:686
+#12 0x00007ffff7aecdb4 in ?? () from /lib/x86_64-linux-gnu/libstdc++.so.6
+#13 0x00007ffff769cb84 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:447
+#14 0x00007ffff7729ecc in clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 1 (Thread 0x7ffff6b36e80 (LWP 2414905) "chdman"):
+#0  0x00007ffff7fc3b68 in clock_gettime ()
+#1  0x00007ffff76eca6d in __GI___clock_gettime (clock_id=clock_id@entry=2, tp=tp@entry=0x7fffffffe150) at ../sysdeps/unix/sysv/linux/clock_gettime.c:42
+#2  0x00007ffff76de889 in clock () at ../sysdeps/unix/sysv/linux/clock.c:31
+#3  0x000055555557841e in progress<char const (&) [50], double, double> () at ../../../../../src/tools/chdman.cpp:970
+#4  compress_common () at ../../../../../src/tools/chdman.cpp:1513
+#5  0x0000555555588183 in do_create_raw () at ../../../../../src/tools/chdman.cpp:1946
+#6  0x000055555557552a in main () at ../../../../../src/tools/chdman.cpp:3525
+[Inferior 1 (process 2414905) killed]
