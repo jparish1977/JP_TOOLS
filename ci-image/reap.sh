@@ -2,7 +2,7 @@
 # ci-image/reap.sh -- remove what CI jobs and image builds leave behind in
 # the runner's daemon.
 #
-#   bash ci-image/reap.sh [--dry-run]     (on the runner's host, in a checkout)
+#   bash ci-image/reap.sh [--dry-run | --can-run]     (on the runner's host, in a checkout)
 #
 # Jobs run in the runner's docker-in-docker sidecar. A task cancelled or killed
 # before its first step leaves its container there, never started ("Created"),
@@ -27,6 +27,9 @@
 # default the one on PATH), REAP_AGE_HOURS.
 #
 # Each removal is printed. --dry-run prints the same list and removes nothing.
+# --can-run only answers whether a real run could start: exit 0 when there is
+# a claude-job to register with, 1 (and why) when there is not; it asks the
+# daemon nothing and removes nothing.
 # Exit 0 when every removal it tried succeeded; 1 when a removal failed, or
 # when there is no claude-job to register with (a real run only).
 #
@@ -49,6 +52,7 @@ if [ "$dry" = 0 ] && { [ -z "$job" ] || [ ! -x "$job" ]; }; then
     echo "reap: no claude-job (${job:-none on PATH}); set CLAUDE_JOB; removing nothing" >&2
     exit 1
 fi
+[ "${1:-}" = "--can-run" ] && exit 0
 if [ "$dry" = 0 ] && ! "$job" start fleet-ci-reap --writes runner-dind --every 1440; then
     echo "reap: the fleet is halted; removing nothing" >&2
     exit 0

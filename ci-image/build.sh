@@ -37,8 +37,10 @@
 # After it builds, it reads the image back with ci-image/readback.sh, run
 # inside it: that it runs as fleet-ci's uid, not root, and cannot sudo; then
 # every tool it is for, each by using it (that script says how). Exit 0 only when every step
-# passes; 2 when the daemon could not be asked whether it remaps users, so
-# nothing was built.
+# passes; 2 when nothing was built: the daemon could not be asked whether it
+# remaps users, or (tagging current) reap.sh could not run afterwards, which
+# is asked first (reap.sh --can-run) so a build never fails after moving
+# fleet-ci:current.
 printf '%s' jpt-ci-image > /proc/$$/comm 2>/dev/null
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -46,6 +48,10 @@ dind=forgejo-runner-docker-in-docker-1
 tag="fleet-ci:$(git -C "$here" rev-parse --short HEAD)"
 current=1
 [ "${1:-}" = "--no-current" ] && current=0
+if [ "$current" = 1 ] && ! bash "$here/ci-image/reap.sh" --can-run; then
+    echo "ci-image: tagging fleet-ci:current runs reap.sh, which could not; nothing built" >&2
+    exit 2
+fi
 # fleet-ci's uid and gid for the image (see the header). Under set -e a
 # failing fleet-ci-ids.sh ends this script with its own exit code, 1 or 2.
 ids=$(bash "$here/ci-image/fleet-ci-ids.sh" "$dind")
