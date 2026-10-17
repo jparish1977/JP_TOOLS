@@ -25,6 +25,9 @@
 # TESTED AGAINST: 4 specs (jpt-scratch-on-hook, jpt-skip-dirs-on-files,
 #   jpt-pyproject-on-pyproject, jpt-scratch-on-scratch-refs): fresh and
 #   worktrees each 0 of 4 kept, all "<clone>/.git changed while its runs ran".
+#   With no pause after setup, worktrees mode's mkdir came under 1 s before
+#   mutate-spec started and decided it; fresh and refreshed modes showed
+#   .git/worktrees made at the runs' start, 0.56 s in (mutate-spec's own_git).
 #
 # NOT TESTED AGAINST: specs whose runs need network or the CI image's tools;
 #   a box without strace, where mutate-spec refuses MUTATE_CACHE_DIR.
@@ -51,6 +54,10 @@ for mode in fresh worktrees refreshed; do
   elif [ "$mode" = refreshed ]; then
     git -C "$work/clone" update-index -q --refresh
   fi
+  # As in CI, where the checkout is minutes before the mutation job: a change
+  # within jpcheck.spec_cache.MARGIN_NS (1 s) of mutate-spec's start counts
+  # as made while its runs ran, so setup that close would decide every mode.
+  sleep 2
   specs=()
   for s in "$@"; do specs+=("$work/clone/$s"); done
   gitlist > "$work/before"
