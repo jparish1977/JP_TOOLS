@@ -1,0 +1,263 @@
+	<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+	<title>MAME | Latest MAME Release</title>
+
+	<!-- Bootstrap Core CSS -->
+	<link href="/_include/css/bootstrap.min.css" rel="stylesheet" />
+
+	<link href="/_include/css/docs.min.css" rel="stylesheet" />
+
+	<!-- Custom CSS -->
+	<link href="/_include/css/mamedev.css" rel="stylesheet" />
+
+	<!-- Custom Fonts -->
+	<link href="/_include/font-awesome-4.1.0/css/font-awesome.min.css" rel="stylesheet" type="text/css" />
+
+	<!-- Shortcut icon -->
+	<link href="/_include/img/favicon.ico" rel="icon" />
+</head>
+
+<body>
+	<a href="//github.com/mamedev/mame"><img style="position: absolute; top: 50px; right: 0; border: 0;" src="//github.blog/wp-content/uploads/2008/12/forkme_right_red_aa0000.png" alt="Fork me on GitHub" /></a>
+
+<nav class="navbar navbar-default navbar-fixed-top" role="navigation">
+	<div class="container">
+		<!-- Brand and toggle get grouped for better mobile display -->
+		<div class="navbar-header">
+			<button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1">
+				<span class="sr-only">Toggle navigation</span>
+				<span class="icon-bar"></span>
+				<span class="icon-bar"></span>
+				<span class="icon-bar"></span>
+			</button>
+		<a class="navbar-brand" href="/index.php"><img src="/_include/img/logo-mame-small-gradient.svg" alt="MAME" style="height: 1.3em; vertical-align: middle;"/>dev.org</a>
+		</div>
+
+		<!-- Collect the nav links, forms, and other content for toggling -->
+		<div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+			<ul class="nav navbar-nav">
+				<li class="dropdown">
+					<a href="#" class="dropdown-toggle" data-toggle="dropdown">Information <span class="caret"></span></a>
+					<ul class="dropdown-menu" role="menu">
+						<li><a href="/about.html">About</a></li>
+						<li><a href="/history.html">History</a></li>
+						<li><a href="/legal.html">Legal</a></li>
+						<li><a href="/logo.html">Logo</a></li>
+						<li><a href="/contact.html">Contact</a></li>
+						<li><a href="/links.html">Resources</a></li>
+					</ul>
+				</li>
+				<li class="dropdown">
+					<a href="#" class="dropdown-toggle" data-toggle="dropdown">Downloads <span class="caret"></span></a>
+					<ul class="dropdown-menu" role="menu">
+						<li><a href="/release.html">Latest Release</a></li>
+						<li><a href="/oldrel.html">Previous Releases</a></li>
+						<li><a href="/roms/">ROMs</a></li>
+					</ul>
+				</li>
+				<li class="dropdown">
+					<a href="#" class="dropdown-toggle" data-toggle="dropdown">Documentation <span class="caret"></span></a>
+					<ul class="dropdown-menu" role="menu">
+						<li><a href="https://docs.mamedev.org/">MAME Documentation</a></li>
+						<li><a href="https://wiki.mamedev.org/">MAMEdev Wiki</a></li>
+						<li><a href="https://wiki.mamedev.org/index.php/Frequently_Asked_Questions">Frequently Asked Questions</a></li>
+						<li><a href="https://wiki.mamedev.org/index.php/System-Specific_Setup_and_Information">Emulated System Guides</a></li>
+					</ul>
+				</li>
+				<li class="dropdown">
+					<a href="#" class="dropdown-toggle" data-toggle="dropdown">Community <span class="caret"></span></a>
+					<ul class="dropdown-menu" role="menu">
+						<li><a href="https://forum.mamedev.org">Official Forums</a></li>
+						<li><a href="https://github.com/orgs/mamedev/discussions">MAMEdev Discussions on GitHub</a></li>
+						<li><a href="/irc.html">Chat on IRC</a></li>
+						<li><a href="//twitter.com/mamedev_org">MAME on Twitter</a></li>
+						<li><a href="https://bsky.app/profile/mamedev.bsky.social">MAMEdev on Bluesky</a></li>
+						<li><a href="//www.facebook.com/mamedev.org/">MAME on Facebook</a></li>
+					</ul>
+				</li>
+				<li class="dropdown">
+					<a href="#" class="dropdown-toggle" data-toggle="dropdown">Development <span class="caret"></span></a>
+					<ul class="dropdown-menu" role="menu">
+						<li><a href="https://github.com/mamedev/mame/">MAME on GitHub</a></li>
+						<li><a href="https://docs.mamedev.org/initialsetup/compilingmame.html">Compiling MAME</a></li>
+						<li><a href="https://docs.mamedev.org/techspecs/">Technical Specifications</a></li>
+						<li><a href="//git.redump.net/mame/tree/">Browse Source Code</a></li>
+						<li><a href="/tools/">Development Tools</a></li>
+					</ul>
+				</li>
+				<form class="navbar-form navbar-right" method="get" id="search" action="//wiki.mamedev.org/index.php">
+					<div class="input-group" style="width:300px;">
+						<input class="input-medium search form-control" maxlength="128" type="text" name="search" id="searchInput" size="20" autocomplete="off" value="Search wiki…" onclick="if (this.value == 'Search wiki…') this.value = '';" onblur="if (this.value == '') this.value = 'Search this wiki…';" />
+						<input type="hidden" name="title" value="Special:Search">
+						<div class="input-group-btn">
+							<button type="submit" class="btn btn-default">Search</button>
+						</div>
+					</div>
+				</form>
+			</ul>
+		</div><!-- /.navbar-collapse -->
+	</div><!-- /.container-fluid -->
+</nav>
+
+
+    <!-- Page Content -->
+    <div class="container">
+
+		<h1 class="page-header" style="text-align: center;">Latest MAME Release</h1>
+
+		<p>
+		Latest official MAME release at <a href="https://github.com/mamedev/mame/releases/mame0289/"
+		target="_blank">GitHub</a> or <a href="https://sourceforge.net/projects/mame/files/mame/0.289/"
+		target="_blank">SourceForge</a>
+		</p>
+
+		<h2>Official Windows Binary Packages</h2>
+
+		<p>
+		The table below provides links to the official Windows
+		binaries. They provide both GUI (just launch the exe)
+		and command-line operation (for starting by hand or
+		from a frontend).  Larger files are hosted on external
+		mirrors, selected at random, which may require a
+		temporary redirect to the mirror site in order to
+		download the file.
+		</p>
+		<p><b>Statistics are updated each 5 minutes</b></p>
+
+		<div class="panel panel-primary">
+		  <div class="panel-heading">MAME 0.289 Official Binary Packages</div>
+		  <table class="table">
+			<tr>
+				<th width="23%">File</th>
+				<th width="12%">Size</th>
+				<th width="53%">Description</th>
+				<th width="12%">Downloads</th>
+			</tr>
+			<tr>
+				<td class="link"><a href="https://github.com/mamedev/mame/releases/download/mame0289/mame0289b_x64.exe">mame0289b_x64.exe</a></td>
+				<td class="number">84 MiB</td>
+				<td>MAME 0.289 Windows x64 binaries<br/>
+				Requires Windows 10 or later and a CPU with x86-64-v2 functionality</td>
+				<td align="right"><span class="badge">167030</span></td>
+			</tr>
+			<tr>
+				<td class="link"><a href="https://github.com/mamedev/mame/releases/download/mame0289/mame0289b_arm64.exe">mame0289b_arm64.exe</a></td>
+				<td class="number">81 MiB</td>
+				<td>MAME 0.289 Windows Arm64 binaries<br />
+				Requires Windows 10 or later and a CPU with Armv8.2-A functionality</td>
+				<td align="right"><span class="badge">14137</span></td>
+			</tr>
+			<tr>
+				<td class="link"><a href="https://github.com/mamedev/mame/releases/download/mame0289/mame0289lx.zip">mame0289lx.zip</a></td>
+				<td class="number">19 MiB</td>
+				<td>MAME 0.289 full driver information in XML format</td>
+				<td align="right"><span class="badge">22568</span></td>
+			</tr>
+		  </table>
+		  <div class="panel-footer">
+			<center>Thanks to our mirrors: 
+<a href="https://github.com/" target="_blank">GitHub</a>,
+<a href="https://sourceforge.net/" target="_blank">SourceForge</a>,
+and <a href="https://www.progettosnaps.net/" target="_blank">Progetto-Snaps</a>
+</center>
+		  </div>
+		</div>
+
+		<br/>
+
+		<hr/>
+
+		<h2>Official Source Code Packages</h2>
+
+		<p>
+		The latest official MAME release is version 0.289. The table below provides links to the source code.
+		</p>
+
+		<p>
+		We recommend cloning source code from our <a href="https://github.com/mamedev/mame/" target="_blank">official
+		git repository on GitHub</a>.  You can also clone tagged releases from our mirrors at <a
+		href="https://gitlab.com/mamedev/mame" target="_blank">GitLab</a> and <a href="https://sourceforge.net/p/mame/code/"
+		target="_blank">SourceForge</a>.  You can clone the MAME 0.289 source code without
+		fetching the entire revision history with this command:<br/>
+		<tt>git clone -b mame0289 --depth 1 https://github.com/mamedev/mame.git mame0289</tt>
+		</p>
+
+		<p>
+		The table below provides links to packaged source archives. Larger files are hosted on external
+		mirrors, selected at random, which may require a temporary redirect to the mirror site in order to
+		download the file.
+		</p>
+
+		<div class="panel panel-primary">
+		  <div class="panel-heading">MAME 0.289 Source Code</div>
+		  <table class="table">
+			<tr>
+				<th width="23%">File</th>
+				<th width="12%">Size</th>
+				<th width="53%">Description</th>
+				<th width="12%">Downloads</th>
+			</tr>
+
+			<tr>
+				<td class="link">
+				<a href="releases/whatsnew_0289.txt">
+				whatsnew_0289.txt				</a></td>
+				<td class="number">263 KiB</td>
+				<td>List of what is new in this MAME release</td>
+				<td align="right">&nbsp;</td>
+			</tr>
+			<tr>
+				<td class="link"><a href="https://github.com/mamedev/mame/releases/download/mame0289/mame0289s.exe">mame0289s.exe</a></td>
+				<td class="number">152 MiB</td>
+				<td>MAME 0.289 sources in self-extracting 7-Zip format (self-extracting on Windows, can be extracted with P7ZIP on other operating systems)</td>
+				<td align="right"><span class="badge">15690</span></td>
+			</tr>
+		  </table>
+		  <div class="panel-footer">
+			<center>Thanks to our mirrors: 
+<a href="https://github.com/" target="_blank">GitHub</a>,
+<a href="https://sourceforge.net/" target="_blank">SourceForge</a>,
+and <a href="https://www.progettosnaps.net/" target="_blank">Progetto-Snaps</a>
+</center>
+		  </div>
+		</div>
+
+		<br/>
+
+		<p>
+		If you are running Windows, and/or have <a href="https://www.7-zip.org/" target="_blank">7-Zip</a> or
+		<a href="http://p7zip.sourceforge.net/" target="_blank">P7ZIP</a> installed, you can download the
+		self-extracting 7-Zip self-extracting archive.
+		</p>
+
+		<!-- content end -->
+    </div>
+    <!-- /.container -->
+	<br/><br/><br/>
+	
+
+	<nav class="navbar navbar-default navbar-fixed-bottom hidden-sm hidden-xs" role="navigation">
+		<div class="container">
+			<div class="collapse navbar-collapse">
+				<ul class="nav navbar-nav">
+					<li><a href="/index.php" accesskey="h"><i class="fa fa-home"></i></a></li>
+				</ul>
+				<ul class="nav navbar-nav navbar-right">
+					<li style="padding-right: 1em"><p class="navbar-text">Copyright &copy;&nbsp;2026 <img src="/_include/img/logo-mame-small-black.svg" alt="MAME" style="height: 1.3em; vertical-align: middle;"/></p></li>
+				</ul>
+			</div>
+		</div>
+	</nav>
+
+	<!-- jQuery Version 1.11.0 -->
+	<script src="/_include/js/jquery-1.11.0.js"></script>
+
+	<!-- Bootstrap Core JavaScript -->
+	<script src="/_include/js/bootstrap.min.js"></script>
+</body>
+</html>

@@ -1,2 +1,5 @@
 * text=auto eol=lf
 *.ps1 text eol=crlf
+# Out-of-band finds are byte-for-byte copies, each checked against the sha256
+# in its PROVENANCE.tsv: stored as fetched, line endings included.
+oob/** -text

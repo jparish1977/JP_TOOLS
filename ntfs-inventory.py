@@ -27,7 +27,6 @@ the TSV is handed back to the invoking user.
 
 from __future__ import annotations
 
-import contextlib
 import os
 import shlex
 import sys
@@ -48,11 +47,14 @@ TIMEOUT = 90
 
 
 def restore_owner(path: str) -> None:
-    """Hand the output back to the invoking user when run under sudo."""
+    """Hand the output back to the invoking user when run under sudo; one
+    that cannot be is still a correct inventory, and is said."""
     uid, gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
     if uid and gid:
-        with contextlib.suppress(OSError):  # reason: a root-owned TSV is still a correct inventory; ownership is a convenience
+        try:
             os.chown(path, int(uid), int(gid))
+        except OSError as e:  # reason: the inventory is written and correct; who owns it is said, not raised over
+            print(f"warning: {path} is left owned by root: {e}", file=sys.stderr)
 
 
 def _sudo_warning(device: str, argv: list[str]) -> str | None:

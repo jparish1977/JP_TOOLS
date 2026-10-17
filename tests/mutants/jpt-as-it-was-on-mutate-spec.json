@@ -1,0 +1,40 @@
+{
+  "about": "mutate-spec holds a kept verdict to what its runs read as it was before the first run began: it takes the start once, passes it to every spec, keeps nothing when a traced call names a path it cannot place, merges every run's found paths (the checkout's and the outside ones), leaves each run's own gitdir out, and says why a verdict was not kept. Run: mutate-on-target.py TREE mutate-spec.py tests/test_spec_cache.py tests/mutants/jpt-as-it-was-on-mutate-spec.json",
+  "mutants": [
+    {
+      "name": "no start taken",
+      "edits": [["    begun = spec_cache.start(root) if os.environ.get(\"MUTATE_CACHE_DIR\") else None\n", "    begun = None\n"]],
+      "target": "first run: every one killed, run, and kept"
+    },
+    {
+      "name": "the start not passed to the specs",
+      "edits": [["run_spec, root, sp, outdir, base, only, pool, begun)", "run_spec, root, sp, outdir, base, only, pool)"]],
+      "target": "first run: every one killed, run, and kept"
+    },
+    {
+      "name": "a line it cannot place ignored",
+      "edits": [["    if t.unplaced:\n", "    if False:\n"]],
+      "target": "a traced call it cannot place: passes, nothing kept, and it says which line"
+    },
+    {
+      "name": "found paths not merged across runs",
+      "edits": [["                found |= r[2]\n", ""]],
+      "target": "an outside file a run found, removed by a later run: passes, nothing kept, and it says which"
+    },
+    {
+      "name": "the checkout's found paths dropped",
+      "edits": [["    return repo, ext, {*found_repo, *found_ext}\n", "    return repo, ext, {*found_ext}\n"]],
+      "target": "a file in the checkout's .git a run found, removed by a later run: nothing kept, and it says which"
+    },
+    {
+      "name": "a run's own gitdir read as an input",
+      "edits": [["            skip = (work, tempfile.gettempdir(), *([gitdir] if gitdir else []))\n", "            skip = (work, tempfile.gettempdir())\n"]],
+      "target": "kept, its reads with no path under any run's gitdir"
+    },
+    {
+      "name": "why a verdict was not kept left unsaid",
+      "edits": [["        if why:\n", "        if False:\n"]],
+      "target": "the checkout edited while its runs ran: passes, nothing kept, and it says why"
+    }
+  ]
+}

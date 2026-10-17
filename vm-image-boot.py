@@ -23,9 +23,9 @@ Nothing here writes to the image unless `--writable` is passed: the default is
 a throwaway qcow2 overlay, so a botched boot cannot damage the original.
 """
 import argparse
-import contextlib
 import json
 import os
+import select
 import shutil
 import socket
 import struct
@@ -140,11 +140,16 @@ def drain_nonblocking(proc: "subprocess.Popen[bytes]") -> str:
     """Whatever qemu has said so far, without blocking on a process still up.
 
     Reading a live process's stderr to EOF hangs until it exits. Terminate
-    first, then read: this is only called on a path that is already failing.
+    first, kill it if TERM has not ended it in 5 s, then read: this is only
+    called on a path that is already failing. (terminate on a process that
+    has already exited does nothing.)
     """
-    with contextlib.suppress(OSError, subprocess.TimeoutExpired):  # reason: qemu already gone or too slow; either way stderr is what we came for
-        proc.terminate()
+    proc.terminate()
+    try:
         proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
     return drain(proc.stderr)
 
 
@@ -163,9 +168,10 @@ def screendump(monitor_path: str, out_ppm: str, timeout: int = 20) -> bool:
     sock = socket.socket(socket.AF_UNIX)
     sock.settimeout(timeout)
     sock.connect(monitor_path)
-    time.sleep(1)
-    with contextlib.suppress(OSError):  # reason: the monitor banner is optional; screendump is sent either way
-        sock.recv(65536)                      # banner
+    # The monitor's banner, when it has sent one within a second: read so it
+    # is not taken for the reply. None is not an error; screendump goes either way.
+    if select.select([sock], [], [], 1)[0]:
+        sock.recv(65536)
     sock.sendall(b"screendump " + out_ppm.encode() + b"\n")
     deadline = time.time() + timeout
     while time.time() < deadline:

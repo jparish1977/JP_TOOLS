@@ -172,7 +172,8 @@ def main() -> None:
     # Audits are never recorded (see jpcheck/baseline.py), so --audit does
     # not apply here.
     if args.record_baseline:
-        sys.exit(record_baseline(target, args.record_baseline, args.force_baseline))
+        sys.exit(record_baseline(target, args.record_baseline, args.force_baseline,
+                                 args.tools.split(",") if args.tools else None))
 
     if args.baseline and Path(target).is_dir():
         # A baseline holds per-file counts, so a directory compared against

@@ -1,5 +1,5 @@
 {
-  "about": "With quality-baseline.json the hook passes --touched, stages a lowered baseline with the commit, restores it when the commit fails, refuses an unstaged edit to it, puts back the index a `git commit <path>` leaves, refuses a file staged in part, holds a staged baseline that raises a count over HEAD's, and holds a not-lowered file for the message only when a commit-msg hook can read it. Run: mutate-on-target.py TREE hooks/pre-commit.sh tests/test_install_hooks.py tests/mutants/jpt-ratchet-on-hook.json",
+  "about": "With quality-baseline.json the hook passes --touched, stages a lowered baseline with the commit, restores it when the commit fails, refuses an unstaged edit to it, puts back the index a `git commit <path>` leaves, refuses a file staged in part, holds a staged baseline that raises a count over HEAD's, and holds a not-lowered file for the message only when a commit-msg hook can read it: an executable one, the repository's own behind the global hooks' stubs. Run: mutate-on-target.py TREE hooks/pre-commit.sh tests/test_install_hooks.py tests/mutants/jpt-ratchet-on-hook.json",
   "mutants": [
     {
       "name": "--touched not passed",
@@ -35,6 +35,21 @@
       "name": "a hold with no commit-msg hook to read it",
       "edits": [["    commit_msg_hook_installed && return 0\n", "    return 0\n"]],
       "target": "with no commit-msg hook to read the line, a held file is refused"
+    },
+    {
+      "name": "a global stub read for the marker, not the repository's own hook behind it",
+      "edits": [["        hook=\"$(git rev-parse --git-common-dir)/hooks/commit-msg\"\n", "        true\n"]],
+      "target": "behind the global hooks' stubs, the repository's own commit-msg reads the line: committed"
+    },
+    {
+      "name": "a global stub never recognised",
+      "edits": [["    if grep -q \"/hooks/global-dispatch.sh\\\" commit-msg \" \"$hook\" 2>/dev/null; then", "    if false; then"]],
+      "target": "behind the global hooks' stubs, the repository's own commit-msg reads the line: committed"
+    },
+    {
+      "name": "a commit-msg git will not run counted",
+      "edits": [["    [ -x \"$hook\" ] && grep -q", "    grep -q"]],
+      "target": "a commit-msg not executable, which git would not run: refused"
     },
     {
       "name": "a staged baseline never compared with HEAD's",

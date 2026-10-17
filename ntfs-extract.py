@@ -45,7 +45,6 @@ files were never attempted, and it is named after the counts.
 """
 
 import argparse
-import contextlib
 import os
 import shutil
 import subprocess
@@ -94,9 +93,13 @@ def within(root: str, candidate: str) -> bool:
 
 
 def _discard(part: str, why: str) -> bool:
+    """Say WHY, remove PART (one never created is already gone), and fail;
+    a PART that cannot be removed is said too."""
     print(f"  ! {why}", file=sys.stderr)
-    with contextlib.suppress(FileNotFoundError):  # reason: a .part never created is already gone
-        os.unlink(part)
+    try:
+        Path(part).unlink(missing_ok=True)
+    except OSError as e:  # reason: the extraction has failed already; a .part left behind is said, not raised over that
+        print(f"  ! could not remove {part}: {e}", file=sys.stderr)
     return False
 
 

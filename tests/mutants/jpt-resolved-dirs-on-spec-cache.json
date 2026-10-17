@@ -1,0 +1,10 @@
+{
+  "about": "spec_cache prints a directory a run only resolved through as a directory, not by its listing, so a file written beside the checkout runs no spec again. Run: mutate-on-target.py TREE jpcheck/spec_cache.py tests/test_spec_cache.py tests/mutants/jpt-resolved-dirs-on-spec-cache.json",
+  "mutants": [
+    {
+      "name": "every directory by its listing, as before",
+      "edits": [["    if not opened:\n        return \"dir\"\n", ""]],
+      "target": "a file written beside the checkout, in a directory only resolved through: still kept"
+    }
+  ]
+}

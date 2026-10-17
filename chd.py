@@ -54,7 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chdtool import batch, commands
 from chdtool.chdman import COMPRESSION_PRESETS, CreateOptions
 from chdtool.importing import ImportOptions, import_image, tool_status
-from platformtools.tools import ToolMissingError
+from platformtools.tools import StalledError, ToolMissingError
 
 _PRESETS = list(COMPRESSION_PRESETS)
 
@@ -183,6 +183,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc.name} not found.")
         print(exc.hint)
         return 2
+    except StalledError as exc:
+        print(f"Error: {exc}, twice; nothing was written.")
+        return 1
 
 
 if __name__ == "__main__":

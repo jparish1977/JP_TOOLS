@@ -299,10 +299,14 @@ def test_main_stops() -> None:
 
 def test_help() -> None:
     out = io.StringIO()
+    code: object = "did not exit"
     with mock.patch.object(sys, "argv", ["autoit-extract.py", "--help"]), \
-            mock.patch.object(ae, "name_process"), contextlib.redirect_stdout(out), \
-            contextlib.suppress(SystemExit):  # reason: --help prints, then argparse exits 0; the printed text is what is checked
-        ae.main()
+            mock.patch.object(ae, "name_process"), contextlib.redirect_stdout(out):
+        try:
+            ae.main()
+        except SystemExit as e:
+            code = e.code
+    check("--help exits 0", code, 0)
     text = " ".join(out.getvalue().split())
     for want in ("Extract and triage the AutoIt script inside a compiled PE.",
                  "where to write scripts", "findings only"):

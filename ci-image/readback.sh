@@ -94,3 +94,5 @@ ver 1 identify probe.png
 is 16 ffprobe -v error -f lavfi -i color=c=black:s=16x16:d=0.1 -show_entries stream=width -of csv=p=0
 has "a probe page" man_probe
 has '.TH "probe" "1"' docbook_probe
+# A job may trace its own children: the kept-verdict cache depends on it.
+has 'execve("' strace -f -qq -e trace=execve true

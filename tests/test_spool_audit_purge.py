@@ -63,6 +63,15 @@ def test_a_refused_unlink_counts_no_surviving_links() -> None:
         check("a symlinked parent: refused, and 0", (note, survivors),
               ("link/f.ps (refused: link is a symlink, NOT followed)", 0))
         check_true("  the file behind it survives", (root / "real" / "f.ps").exists())
+        with mock.patch("spoolaudit.purge.os.lstat", side_effect=PermissionError("denied")):
+            note, survivors = _at(root, "link/f.ps")
+        check("  the refusal's lstat failing: still refused, saying it could not tell whether it is a symlink",
+              (note is not None and note.startswith("link/f.ps (could not reach it: ")
+               and note.endswith("; whether link is a symlink is unknown: PermissionError)"), survivors), (True, 0))
+        check_true("    the file behind it survives", (root / "real" / "f.ps").exists())
+        (root / "plain").write_bytes(b"")
+        check("a component that is a plain file, no symlink: could not reach it, by its error",
+              _at(root, "plain/f.ps"), ("plain/f.ps (could not reach it: NotADirectoryError)", 0))
 
 
 def test_unlink_at_removes_at_any_depth() -> None:

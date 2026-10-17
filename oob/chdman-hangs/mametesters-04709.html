@@ -1,0 +1,1209 @@
+  <!DOCTYPE html>
+  <html lang="en">
+<head>
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-41192733-1"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'UA-41192733-1');
+</script>
+  <meta http-equiv="cache-control" content="private, max-age=5400, pre-check=5400">
+  <meta http-equiv="expires" content="Fri, 23 Oct 26 23:09:21 +0000">
+    <link rel="stylesheet" type="text/css" href="https://mametesters.org/css/default.css?v=180622">
+  <meta http-equiv="Expires" content="Fri, 23 Oct 2026 23:09:21 GMT">
+  <link rel="shortcut icon" href="images/favicon.ico" type="image/x-icon">
+  <title>04709: chdman: random deadlocks - MAME Testers</title>
+ <script src="javascript/common.js"></script>
+    <script src="javascript/ajax.js"></script>
+    <script
+      src="https://code.jquery.com/jquery-3.7.1.min.js"
+      integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo="
+      crossorigin="anonymous"></script>
+    <script src="js/script.js?v=12"></script>
+    <meta property="og:title" content="MAME Testers - 04709: chdman: random deadlocks">
+  <meta property="og:type" content="mametesters:article">
+</head>
+
+  <body>
+    <div class="content">
+    
+
+<!-- navigator -->
+<nav>
+ <div class="nav-inner">
+  <div id="navcontent">
+    <ul>
+      <li class="first"><a href="./main_page.php" class="home">&nbsp;</a></li>
+      <li><a href="./my_view_page.php">My View</a></li>
+      <li><a href="./view_all_bug_page.php">View &amp; Search</a></li>
+      <li class="has-submenu"><a href="#">Change Log</a>
+        <ul class="sub_menu">
+          <li class="first"><a href="./changelog_page.php">MAME Change Log</a></li>
+          <li><a href="./changelog_mess_page.php">Old MESS Change Log</a></li>
+        </ul>
+      </li>
+    <li class="has-submenu"><a href="#" class="links"></a>
+      <div class="dev-menu-wrapper">
+        <div class="dev-menu">
+          <ul>
+            <li><a href="https://www.mamedev.org/" target="_blank" class="mamedev">mamedev.org</a></li>
+            <li><a href="https://github.com/mamedev/mame" target="_blank" class="git">mamedev git</a></li>
+            <li><a href="https://mashinfo.github.io/mameinfo//" target="_blank">MASH's MAMEINFO</a></li>
+            <li><a href="https://mamedev.org/devwiki/index.php/Frequently_Asked_Questions" target="_blank" class="mamedev">MAME FAQ</a></li>
+            <li><a href="https://flyers.arcade-museum.com/" target="_blank" class="tafa">TAFA</a></li>
+            <li><a href="http://www.system16.com/" target="_blank" class="sys16">System 16</a></li>
+            <li><a href="https://www.arcade-history.com/" target="_blank" class="archis">Arcade History</a></li>
+            <li><a href="https://www.tamdb.net/" target="_blank" class="amdb">Arcade Manual DB</a></li>
+            <li><a href="http://www.arcadecollecting.com/" target="_blank" class="arcadecollect">ArcadeCollecting</a></li>
+            <li><a href="https://auctions.yahoo.co.jp/search/search?p=%E3%82%A2%E3%83%BC%E3%82%B1%E3%83%BC%E3%83%89%20%E5%9F%BA%E6%9D%BF" target="_blank" class="yahoo">Yahoo Auctions (JP)</a></li>
+
+            <li><a href="https://e2j.net/bugs/" target="_blank" class="e2j">Japanese Database</a></li>
+            <li><a href="https://e2j.net/files/mameinfo_en.zip" class="download">mameinfo.dat (bug only)</a></li>
+
+          </ul>
+          <ul>
+            <li><a target="_blank" href="https://aarongiles.com/">Aaron Giles</a></li>
+            <li><a target="_blank" href="http://web.archive.org/web/20200616084501id_/http://andreasnaive.blogspot.com/search/label/emulaci%C3%B3n/">Andreas Naive</a></li>
+            <li><a target="_blank" href="https://ajg.mameworld.info/">Andrew Gardner</a></li>
+            <li><a target="_blank" href="http://mamedev.emulab.it/kale/">Angelo Salese / Kale</a></li>
+            <li><a target="_blank" href="http://mess.redump.net/people/mahlemiut">Barry Rodewald</a></li>
+            <li><a target="_blank" href="http://www.bryanmcphail.com/wp/?cat=25">Bryan McPhail / Mish</a></li>
+            <li><a target="_blank" href="http://www.techno-junk.org/">Charles MacDonald</a></li>
+            <li><a target="_blank" href="http://mess.redump.net/people/curt_coder">Curt Coder</a></li>
+            <li><a target="_blank" href="http://mamedev.emulab.it/haze/">David Haywood / Haze</a></li>
+            <li><a target="_blank" href="http://derrick.mameworld.info/">Derrick Renaud</a></li>
+            <li><a target="_blank" href="https://redump.net/">Dirk Best / Duke</a></li>
+            <li><a target="_blank" href="http://mamedev.emulab.it/etabeta/?cat=4">Fabio Priuli / etabeta</a></li>
+            <li><a target="_blank" href="https://www.firehawke.net/posts/">Firehawke</a></li>
+            <li><a target="_blank" href="http://avoidspikes.blogspot.jp/">Frank Palazzolo</a></li>
+            <li><a target="_blank" href="http://agemame.mameworld.info/">James Wallace</a></li>
+            <li><a target="_blank" href="http://agemame.mameworld.info/">Jarek Burczynski</a></li>
+            <li><a target="_blank" href="http://stolistic.blogspot.jp/">Jim Stolis / Stolistic</a></li>
+            <li><a target="_blank" href="http://mess.redump.net/people/lord_nightmare">Lord Nightmare</a></li>
+
+          </ul>
+          <ul>
+            <li><a target="_blank" href="http://www.lucaelia.com/mame.php">Luca Elia</a></li>
+            <li><a target="_blank" href="http://web.archive.org/web/20210128044540/http://www.manuelabadia.com/blog/CategoryView,category,MAME.aspx">Manuel Abadia</a></li>
+            <li><a target="_blank" href="http://mess.redump.net/people/mizapf">Michael Zapf / mizapf</a></li>
+            <li><a target="_blank" href="http://nebula.emulatronia.com/">Miguel Ángel Horna / ElSemi</a></li>
+            <li><a target="_blank" href="http://micko-wip.blogspot.jp/">Miodrag Milanovic / Micko</a></li>
+            <li><a target="_blank" href="http://mamelife.blogspot.com/">Nicola Salmoria</a></li>
+            <li><a target="_blank" href="https://web.archive.org/web/20040816085654id_/http://www.mamehot.net:80/php/bujar.php">Norbert Kehrer</a></li>
+            <li><a target="_blank" href="http://philwip.mameworld.info/">Philip Bennett</a></li>
+            <li><a target="_blank" href="http://reip.mameworld.info/">Pierpaolo Prazzoli / Reip</a></li>
+            <li><a target="_blank" href="http://rbelmont.mameworld.info/">R. Belmont</a></li>
+            <li><a target="_blank" href="https://robbie.mameworld.info//">Roberto Fresca</a></li>
+            <li><a target="_blank" href="http://mamedev.emulab.it/robiza/">Roberto Zandonà / Robiza</a></li>
+            <li><a target="_blank" href="http://slanina.pl/mame.html">Tomasz Slanina / dox</a></li>
+            <li><a target="_blank" href="http://tourniquet.mameworld.info/">Tourniquet / Paul Priest</a></li>
+            <li><a target="_blank" href="https://rants.vastheman.com/category/technology/mame/">Vas Crabb</a></li>
+            <li><a target="_blank" href="http://vlinde.mameworld.info/">Ville Linde</a></li>
+            <li><a target="_blank" href="http://mess.redump.net/people/wilbert_pol">Wilbert Pol / Judge</a></li>
+
+          </ul>
+        </div>
+      </div>
+    </li>
+    </ul></div>      <div id="navcontent-r">
+        <ul>
+          <li class="has-submenu"><a href="#" class="dropdown">Help</a>
+            <ul class="sub_menu" style="display: none;">
+              <li class="first"><a href="./rules.html" target="_blank">Rules and Guidelines</a></li>
+              <li><a href="./legend.html" target="_blank">Legend</a></li>
+              <li><a href="./tutorial.html" target="_blank">Tutorial</a></li>
+              <li><a href="./roles.html" target="_blank">User Levels</a></li>
+              <li><a href="./faq.html" target="_blank">FAQ</a></li>
+            </ul>
+          </li>
+          <li class="devider">|</li>
+          <li class="has-submenu"><a href="#" class="dropdown  header-username-flex">Guest</a>
+            <ul class="sub_menu" style="display: none;">
+              <li class="first"><a href="./login_page.php?return=%2Fview.php%3Fid%3D4709">Login</a></li>
+              <li><a href="./signup_page.php">Join Testers</a></li>
+            </ul>
+          </li>
+                <li class="devider">|</li>
+      <li><a href="./login_page.php?return=%2Fview.php%3Fid%3D4709">Login</a>
+        </ul>
+      </div>
+
+    </div>
+    </nav>
+
+    <!-- sub navigator -->
+    <div id="navsub">
+      <div id="login2">
+
+        <ul>
+          <li><span id="utc" style="white-space: nowrap;">--</span></li>
+          <li>
+            <form method="post" action="jump_to_bug.php"><input name="bug_id" size="4" maxlength="5" class="inp_txt" placeholder="BugID" type="text"></form>
+          </li>
+          <li>
+            <form method="post" action="./view_all_set.php" style="margin-left: 5px;"><input type="hidden" name="type" value="1"><input type="hidden" name="temporary" value="y"><input name="search" size="12" maxlength="20" class="inp_txt_search" value="" type="text" placeholder="Search"></form>
+          </li>
+        </ul>
+
+      </div>
+    </div>
+
+    <!-- Main Contents -->
+<main>
+
+<div>
+<section class="widget">
+  <div class="widget-title">
+    <div class="widget-title-left">
+      <span class="ico_bug">Viewing Issue Advanced Details</span>
+    </div>
+  </div>
+  <div class="widget-header">
+    <div class="widget-header-left">
+      <!-- Jump to Bugnotes -->
+      <span class="bracket-link">[&nbsp;<a href="#bugnotes">Jump to Notes</a>&nbsp;]</span>       <!-- Send Bug Reminder -->
+          </div>
+    <div class="widget-header-right">
+          </div>
+  </div>
+  <div class="widget-client">
+
+    <table class="general">
+
+      <!-- Labels -->
+      <tr class="row-category">
+        <th width="15%">
+          ID        </th>
+        <th width="20%">
+          Category <span class="hint">[<a href="./legend.html#category" target="_blank">?</a>]</span>        </th>
+        <th width="15%">
+          Severity <span class="hint">[<a href="./legend.html#severity" target="_blank">?</a>]</span>        </th>
+        <th width="20%">
+          Reproducibility        </th>
+        <th width="15%">
+          Date Submitted        </th>
+        <th width="15%">
+          Last Update        </th>
+      </tr>
+
+      <tr class="row-category-items">
+        <!-- Bug ID -->
+        <td>
+          04709        </td>
+
+        <!-- Category -->
+        <td>
+          Core        </td>
+
+        <!-- Severity -->
+        <td>
+          Minor        </td>
+
+        <!-- Reproducibility -->
+        <td>
+          Random        </td>
+
+        <!-- Date Submitted -->
+        <td>
+          Feb 27, 2012, 22:24        </td>
+
+        <!-- Date Updated -->
+        <td>
+          Mar 24, 2015, 10:36        </td>
+
+      </tr>
+
+      <!-- spacer -->
+      <tr class="spacer">
+        <td colspan="6"></td>
+      </tr>
+      <tr class="hidden"></tr>
+
+      <tr>
+        <!-- Reporter -->
+        <th>
+          Tester        </th>
+        <td>
+          Firewave        </td>
+
+        <!-- View Status -->
+        <th>
+          View Status        </th>
+        <td>
+          Public        </td>
+
+        <!-- Platform -->
+        <th>
+          Platform        </th>
+        <td>
+          MAME (Self-compiled)        </td>
+
+      </tr>
+
+
+      <!-- Handler -->
+      <tr>
+        <th>
+          Assigned To        </th>
+        <td>
+                  </td>
+
+        <!-- Resolution -->
+        <th>
+          Resolution        </th>
+        <td>
+          Open        </td>
+
+        <!-- Operating System -->
+        <th>
+          OS        </th>
+        <td>
+          Windows Vista/7 (32-bit)        </td>
+
+      </tr>
+
+      <tr>
+
+        <!-- Status -->
+        <th>Status <span class="hint">[<a href="./legend.html#status" target="_blank">?</a>]</span></th>
+        <td class="acknowledged">Acknowledged</td>
+
+        <!-- Github pull request  -->
+
+        <td colspan="2"></td>
+
+        <!-- OS Version -->
+        <th>Driver</th>
+        <td></td>
+      </tr>
+
+      <tr>
+        <!-- version -->
+        <th>
+          Version        </th>
+        <td>
+          0.145u3        </td>
+        <!-- fixed in version -->
+        <th>
+          Fixed in Version        </th>
+        <td>
+                  </td>
+        <th>
+          Build        </th>
+        <td>
+                  </td>
+      </tr>
+
+
+      
+      <tr>
+        <th></th>
+        <td></td>
+
+        <th>Fixed in Git Commit</th>
+        <td></td>
+
+        <th>Github Pull Request #</th>
+        <td></td>
+      </tr>
+
+      
+      <!-- spacer -->
+      <tr class="spacer">
+        <td colspan="6"></td>
+      </tr>
+      <tr class="hidden"></tr>
+
+      <!-- Summary -->
+      <tr>
+        <th>
+          Summary        </th>
+        <td colspan="5" class="largefont">
+          04709: chdman: random deadlocks        </td>
+      </tr>
+
+
+      <!-- Description -->
+      <tr>
+        <th>
+          Description        </th>
+        <td colspan="5" class="largefont">
+          Since the addition of the lzma and FLAC compression there have be several reports of chdman hanging.<br />
+<br />
+Now I encountered it myself and it was hang right at the end of the operation using &quot;createcd&quot;. I was using a Visual Studio 2010 64-bit debug compile. When I attached it to the debugger it said, that the application had encountered a deadlock. chdman hung in the progress() function in the fflush(stderr) call.<br />
+<br />
+So far I have not been able to reproduce this. But this matches a report by another user with a GCC compile, that had a hang also very much at the end of a conversion of arctthnd.<br />
+<br />
+On a side note - all other threads were in WaitForSingleObject(thread-&gt;wakeevent).        </td>
+      </tr>
+
+
+      <!-- Steps to Reproduce -->
+      <tr>
+        <th>
+          Steps To Reproduce        </th>
+        <td colspan="5" class="largefont">
+                  </td>
+      </tr>
+
+
+      <!-- Additional Information -->
+      <tr>
+        <th>
+          Additional Information        </th>
+        <td colspan="5" class="largefont">
+                  </td>
+      </tr>
+
+      <!-- GIT Commit -->
+      <tr>
+        <th>Github Commit</th>
+        <td colspan="5"></td>
+      </tr>
+
+
+
+      <!-- Tagging -->
+      
+      
+
+      <!-- spacer -->
+      <tr class="spacer">
+        <td colspan="6"></td>
+      </tr>
+      <tr class="hidden"></tr>
+
+      <!-- Custom Fields -->
+              <tr>
+          <th>
+            Flags          </th>
+          <td colspan="5">
+                      </td>
+        </tr>
+              <tr>
+          <th>
+            Regression Version          </th>
+          <td colspan="5">
+                      </td>
+        </tr>
+              <tr>
+          <th>
+            Affected Sets / Systems          </th>
+          <td colspan="5">
+                      </td>
+        </tr>
+      
+              <!-- spacer -->
+        <tr class="spacer">
+          <td colspan="6"></td>
+        </tr>
+        <tr class="hidden"></tr>
+      
+      <!-- Attachments -->
+                <tr>
+            <th rowspan="1">
+              <div id="attachments">Attached Files</div>
+            </th>
+            <td colspan="5" class="bug-attachment"><div class="file-info"><a href="file_download.php?file_id=3350&amp;type=bug"><img src="https://mametesters.org/images/fileicons/jpg.png" alt="jpg file icon" width="16" height="16" class="attchment_icon"></a>&nbsp;<a href="file_download.php?file_id=3350&amp;type=bug">lockedup.jpg</a> (167,998 bytes) Feb 29, 2012, 14:39 Uploaded by <b>Fujix</b></div>
+<a href="file_download.php?file_id=3350&amp;type=bug"><img alt="Fujix" style=" max-height:512px; max-width: 100%; height: auto;" src="file_download.php?file_id=3350&amp;type=bug"></a></td></tr>
+        
+        <!-- Buttons -->
+          <tr class="center">
+            <td colspan="6"><div class="bug_manipulate"></div></td>
+          </tr>
+    </table>
+
+  </div>
+  <!--/.widget-client-->
+</section>
+<!--/.widget-->
+
+
+<section class="widget widget-accordion" id="view-relationships">
+  <div class="widget-title">
+    <div class="widget-title-left">
+      <span class="ico_link">Relationships</span>
+		</div>
+    <div class="widget-toggle"></div>
+  </div>
+  <div class="widget-client">
+
+		<table class="general">
+
+            
+        <tr>
+          <td colspan="2" class="general-td-relationships">
+            <table><tr class="acknowledged"><td><span class="nowrap">related to</span>&nbsp;</td><td><a href="view.php?id=5891">05891</a></td><td><span class="issue-status" title="Open">Acknowledged</span></td><td>&nbsp;</td><td><b><a href="http://adb.arcadeitalia.net/dettaglio_mame.php?game_name=chdman&lang=en" target="_blank"> chdman</a></b>: ThreadSanitizer: data race&nbsp;</td></tr>
+</table>
+          </td>
+  			</tr>
+		</table>
+
+	</div>
+</section>
+
+
+<section class="widget widget-accordion" id="bugnotes">
+  <div class="widget-title">
+    <div class="widget-title-left">
+      <span class="ico_chat">Notes</span>
+      <div class="widget-numbers">45</div>
+    </div>
+    <div class="widget-toggle"></div>
+  </div>
+  <div class="widget-client">
+    <table class="general">
+
+              
+        <tr class="bugnote" id="c8287">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08287</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Feb 27, 2012, 23:18</div>
+            <div class="bugnote-modified">edited on:  Feb 27, 2012, 23:18</div>            <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            I have a feeling it's more related to the CPP rewrite, possible a thread safety issue somewhere?<br />
+<br />
+I processed, converted, and verified over 900gb of CHD images with the FLAC code in old CHDMAN with no issues, but I've seen fairly frequent lockups in the new one, interestingly only ever when processing HDD images tho (and sometimes with compression *off*)<br />
+<br />
+Making the host IO 'busy' seems to exaggerate the problem, for example if I'm doing other things with the PC at the same time it seems to be more frequent.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8288">
+          <th class="bugnote-public">
+            <img src="./mameavatars/c4a9365167366ac69c83d3f21125ffe6.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08288</div>
+            <div class="bugnote-user">Fujix</div>            <div class="bugnote-user-level">Administrator</div>
+            
+            <div class="bugnote-submit">Feb 28, 2012, 05:10</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            I have encountered this problem many many times.. I gave up converting CHDS for now.<br />
+And as I reported previously (and deleted), when it started converting a CHD, chdman ignores &quot;-np 1&quot; and eats up all CPUs. My Core 2 Duo shows 100% usage even if I restrict the number of processors.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8289">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08289</div>
+            <div class="bugnote-user">Firewave</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Feb 28, 2012, 14:24</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            My hang had nothing to with threads. They were also finished and waiting for the main loop to wake them. The loop was stuck in the fflush(stderr) call in the progress() fuction.<br />
+<br />
+When I did the big conversion test I had not a single lockup whatsoever. The test ran over two days.<br />
+<br />
+Fujix, could you use a chdman build with symbols and attach the gdb to it when it hangs and get a backtrace of all threads? I have never had this issue with a GCC compile and with a Visual Studio it only happened once.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8293">
+          <th class="bugnote-public">
+            <img src="./mameavatars/c4a9365167366ac69c83d3f21125ffe6.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08293</div>
+            <div class="bugnote-user">Fujix</div>            <div class="bugnote-user-level">Administrator</div>
+            
+            <div class="bugnote-submit">Feb 29, 2012, 02:37</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            chdman on gdb is very modest for me, converted 3 chds and no lock up so far.<br />
+<br />
+And I found it makes three threads if I don't restrict the number of process, looks working properly and CPU usage is acceptable on gdb.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8297">
+          <th class="bugnote-public">
+            <img src="./mameavatars/c4a9365167366ac69c83d3f21125ffe6.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08297</div>
+            <div class="bugnote-user">Fujix</div>            <div class="bugnote-user-level">Administrator</div>
+            
+            <div class="bugnote-submit">Feb 29, 2012, 14:40</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            It locked up when I was copying the carevil chd, uploaded how cmd.exe looks like.<br />
+In fact chdman is still working and uses CPU.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8298">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08298</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Feb 29, 2012, 16:30</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            yeah, it's usually hung at one core of activity (50% here)          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8393">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08393</div>
+            <div class="bugnote-user">Darkfalz</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">Mar 19, 2012, 15:04</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Mine crashed (hung) once, after I paused and restarted.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8522">
+          <th class="bugnote-public">
+            <img src="./mameavatars/8d88aff7c180775c7229c09d87c37538.jpg" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08522</div>
+            <div class="bugnote-user">Iaspis</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">May 8, 2012, 08:09</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            is this fixed, after the u8 update?          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8523">
+          <th class="bugnote-public">
+            <img src="./mameavatars/2711045dd22ea4df30de4c97cc8d9407.jpg" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08523</div>
+            <div class="bugnote-user">Tafoid</div>            <div class="bugnote-user-level">Administrator</div>
+            
+            <div class="bugnote-submit">May 8, 2012, 09:52</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            I haven't heard that it has been, so I assume it hasn't been.   Someone with 64-bit CHDMAN need to do some extensive converting to find out, I guess.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8524">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08524</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">May 8, 2012, 15:44</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Nothing has been checked in which is liable to fix it, and I was still seeing it very recently, as have others trying to use the frontend posted on MW.<br />
+<br />
+I need to give it another run to make sure the compile too switch hasn't changed the behavior, but I'd be very suspicious that the bug wasn't just being hidden if it has.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8876">
+          <th class="bugnote-public">
+            <img src="./mameavatars/8d88aff7c180775c7229c09d87c37538.jpg" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08876</div>
+            <div class="bugnote-user">Iaspis</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">Aug 21, 2012, 07:06</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Sorry for asking again, I see there've been some fixes since 0.146u1, especialy the fix about a memory leak in libflac/libflac/md5.c . Is this bug still active?          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8877">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08877</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Aug 21, 2012, 19:30</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            nothing specific has been done to fix it.. why are you asking? are you still encountering it, or do you think it's fixed?          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8880">
+          <th class="bugnote-public">
+            <img src="./mameavatars/8d88aff7c180775c7229c09d87c37538.jpg" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08880</div>
+            <div class="bugnote-user">Iaspis</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">Aug 26, 2012, 21:10</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            No, I haven't encountered it, however it's random so I couldn't be sure. I thought that those changes might have affected it eventually but I was wrong, apparently.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8881">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08881</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Aug 26, 2012, 21:41</div>
+            <div class="bugnote-modified">edited on:  Aug 26, 2012, 21:42</div>            <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            the os etc. seems to play a role..<br />
+<br />
+my 32-bit Windows XP Athlon 3000+ (single core) box converts fine 100% of the time.<br />
+<br />
+All 3 Win 7 64-bit C2D Intel machines I've tested it on get stuck say 80% of the time on the largest Beatmania CHD.<br />
+<br />
+I can test a current version but I haven't seen a change go in specifically to fix it.<br />
+<br />
+I did try creating a 100% reproduction test case, but a blank 40gb file seems to convert fine every time, even if it's the blank areas it seems to get stuck on in normal cases, it's an annoying bug.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8979">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08979</div>
+            <div class="bugnote-user">Ki3r</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">Sep 27, 2012, 19:06</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            I was struggling with this bug for days, with chdman from SVN rev 17996 and 18126. One in every 2 or 3 CHDs was causing chdman to fall asleep while converting from v4 to v5.<br />
+<br />
+Then I tried turning off Hyper-threading in BIOS. The bug is gone! I could convert every CHD that I couldn't before.<br />
+<br />
+The computer is a old P4 @3Ghz running Windows XP SP3. I hope this info give some clues to the developers to fix this PITA bug.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8982">
+          <th class="bugnote-public">
+            <img src="./mameavatars/fd147ae67bc288a89677f5c3a1492827.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08982</div>
+            <div class="bugnote-user">NekoEd</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Sep 27, 2012, 22:45</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            If it works just fine after disabling hyperthreading, then it would appear that this bug is only present on multiprocessor systems (hyperthreading gives you what is essentially two CPUs, after all.)          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8994">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08994</div>
+            <div class="bugnote-user">Ki3r</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">Oct 1, 2012, 09:45</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            From what I've read most people managed to convert the CHDs without problems. Assuming that most of today's CPUs are multi-core and just a few have HT I suspect that the problem lies only in HT.<br />
+<br />
+Googling for &quot;hyper threading deadlock&quot; also returns many results.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8995">
+          <th class="bugnote-public">
+            <img src="./mameavatars/fd147ae67bc288a89677f5c3a1492827.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08995</div>
+            <div class="bugnote-user">NekoEd</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Oct 1, 2012, 16:22</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Haze reported hangups on three machines with Core 2 Duo processors. These machines do not have hyperthreading, they're pure multicore. So the issue is with any machine on which there are more than one core, whether the extra cores are logical (hyperthreading, mostly later Pentium 4s), physical (Core 2 Duo/Quad) or a combination of both (multiple physical cores each with hyperthreading, most mobile Core ix processors).<br />
+<br />
+Does chdman decide to multithread based on the number of processors? If there's a way to force it to use multithreading under a single core processor without multithreading, it should be checked whether that causes it to deadlock or not. Either way, it looks like that someone is going to have to trace each thread of operation and watch for it to stall then find out why.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c8998">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.08998</div>
+            <div class="bugnote-user">Ki3r</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">Oct 3, 2012, 09:57</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            You're right., just checked C2D specs. Don't have a clue then.<br />
+<br />
+I noticed the problem occurred in highly compressible CHDs. I remember some of those with 20GB of logical size which end with just a few MB after compression but can't pinpoint a name.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9000">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09000</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Oct 4, 2012, 18:36</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            yes, that's pretty much what we've noticed.<br />
+<br />
+Only seems to happen with HDDs, almost always on areas which are mostly blank space<br />
+Doesn't happen on a specifically made test case HDD which is always blank space tho.<br />
+<br />
+Definitely threading related, can't recreate the lockup on a single core machine, at all.  The only traces we have point to some kind of flush IO deadlock.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9090">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09090</div>
+            <div class="bugnote-user">jumper</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">Nov 10, 2012, 01:53</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Joined to chime in...hope this helps at least a little...<br />
+<br />
+I've compiled 147u2 chdman on both 32bit Windows XP(dual core) (using the tools from mamedev), and Ubuntu 12.04 LTS (64bit)(quad core).<br />
+Both exhibit the same deadlocks with the same HDDs.  My debugging skills are lacking, so, I cannot point to anything specific.<br />
+<br />
+Eventually, after endless retries, the HDDs seem to convert, but, there seems to be no rhyme or reason as why chdman deadlocks...it seems to always be random, but, problem files are problem files.(Files that exhibit deadlocks repeatedly give deadlocks until EVENTUALLY converting)<br />
+<br />
+On Windows, using a third party tool to limit the processor affinity to one processor seems to help a little, but, deadlocks still occur.<br />
+I'm unsure yet if anything helps on Ubuntu.  Since this is really meant for Windows debugging, I'll shy away from any more on Ubuntu, but, I believe I read somewhere that there was a thought that a Windows compiling tool may have introduced the problem.  Since the problem exists on Ubuntu also, the problem is quite possibly in the source code.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9091">
+          <th class="bugnote-public">
+            <img src="./mameavatars/fd147ae67bc288a89677f5c3a1492827.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09091</div>
+            <div class="bugnote-user">NekoEd</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Nov 12, 2012, 13:55</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            I think the best course of action at this point is to pepper the code with debug statements anywhere a deadlock might occur, report every lock obtained, print everything that's going on, etc. Just make the whole thing very verbose about the underlying details then let it run; eventually we may find where it's tripping over itself and hanging up....          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9092">
+          <th class="bugnote-public">
+            <img src="./mameavatars/3b0fed41222ffb23ff94995296e29f78.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09092</div>
+            <div class="bugnote-user">M.A.S.H.</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Nov 12, 2012, 18:48</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            I used Portable-VirtualBox and XP SP2 and have no problems with chdman hangings or other things.<br />
+<br />
+Portable-VirtualBox: <a href="http://www.vbox.me/" target="_blank">http://www.vbox.me/</a>  (...This program loads all necessary files and installed them for you!)<br />
+Operating System: Microsoft Windows<br />
+Version Windows XP<br />
+Memory: 512 MB<br />
+Shared Clipboard: Bidirectional<br />
+Extended Features: Non enabled<br />
+Video Memory: 32 MB<br />
+Shared Folders: D:\Temp + Full Access for the MAME/MESS HDDs<br />
+<br />
+NOTE: <br />
+- Copy chdman and HDDs into D:\Temp, start Portable-VirtualBox/XP and then command prompt.<br />
+- Type d:    ...for the Shared Folder<br />
+- Type chdman createhd -i j.raw -o new.chd      READY! ...or do other operation with your HDDs images :)          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9097">
+          <th class="bugnote-public">
+            <img src="./mameavatars/fd147ae67bc288a89677f5c3a1492827.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09097</div>
+            <div class="bugnote-user">NekoEd</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Nov 19, 2012, 14:00</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            M.A.S.H.: We've already determined that the issue doesn't occur on uniprocessor systems, only multiprocessor.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9145">
+          <th class="bugnote-public">
+            <img src="./mameavatars/cf2726b2e9e60bd69fac2756e734c156.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09145</div>
+            <div class="bugnote-user">haynor666</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">Dec 20, 2012, 20:58</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Self compiled 147u4 x64 and works on windows 7 professional x64 core i5 (at work). So far I managed conwert half of chds v4 to v5.<br />
+<br />
+Also I've recompressed carnevil on windows 7 home premium Core2Duo 3,20 GHz (at home).          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9237">
+          <th class="bugnote-public">
+            <img src="./mameavatars/8d88aff7c180775c7229c09d87c37538.jpg" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09237</div>
+            <div class="bugnote-user">Iaspis</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">Jan 15, 2013, 16:42</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Same as haynor, no problems here as well.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9249">
+          <th class="bugnote-public">
+            <img src="./mameavatars/fd147ae67bc288a89677f5c3a1492827.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09249</div>
+            <div class="bugnote-user">NekoEd</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Jan 19, 2013, 01:55</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            This was a pretty pervasive, nasty bug; I'd like a few more reports that it's fixed before we close it out.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9297">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09297</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Jan 29, 2013, 08:13</div>
+            <div class="bugnote-modified">edited on:  Jan 29, 2013, 08:16</div>            <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            nope, not fixed.<br />
+<br />
+just had it with a CD image for the first time too, and it again seems to be related to putting any extra strain on the I/O while CHDMAN works, in this case I'd left it converting PSX CDs all night, and it hung at the very point I went back to the PC in the morning and started trying to use it for something else at the same time causing heavy disk access while it restored everything.<br />
+<br />
+This really seems to be something to do with the i/o threading or i/o in general.<br />
+<br />
+It's worth noting that -c none was being used at the time, so COMPRESSION WAS TURNED OFF<br />
+<br />
+this again causes CHDMAN to write data more quickly, and is probably why I managed to trigger it on a CD image rather than the usual 0 fill areas of HDDs.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9299">
+          <th class="bugnote-public">
+            <img src="./mameavatars/fd147ae67bc288a89677f5c3a1492827.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09299</div>
+            <div class="bugnote-user">NekoEd</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Feb 1, 2013, 03:43</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Got it, still exists. Wow, this is a tough bug to squash. Keeping open since it's still there.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9300">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09300</div>
+            <div class="bugnote-user">Firewave</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Feb 1, 2013, 14:49</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Could I please have some very detailed information on the problem?<br />
+<br />
+What compiler did you use?<br />
+What build flags did you use?<br />
+What parameters did you use chdman with?<br />
+How many CPUs has your machine?<br />
+What was the exact input file it happened with?          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9301">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09301</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Feb 1, 2013, 18:52</div>
+            <div class="bugnote-modified">edited on:  Feb 1, 2013, 18:54</div>            <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            1) the official Windows ones, both old and new<br />
+2) the default ones, both 32-bit and 64-bit<br />
+3) default createhdd options, copy operations on HDD images, with or without compression, you name it, nothing special.<br />
+4) all machines I've seen it on are <br />
+5) it's random, but most typically it occurs on large HDD images with a significant amount of blank space.  I've had it *once* on a cd using -c none (out of around 6TB of CD conversions) - I couldn't reproduce it on an entirely blank image tho bizarrely, but maybe that's just a bit too 'clean' to trigger it.<br />
+<br />
+it seems most connected to doing thing that might cause heavy i/o or slow down one of the threads (which I guess heavy i/o would)<br />
+<br />
+it does NOT happen on a single core Win XP machine, not even once, as others have pointed out, it's a multi-core issue.<br />
+<br />
+i've seen it happen with -c none when creating CHDs for MESS (as well as the one time it's done it on a CD) so it isn't tied to any specific compression library.<br />
+<br />
+There are 5 different machines I've seen this on, it isn't a heating problem or RAM problem or HDD problem, the most flaky machine of the lot (the 32-bit XP box) is the one where it works!          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9312">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09312</div>
+            <div class="bugnote-user">Firewave</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Feb 8, 2013, 14:10</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            5) Could you give me exact names of images it happened with that can be found somewhere on the web?          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9542">
+          <th class="bugnote-public">
+            <img src="./mameavatars/8d88aff7c180775c7229c09d87c37538.jpg" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09542</div>
+            <div class="bugnote-user">Iaspis</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">May 24, 2013, 20:29</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            I can also confirm this is not happening on older single core &amp; XP machines (tested a few, already)          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9614">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09614</div>
+            <div class="bugnote-user">Firewave</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Jun 21, 2013, 17:29</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            r23841 fixes a hang when chd_file_compressor::async_read() fails and also improved the error reporting a bit. Maybe this helps with this issue.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9621">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09621</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Jun 26, 2013, 19:33</div>
+            <div class="bugnote-modified">edited on:  Jun 26, 2013, 19:34</div>            <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            still happens with latest code as of now.<br />
+<br />
+was trying to convert a taito type x hard drive (WDC WD400EB-11CPF0.img from Taisen Hot Gimmick Mix Party) and it hung at ~ 29.2 % on one machine and  ~ 40 % on another.<br />
+<br />
+CPU usage was 50% (rather than 100%) indicating one core has probably stalled.<br />
+<br />
+no error messages given.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9622">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09622</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Jun 26, 2013, 22:03</div>
+            <div class="bugnote-modified">edited on:  Jun 28, 2013, 19:35</div>            <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            ok, so far I've attempted this conversion 15 times across 5 different PCs and it's frozen at random points each and every time.<br />
+<br />
+I'm going to have to dig out the single core XP box at this rate!<br />
+<br />
+*edit* add another 5 attempts to that count..<br />
+<br />
+all in all it took over 40 attempts across 5 pcs to actually get 1 conversion that worked without stalling.  none of the machines have heat issues or drive problems, they can run stress test software night and day.  If other people aren't still seeing this I'm amazed.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9624">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09624</div>
+            <div class="bugnote-user">Firewave</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Jun 28, 2013, 15:43</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Worked for me on the first try and did three attempts in total each with a build compiled with a different compiler and they all came through. They were all unoptimized DEBUG=1 builds though.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9625">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09625</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Jun 28, 2013, 19:39</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            right, it seems to be less frequent, if at all happening with debug compiles. (converted 10/10 times with no problem here)<br />
+<br />
+with a regular build it still happens even if I turn *all* compression off so it isn't one of the compression routines either.<br />
+<br />
+we know it doesn't occur on single core machines either, however if DOES still occur on a dual core setup if you use the task manager to set 'affinity' to one core after CHDMAN has started, that makes no difference other than making it slower.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9626">
+          <th class="bugnote-public">
+            <img src="./mameavatars/fd147ae67bc288a89677f5c3a1492827.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09626</div>
+            <div class="bugnote-user">NekoEd</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Jun 29, 2013, 00:02</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            I'd say sprinkle it with debug printfs all over the place. Anywhere you think it could be hanging up, any time it takes a mutex or some other resource, make it print the grab and the release. Eventually we should be able to track down to around where in the code it's losing track of itself and crapping out.... hopefully.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9642">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09642</div>
+            <div class="bugnote-user">Firewave</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Jul 8, 2013, 09:16</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            I was able to reproduce this on a older machine with less CPUs and it hangs with waiting for compression results, but all the threads are waiting for be waked up. It seems more prone to happen with less threads and looks like the relation between livethreads and the active flag of the thread might be the issue. It should be reproducible on modern machines with -np 2.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c9644">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.09644</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Jul 9, 2013, 13:58</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            it happens even with compression turned off tho? (-c none or whatever the current option for that is)          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c10075">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.10075</div>
+            <div class="bugnote-user">Gherry</div>            <div class="bugnote-user-level">Tester</div>
+            
+            <div class="bugnote-submit">Dec 17, 2013, 07:50</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Hi,<br />
+I can confirm that chdman still randomly hangs.<br />
+<br />
+First of all my hardware specs:<br />
+Core 2 Duo E8200, 6GB RAM, OS Win7 64bit<br />
+<br />
+On computer the -np option doesn't work: cpu is always 100% capped, even with -np1.<br />
+<br />
+<br />
+That said, I still had to convert old .chd from v4 to v5 and since I finally had some spare time I started doing it <br />
+(I used chdman from .149 and .151 precompiled packages from mamedev.org) same behavior with both versions.<br />
+<br />
+Most of the chds converted without any problems, but few hanged.<br />
+Basically the prompt hangs and cpu utilization goes from 100% (both cores) to only 100% on one core.<br />
+<br />
+Since I read that it was (probably) a problem with multi-core I tried running chdman in a virtual machine on the same pc (virtualbox guest: win7) with only one core and chdman finished the operation without any problem.<br />
+<br />
+<br />
+Behavior is really weird, the same chd hangs one time at 30% and the next time at 97%.<br />
+These 4 chds gave me more trouble than most (I couldn't convert them even in multiple tries)<br />
+jnero - jn010108.chd<br />
+bmiidx - c44jaa03.chd<br />
+sf2049se - sf2049se.chd<br />
+sf2049te - sf2049te.chd<br />
+<br />
+Since all of the 4 converted on the first go on the VM with one core, I'd say it's 90% related with multi-core code.<br />
+<br />
+Sorry I cannot be more specific, if needed I can run some test, just let me know.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c10076">
+          <th class="bugnote-public">
+            <img src="./mameavatars/fd147ae67bc288a89677f5c3a1492827.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.10076</div>
+            <div class="bugnote-user">NekoEd</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Dec 17, 2013, 18:58</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Thank you, Gherry. It's always good to have updates on outstanding bugs, and your information may prove to be valuable in helping to track down the issue.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c10083">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.10083</div>
+            <div class="bugnote-user">Haze</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Dec 20, 2013, 08:25</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            smf added a hack / some code so that if you set an environmental variable it forces MAME to only only a single thread for i/o, which prevents the hangs on dual core systems, doesn't really solve the issue because it's an undocumented workaraound, but points in the same direction as everything else, the MAME I/O code isn't threadsafe.          </td>
+        </tr>
+        
+        <tr class="bugnote" id="c11340">
+          <th class="bugnote-public">
+            <img src="./images/no_avatar.png" class="avatar" alt="User avatar">            <div class="bugnote-id">No.11340</div>
+            <div class="bugnote-user">Firewave</div>            <div class="bugnote-user-level">Senior Tester</div>
+            
+            <div class="bugnote-submit">Jan 2, 2015, 13:58</div>
+                        <div class="bugnote-buttons">
+                        </div>
+          </th>
+          <td class="largefont bugnote-note-public">
+            Several data race &quot;fixes&quot; based on ThreadSanitizer warnings have been applied to the sdlwork.c/winwork.c code for 0.158. There's still some data races in the CHD code though.<br />
+<br />
+We should add a separate issue though if there are still issues with the -np parameter for chdman instead of discussing it in here.          </td>
+        </tr>
+            </table>
+  </div>
+</section>
+
+</div>    </main>
+    </div><!--/.content-->
+
+    <footer>
+      <div class="footer-row">
+        <div class="footer-col footer-logo"></div>
+        <div class="footer-col">
+          <dl>
+            <dt>Project Coordinators</dt>
+            <dd>Fujix, Tafoid, B2K24</dd>
+            <dt>Project Founders</dt>
+            <dd>RocLobsta, KiLLerCloWn</dd>
+            <dt>MT Hall of Fame</dt>
+            <dd>Mevi, The Dog, Karasu, Shifty, tECHIDNA, Uncle Vom, etabeta, Smitdogg</dd>
+            <dt>Server Host</dt>
+            <dd>Fujix</dd>
+          </dl>
+        </div>
+        <div class="footer-col">
+          <div class="logo-mantis"><a href="http://www.mantisbt.org" title="Free Web Based Bug Tracker"><img src="./testersimgs/mantis_logo_button.png" alt="Powered by Mantis Bugtracker" id="ico_mantis"></a><br> Powered by Mantis Bugtracker</div>
+
+          MAME Testers &copy; 1999 - 2026<br>
+          Process Time: 0.000000 seconds.<br><br>
+
+        </div>
+      </div>
+    </footer>
+      <div id="backtotop"></div>
+  </body>
+  </html>

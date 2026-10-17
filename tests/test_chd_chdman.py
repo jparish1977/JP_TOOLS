@@ -5,25 +5,41 @@ chd.py against a real chdman: every command that writes a CHD, read back
 and compared byte for byte with what went in. The fake-tool suite asserts the
 arguments; this one proves chdman accepts them.
 
-    python tests/test_chd_chdman.py
-
 Needs chdman on PATH (Debian/Ubuntu: mame-tools). Without it this prints
 SKIP and runs nothing.
+
+Each test holds chdman's stall to STALL seconds. chdman hangs now and then
+making a child CHD on a loaded box, 0.264 and 0.289 alike (7 and 13 in
+1600 with eight at once: tools/lab/chdman-delta-hang.sh,
+oob/chdman-hangs/CHDMAN-NOTE.md), and at the real 600 s the suite's own
+timeout would end first. These images are a few hundred KB, so a call
+silent this long is hung; the watchdog kills it and runs it once more.
+
+    python tests/test_chd_chdman.py
 """
 
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from unittest import mock
 
 from _harness import check, check_true, run
 from chd_support import cli
 from chdmap.header import read_header
 from chdmap.hunkmap import Kind, read_map
+from chdtool import chdman as chdman_mod
 from chdtool.chdman import WINDOWS_CHDMAN
 from platformtools.tools import find_tool
 
 SECTOR = 2048
+STALL = 20.0
+
+
+def _short_stall(test: Callable[[], None]) -> Callable[[], None]:
+    """TEST run with chdman's stall held to STALL."""
+    return mock.patch.object(chdman_mod, "CHDMAN_STALL", STALL)(test)
 
 
 def _image(path: Path, sectors: int, seed: int) -> bytes:
@@ -32,6 +48,7 @@ def _image(path: Path, sectors: int, seed: int) -> bytes:
     return data
 
 
+@_short_stall
 def test_raw_image_round_trip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         w = Path(tmp)
@@ -45,6 +62,7 @@ def test_raw_image_round_trip() -> None:
         check("compare same content", cli("compare", str(w / "a.chd"), str(w / "c.chd"))[0], 0)
 
 
+@_short_stall
 def test_delta_then_merge_round_trip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         w = Path(tmp)
@@ -77,6 +95,7 @@ def _decoded(chd: Path) -> tuple[int, int]:
     return (sum(h.kind is Kind.SELF for h in hunks), sum(h.kind is Kind.PARENT for h in hunks))
 
 
+@_short_stall
 def test_hunkmap_agrees_with_chdman() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         w = Path(tmp)
@@ -95,6 +114,7 @@ def test_hunkmap_agrees_with_chdman() -> None:
         check_true("the image did have duplicates", _decoded(w / "d.chd")[0] > 0)
 
 
+@_short_stall
 def test_cd_extracts_to_a_cue_sheet() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         w = Path(tmp)

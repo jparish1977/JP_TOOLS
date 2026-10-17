@@ -9,7 +9,6 @@ every copy caught (OSError, AttributeError); on Windows ctypes.CDLL(None)
 raises TypeError, so every one of them died on its first line there.
 """
 
-import contextlib
 import ctypes
 import sys
 
@@ -18,8 +17,11 @@ COMM_MAX = 15     # the kernel keeps this many bytes of a name
 
 
 def name_process(name: str) -> None:
-    """Set this process's name to NAME (cut to COMM_MAX bytes), on Linux only."""
+    """Set this process's name to NAME (cut to COMM_MAX bytes), on Linux only.
+    A Linux that cannot (no libc, no prctl) runs on unnamed, and says so."""
     if not sys.platform.startswith("linux"):
         return
-    with contextlib.suppress(OSError, AttributeError, TypeError, ValueError):  # reason: no libc, no prctl, or a loader that will not take None (Windows); unnamed is never fatal
+    try:
         ctypes.CDLL(None).prctl(PR_SET_NAME, name.encode()[:COMM_MAX], 0, 0, 0)
+    except (OSError, AttributeError, TypeError, ValueError) as e:  # reason: unnamed is never fatal; it is said, so a missing name has a cause on record
+        sys.stderr.write(f"procname: could not name this process {name!r}: {e}\n")

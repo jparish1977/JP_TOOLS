@@ -180,26 +180,22 @@ def run_prettier(target: str) -> dict[str, Any]:
     if not cmd:
         return _tool_missing("prettier", NPM_INSTALL)
     result = subprocess.run([cmd, "--check", target], capture_output=True, text=True, check=False, env=_plain_env())
-    issues = []
-    for line in (strip_ansi(result.stdout + result.stderr)).splitlines():
-        line = line.strip()
-        if line.startswith("[warn]"):
-            fp = line[len("[warn]"):].strip()
-            # prettier ends --check with a summary on its own [warn] line:
-            # "Code style issues found in the above file. Run Prettier with
-            # --write to fix." (prettier 2: "... Forgot to run Prettier?").
-            # Read as a filename, it would count every unformatted file twice.
-            if fp.startswith("Code style issues"):
-                continue
-            issues.append({
-                "file":     fp,
-                "line":     0,
-                "col":      0,
-                "severity": "warning",
-                "rule":     "prettier/formatting",
-                "message":  "File is not formatted correctly",
-                "fixable":  True,
-            })
+    warned = [line.strip()[len("[warn]"):].strip()
+              for line in strip_ansi(result.stdout + result.stderr).splitlines()
+              if line.strip().startswith("[warn]")]
+    # prettier ends --check with a summary on its own [warn] line: "Code style
+    # issues found in the above file. Run Prettier with --write to fix."
+    # (prettier 2: "... Forgot to run Prettier?"). Read as a filename, it would
+    # count every unformatted file twice.
+    issues = [{
+        "file":     fp,
+        "line":     0,
+        "col":      0,
+        "severity": "warning",
+        "rule":     "prettier/formatting",
+        "message":  "File is not formatted correctly",
+        "fixable":  True,
+    } for fp in warned if not fp.startswith("Code style issues")]
     return _tool_result("prettier", issues, result)
 
 

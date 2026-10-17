@@ -346,7 +346,7 @@ def test_record_baseline() -> None:
             "files": files,
         }
         text = json.dumps(expected, indent=1, sort_keys=True) + "\n"
-        with mock.patch.object(baseline, "per_file_checks", lambda _t: checks), \
+        with mock.patch.object(baseline, "per_file_checks", lambda _t, tools=None: checks), \
                 mock.patch.object(baseline, "_repo_root", lambda _t: top), \
                 mock.patch.object(baseline, "_tool_version", lambda t: f"v-{t}"), \
                 mock.patch.object(baseline, "time", types.SimpleNamespace(strftime=lambda fmt: fmt)), \

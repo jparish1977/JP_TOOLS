@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import errno
 import os
 import stat
@@ -74,10 +73,14 @@ def _component_note(rel: str, part: str, fd: int, exc: OSError) -> str:
     reopen the path.
     """
     if exc.errno in (errno.ELOOP, errno.ENOTDIR):
-        with contextlib.suppress(OSError):  # reason: the lstat is for the message only, after the refusal; a failed one loses the symlink detail
-            if stat.S_ISLNK(os.lstat(part, dir_fd=fd).st_mode):
-                return (f"{safe_name(rel)} (refused: {safe_name(part)} is "
-                        "a symlink, NOT followed)")
+        try:
+            link = stat.S_ISLNK(os.lstat(part, dir_fd=fd).st_mode)
+        except OSError as e:  # reason: the lstat is for the message only, after the refusal; the message says it could not tell
+            return (f"{safe_name(rel)} (could not reach it: {exc.__class__.__name__}; whether "
+                    f"{safe_name(part)} is a symlink is unknown: {e.__class__.__name__})")
+        if link:
+            return (f"{safe_name(rel)} (refused: {safe_name(part)} is "
+                    "a symlink, NOT followed)")
     return f"{safe_name(rel)} (could not reach it: {exc.__class__.__name__})"
 
 

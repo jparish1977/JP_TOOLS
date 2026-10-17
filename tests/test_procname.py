@@ -15,6 +15,7 @@ WHY
 """
 
 import ctypes
+import io
 import subprocess
 import sys
 from unittest.mock import patch
@@ -35,29 +36,43 @@ class _Exploding:
         raise self.error
 
 
-def _with(platform: str, cdll: _Exploding) -> tuple[bool, int]:
-    """(whether name_process raised, how often it called CDLL) on PLATFORM."""
-    with patch.object(sys, "platform", platform), patch.object(ctypes, "CDLL", cdll):
-        try:
-            procname.name_process("jp-test")
-            raised = False
-        except Exception:  # noqa: BLE001  # reason: the property under test is that nothing escapes
-            raised = True
-    return raised, cdll.calls
+def _with(platform: str, cdll: _Exploding) -> tuple[int, str]:
+    """(how often name_process called CDLL, what it wrote on stderr) on
+    PLATFORM. Anything it raised fails the calling test (the harness)."""
+    err = io.StringIO()
+    with patch.object(sys, "platform", platform), patch.object(ctypes, "CDLL", cdll), patch.object(sys, "stderr", err):
+        procname.name_process("jp-test")
+    return cdll.calls, err.getvalue()
 
 
 def test_off_linux_libc_is_never_touched() -> None:
     for platform in ("win32", "darwin"):
-        raised, calls = _with(platform, _Exploding(RuntimeError("must not be called")))
-        check(f"{platform}: never raises, never calls CDLL", (raised, calls), (False, 0))
+        check(f"{platform}: never calls CDLL, says nothing",
+              _with(platform, _Exploding(RuntimeError("must not be called"))), (0, ""))
 
 
 def test_a_libc_that_will_not_load_is_never_fatal() -> None:
     """TypeError is what CDLL(None) raises on Windows (measured there)."""
     for error in (TypeError("LoadLibrary() argument 1 must be str, not None"),
-                  OSError("no libc"), AttributeError("no prctl")):
-        raised, calls = _with("linux", _Exploding(error))
-        check(f"linux, CDLL raising {type(error).__name__}: never raises", (raised, calls), (False, 1))
+                  OSError("no libc"), AttributeError("no prctl"), ValueError("embedded null byte")):
+        check(f"linux, CDLL raising {type(error).__name__}: runs on unnamed, and says why",
+              _with("linux", _Exploding(error)), (1, f"procname: could not name this process 'jp-test': {error}\n"))
+
+
+def test_the_call_it_makes() -> None:
+    """The kernel call itself, in this process (the run below is in another,
+    which loads the checkout's own copy): PR_SET_NAME with the name cut to
+    the kernel's 15 bytes, the other three arguments zero."""
+    calls: list[tuple[object, ...]] = []
+
+    class Libc:
+        def prctl(self, *args: object) -> int:
+            calls.append(args)
+            return 0
+
+    with patch.object(sys, "platform", "linux"), patch.object(ctypes, "CDLL", lambda _: Libc()):
+        procname.name_process("jp-procname-test-long")
+    check("prctl(15, the name's first 15 bytes, 0, 0, 0)", calls, [(15, b"jp-procname-tes", 0, 0, 0)])
 
 
 def test_names_the_process_on_linux() -> None:

@@ -66,6 +66,11 @@ jobs:
   python:
     name: Python and shell (ruff, mypy, shellcheck, suites, coverage)
     runs-on: fleet-ci
+    # The PR mutation job's volume, for the mutant specs' kept verdicts in its
+    # spec-cache/ (see the Mutant specs step).
+    container:
+      image: fleet-ci:current
+      options: -v jp-tools-mutmut-pr:/mutmut-pr
     steps:
       # A job as root reads a mode-000 file anyway, so the permission tests
       # skip and nothing says so; and root widens any escape from the job's
@@ -233,6 +238,9 @@ jobs:
       # killed on target has its whole output printed after. CI_WORKERS runs
       # at once, as the other steps. The copies go in a temporary directory:
       # the job runs as fleet-ci, which cannot write the checkout's parent.
+      # A spec whose every mutant was killed is kept in the volume and not
+      # run again while nothing its runs read has changed (mutate-spec.py,
+      # KEPT VERDICTS); its line says "kept".
       - name: Mutant specs
         if: always()
         shell: bash
@@ -241,7 +249,7 @@ jobs:
           copies=$(mktemp -d)
           shopt -s nullglob
           set +e
-          MUTATE_OUT_DIR="$out" MUTATE_COPY_DIR="$copies" \
+          MUTATE_OUT_DIR="$out" MUTATE_COPY_DIR="$copies" MUTATE_CACHE_DIR=/mutmut-pr/spec-cache \
             python mutate-spec.py --jobs "$CI_WORKERS" . tests/mutants/*.json
           rc=$?
           for f in "$out"/*.mutate.out; do

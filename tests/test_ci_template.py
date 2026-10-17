@@ -22,7 +22,8 @@ WHAT IS CHECKED
       cannot write the workspace's parent); no step clones JP_TOOLS from a
       fixed URL; every `uses:` is an actions/* action.
     - The template's text names no host or owner internal to one forge.
-    Control: master's template before this change fails all of it.
+    Control: templates with each fault, kept in tests/fixtures/ci-template/,
+    fail all of it.
 
     The PHP install takes only the dev packages composer.json's
     extra.jp-tools-gate names. The others are libraries JP_TOOLS' own scripts
@@ -58,23 +59,17 @@ WORKFLOWS = (ROOT / ".github" / "workflows" / "check.yml", TEMPLATE, NIGHTLY)
 REPOSITORY = "${{ vars.JP_TOOLS_REPOSITORY || 'jparish1977/JP_TOOLS' }}"
 TOKEN = "${{ secrets.JP_TOOLS_TOKEN || github.token }}"
 INTERNAL = ("iteration8", "ts.net", "joe/", ":3000", ":2222")
-# The controls read the template at a past master commit. A history rewrite
-# gives every commit a new id, so these must be remapped after one; a commit
-# that is not in the clone fails the control rather than skipping it.
-BEFORE = "7e00ba9"      # master before the template took its source from a variable
-BEFORE_TESTS_JOB = "93fc0d4"  # master before #140 added the tests job
-BEFORE_LAYOUT = "5da564d"     # master while JP_TOOLS was moved to the workspace's parent
+# The controls' inputs: templates with each fault these checks catch, kept as
+# files so a control runs on the checkout alone.
+CONTROLS = ROOT / "tests" / "fixtures" / "ci-template"
+FIXED_CLONE = "fixed-github-clone.yml"        # JP_TOOLS cloned from a fixed URL, setup-php
+NO_TESTS_JOB = "no-tests-job.yml"             # the template before it had a tests job
+OUTSIDE_WORKSPACE = "jp-tools-outside-workspace.yml"  # JP_TOOLS moved to the workspace's parent
 
 
-def template_at(commit: str) -> str | None:
-    """The template's text at COMMIT, or None, recorded as a failure, when the
-    clone does not have it."""
-    r = subprocess.run(["git", "-C", str(ROOT), "show", f"{commit}:templates/ci-check.yml"],
-                       capture_output=True, text=True, check=False)
-    if r.returncode != 0:
-        check(f"control: {commit} is in this clone's history", r.stderr.strip(), "")
-        return None
-    return r.stdout
+def control_template(name: str) -> str:
+    """A control template's text."""
+    return (CONTROLS / name).read_text(encoding="utf-8")
 
 
 def actionlint(path: Path) -> tuple[int, str]:
@@ -156,10 +151,8 @@ def test_the_template_is_forge_neutral() -> None:
     check("the nightly template has nothing wrong", findings(NIGHTLY.read_text(encoding="utf-8")), [])
 
 
-def test_control_master_before_the_change_fails() -> None:
-    old_text = template_at(BEFORE)
-    if old_text is None:
-        return
+def test_control_a_faulty_template_fails() -> None:
+    old_text = control_template(FIXED_CLONE)
     wrong = findings(old_text)
     check_true("control: the old template's fixed GitHub clone is caught",
                "a fixed JP_TOOLS clone URL" in wrong)
@@ -172,16 +165,14 @@ def test_control_master_before_the_change_fails() -> None:
         old.write_text(old_text, encoding="utf-8")
         rc, out = actionlint(old)
     check_true("control: actionlint reports the old template's SC2086", rc == 1 and "SC2086" in out)
-    old_text = template_at(BEFORE_LAYOUT)
-    if old_text is not None:
-        check("control: the template that moved JP_TOOLS to the workspace's parent is caught, in both jobs",
-              _layout_findings(old_text),
-              ["check: the project is not checked out at project/ and JP_TOOLS at JP_TOOLS/",
-               "check: steps do not run from project/",
-               "check: a step moves JP_TOOLS out of the workspace",
-               "tests: the project is not checked out at project/ and JP_TOOLS at JP_TOOLS/",
-               "tests: steps do not run from project/",
-               "tests: a step moves JP_TOOLS out of the workspace"])
+    check("control: a template that moves JP_TOOLS to the workspace's parent is caught, in both jobs",
+          _layout_findings(control_template(OUTSIDE_WORKSPACE)),
+          ["check: the project is not checked out at project/ and JP_TOOLS at JP_TOOLS/",
+           "check: steps do not run from project/",
+           "check: a step moves JP_TOOLS out of the workspace",
+           "tests: the project is not checked out at project/ and JP_TOOLS at JP_TOOLS/",
+           "tests: steps do not run from project/",
+           "tests: a step moves JP_TOOLS out of the workspace"])
 
 
 # What check.py's PHP runners and measures call from vendor: phpstan, phpcs and
@@ -751,10 +742,8 @@ def test_the_gate_steps_stop_at_the_first_failure() -> None:
           (1, [fetch, run_, results, gate]))
 
 
-def test_control_master_before_the_change_has_no_tests_job() -> None:
-    old_text = template_at(BEFORE_TESTS_JOB)
-    if old_text is not None:
-        check("control: the template before #140 has no tests job", tests_job(old_text), {})
+def test_control_a_template_with_no_tests_job() -> None:
+    check("control: a template with no tests job has none", tests_job(control_template(NO_TESTS_JOB)), {})
 
 
 if __name__ == "__main__":
