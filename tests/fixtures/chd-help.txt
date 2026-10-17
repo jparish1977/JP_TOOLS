@@ -1,0 +1,216 @@
+== chd.py --help
+usage: chd.py [-h]
+              {create,verify,extract,info,delta,merge,compare,convert,import,batch-create,batch-verify,batch-import,import-tools}
+              ...
+
+CHD archive management: a wrapper for MAME's chdman.
+
+Create, verify, extract, compare and re-compress CHD archives of disc images
+and raw disk dumps, one file or a whole directory at a time.
+
+Usage:
+    python chd.py create <input> <output.chd> [options]
+    python chd.py verify <file.chd>
+    python chd.py extract <file.chd> <output>
+    python chd.py info <file.chd> [--json]
+    python chd.py delta <parent.chd> <child-input> <child.chd>
+    python chd.py merge <parent.chd> <child.chd> <output.chd>
+    python chd.py compare <file1.chd> <file2.chd>
+    python chd.py convert <input.chd> <output.chd> [--compression <type>]
+    python chd.py import <input> [<output.chd>]
+    python chd.py batch-create <directory> [--format <ext>] [--delete-originals]
+    python chd.py batch-verify <directory>
+    python chd.py batch-import <directory> [--format <ext>] [--delete-originals]
+    python chd.py import-tools
+
+chdman reads .iso .img .bin .raw directly (createraw) and .cue .gdi .toc as
+CDs (createcd). `import` also takes .cso .zso .dax .pbp .nrg .mdf .ecm and
+.7z .zip .rar .gz archives, converting with the tools `import-tools` lists.
+
+A cue, gdi or toc sheet and the track files it names are one disc: batches
+convert the sheet, not its tracks on their own, and --delete-originals
+deletes the tracks with it, never anything outside the sheet's directory.
+
+Examples:
+    python chd.py create game.iso game.chd
+    python chd.py create disk.img disk.chd --compression lzma
+    python chd.py create game.cue game.chd                     # CD with cue sheet
+    python chd.py delta base.chd updated.img updated.chd       # child of base.chd
+    python chd.py merge base.chd updated.chd standalone.chd    # child made whole
+    python chd.py batch-create ~/roms/psx --format iso
+    python chd.py batch-verify ~/roms/chd
+
+Exit status: the failing chdman or converter status, 1 for a missing input
+or any failed file in a batch, 2 when a required program is not installed.
+`compare` exits 0 for identical, 1 for different, 2 for unreadable.
+
+positional arguments:
+  {create,verify,extract,info,delta,merge,compare,convert,import,batch-create,batch-verify,batch-import,import-tools}
+                        Command to run
+    create              Create CHD from disc image or raw dump
+    verify              Verify CHD integrity
+    extract             Extract CHD to a cue sheet (CDs) or raw image
+    info                Show CHD metadata
+    delta               Create delta (child) CHD from parent
+    merge               Merge child CHD with its parent into a standalone CHD
+    compare             Compare two CHD files
+    convert             Re-compress CHD with different settings
+    import              Convert any disc image format to CHD
+    batch-create        Convert all matching files in a directory
+    batch-verify        Verify all CHDs in a directory
+    batch-import        Convert all disc images in a directory to CHD
+    import-tools        Show which format conversion tools are installed
+
+options:
+  -h, --help            show this help message and exit
+== chd.py create --help
+usage: chd.py create [-h] [--compression {default,lzma,zlib,flac,none,best,fast}]
+                     [--hunk-size HUNK_SIZE] [--force] [--dry-run]
+                     input output
+
+positional arguments:
+  input                 Input file (.iso, .img, .bin, .raw, .cue, .gdi, .toc)
+  output                Output CHD file
+
+options:
+  -h, --help            show this help message and exit
+  --compression {default,lzma,zlib,flac,none,best,fast}
+                        Compression preset
+  --hunk-size HUNK_SIZE
+                        Hunk size in bytes, a multiple of 512 (default: auto)
+  --force               Overwrite existing output
+  --dry-run             Print what would run, and run nothing
+== chd.py verify --help
+usage: chd.py verify [-h] file
+
+positional arguments:
+  file        CHD file to verify
+
+options:
+  -h, --help  show this help message and exit
+== chd.py extract --help
+usage: chd.py extract [-h] [--force] [--dry-run] file output
+
+positional arguments:
+  file        CHD file to extract
+  output      Output file (a .cue for a CD)
+
+options:
+  -h, --help  show this help message and exit
+  --force     Overwrite existing output
+  --dry-run   Print what would run, and run nothing
+== chd.py info --help
+usage: chd.py info [-h] [--json] file
+
+positional arguments:
+  file        CHD file
+
+options:
+  -h, --help  show this help message and exit
+  --json      Output as JSON
+== chd.py delta --help
+usage: chd.py delta [-h] [--dry-run] parent input output
+
+positional arguments:
+  parent      Parent CHD file
+  input       Input file for child
+  output      Output child CHD file
+
+options:
+  -h, --help  show this help message and exit
+  --dry-run   Print what would run, and run nothing
+== chd.py merge --help
+usage: chd.py merge [-h] [--force] [--dry-run] parent child output
+
+positional arguments:
+  parent      Parent CHD file the child was made against
+  child       Child CHD file
+  output      Output standalone CHD file
+
+options:
+  -h, --help  show this help message and exit
+  --force     Overwrite existing output
+  --dry-run   Print what would run, and run nothing
+== chd.py compare --help
+usage: chd.py compare [-h] file1 file2
+
+positional arguments:
+  file1       First CHD file
+  file2       Second CHD file
+
+options:
+  -h, --help  show this help message and exit
+== chd.py convert --help
+usage: chd.py convert [-h] [--compression {default,lzma,zlib,flac,none,best,fast}] [--force]
+                      [--dry-run]
+                      input output
+
+positional arguments:
+  input                 Input CHD file
+  output                Output CHD file
+
+options:
+  -h, --help            show this help message and exit
+  --compression {default,lzma,zlib,flac,none,best,fast}
+                        Compression preset
+  --force               Overwrite existing output
+  --dry-run             Print what would run, and run nothing
+== chd.py import --help
+usage: chd.py import [-h] [--compression {default,lzma,zlib,flac,none,best,fast}] [--force]
+                     [--keep-intermediate] [--dry-run]
+                     input [output]
+
+positional arguments:
+  input                 Input file (ISO, CSO, PBP, NRG, MDF, ECM, CUE, GDI, 7z, zip, ...)
+  output                Output CHD file (default: same name with .chd)
+
+options:
+  -h, --help            show this help message and exit
+  --compression {default,lzma,zlib,flac,none,best,fast}
+  --force               Overwrite existing output
+  --keep-intermediate   Keep converted and extracted files after conversion
+  --dry-run             Print what would run, and run nothing
+== chd.py batch-create --help
+usage: chd.py batch-create [-h] [--format FORMAT] [--delete-originals] [--force] [--dry-run]
+                           directory
+
+positional arguments:
+  directory           Directory to scan
+
+options:
+  -h, --help          show this help message and exit
+  --format FORMAT     File extensions to convert (comma-separated, e.g. iso,bin,cue)
+  --delete-originals  Delete each original (and a sheet's tracks) once its CHD is made
+  --force             Overwrite existing output
+  --dry-run           Print what would run, and run nothing
+== chd.py batch-verify --help
+usage: chd.py batch-verify [-h] [--json] directory
+
+positional arguments:
+  directory   Directory to scan
+
+options:
+  -h, --help  show this help message and exit
+  --json      Output summary as JSON
+== chd.py batch-import --help
+usage: chd.py batch-import [-h] [--format FORMAT]
+                           [--compression {default,lzma,zlib,flac,none,best,fast}]
+                           [--delete-originals] [--keep-intermediate] [--force] [--dry-run]
+                           directory
+
+positional arguments:
+  directory             Directory to scan
+
+options:
+  -h, --help            show this help message and exit
+  --format FORMAT       File extensions to convert (comma-separated)
+  --compression {default,lzma,zlib,flac,none,best,fast}
+  --delete-originals    Delete each original (and a sheet's tracks) once its CHD is made
+  --keep-intermediate   Keep converted and extracted files after conversion
+  --force               Overwrite existing output
+  --dry-run             Print what would run, and run nothing
+== chd.py import-tools --help
+usage: chd.py import-tools [-h]
+
+options:
+  -h, --help  show this help message and exit

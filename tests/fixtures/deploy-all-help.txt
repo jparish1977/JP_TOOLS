@@ -1,0 +1,24 @@
+usage: deploy-all.py [-h] [--dry-run] [--skip-s3] [--skip-pages] project bucket
+
+Deploy a project to S3 and GitHub Pages in one command.
+
+Usage:
+    python deploy-all.py <project-dir> <s3-bucket> [--dry-run] [--skip-s3] [--skip-pages]
+
+Steps:
+    1. Refuse unless the project is on master or main, with a clean tree
+    2. Merge that branch into gh-pages (when a gh-pages branch exists) and push it
+    3. Deploy the project to the S3 bucket with deploy-s3.py
+    4. Always end back on the branch it started from, whatever failed
+
+Exit status: 0 deployed, 1 a refusal or any failed step.
+
+positional arguments:
+  project       Path to the project directory
+  bucket        S3 bucket name
+
+options:
+  -h, --help    show this help message and exit
+  --dry-run     Show what would happen
+  --skip-s3     Skip S3 deploy
+  --skip-pages  Skip GitHub Pages sync
