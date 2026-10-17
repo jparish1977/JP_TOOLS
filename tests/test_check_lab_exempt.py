@@ -12,7 +12,9 @@ THE RULE THIS PINS DOWN
     lacks the tested-against field would pass a plain `in` test. That case is
     here.
 
-Skips without ruff, which is what produces the finding.
+The claim itself (jpcheck.lab) is also checked in-process, first and without
+ruff, so mutation testing sees it: check.py in a child process is not seen.
+The rest skips without ruff, which is what produces the finding.
 
     python3 tests/test_check_lab_exempt.py
 """
@@ -25,6 +27,7 @@ import tempfile
 from pathlib import Path
 
 from _harness import ROOT
+from jpcheck.lab import _repo_root_of, lab_claim
 
 CHECK_PY = ROOT / "check.py"
 
@@ -56,7 +59,26 @@ def run(target: Path) -> tuple[int, dict[str, object]]:
         return r.returncode, {"raw": r.stdout + r.stderr}
 
 
+def claim_in_process() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td).resolve() / "repo"
+        (repo / ".git").mkdir(parents=True)
+        lab = repo / "tools" / "lab"
+        lab.mkdir(parents=True)
+        f = lab / "probe.py"
+        f.write_text(HEADER, encoding="utf-8")
+        nested = Path(td).resolve() / "lab" / "other"
+        (nested / ".git").mkdir(parents=True)
+        g = nested / "x.py"
+        g.write_text(HEADER, encoding="utf-8")
+        got = (_repo_root_of(f), _repo_root_of(g), lab_claim(f), lab_claim(g))
+        check("in-process: each file's repository found by its .git, a lab file claims, "
+              "a repo under a directory called lab does not",
+              got == (repo, nested, True, False), repr(got))
+
+
 def main() -> int:
+    claim_in_process()
     if not shutil.which("ruff"):
         print("SKIP: ruff not found, check.py cannot produce a finding")
         return 0

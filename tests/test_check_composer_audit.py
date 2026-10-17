@@ -30,7 +30,7 @@ from typing import Any
 
 from _harness import ROOT, check, check_true, run
 from fake_tools import fake_tools
-from jpcheck.php_tools import _composer_issues, run_composer_audit
+from jpcheck.php_tools import _composer_cmd, _composer_issues, run_composer_audit
 
 EMPTY = '{\n    "advisories": [],\n    "abandoned": []\n}\n'
 NO_KEY = '{"abandoned": []}'
@@ -66,6 +66,21 @@ def gate_exit(stdout: str) -> int:
         return subprocess.run([sys.executable, str(ROOT / "check.py"), str(work),
                                "--tools", "composer-audit"],
                               capture_output=True, text=True, check=False).returncode
+
+
+def test_the_audit_command() -> None:
+    audit_json = ["audit", "--format=json"]
+    check("composer as found, run directly", _composer_cmd("/usr/bin/php", "/usr/bin/composer"),
+          ["/usr/bin/composer", *audit_json])
+    check("composer with no php, run directly", _composer_cmd(None, "/usr/bin/composer"),
+          ["/usr/bin/composer", *audit_json])
+    check("a .bat shim, run through php", _composer_cmd("php.exe", r"C:\c\composer.bat"),
+          ["php.exe", r"C:\c\composer.bat", *audit_json])
+    check("php and no composer: php runs composer by name", _composer_cmd("php.exe", None),
+          ["php.exe", "composer", *audit_json])
+    check("a .bat shim and no php: the shim, as it is", _composer_cmd(None, r"C:\c\composer.bat"),
+          [r"C:\c\composer.bat", *audit_json])
+    check("neither: nothing to run", _composer_cmd(None, None), None)
 
 
 def test_parse() -> None:
