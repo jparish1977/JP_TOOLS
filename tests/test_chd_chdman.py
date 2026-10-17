@@ -11,9 +11,14 @@ SKIP and runs nothing.
 Each test holds chdman's stall to STALL seconds. chdman hangs now and then
 making a child CHD on a loaded box, 0.264 and 0.289 alike (7 and 13 in
 1600 with eight at once: tools/lab/chdman-delta-hang.sh,
-oob/chdman-hangs/CHDMAN-NOTE.md), and at the real 600 s the suite's own
-timeout would end first. These images are a few hundred KB, so a call
-silent this long is hung; the watchdog kills it and runs it once more.
+oob/chdman-hangs/CHDMAN-NOTE.md). These images are a few hundred KB and
+take about 0.2 s, so a call silent this long is hung; the watchdog kills it
+and runs it once more. The kill comes up to a second (run_watched's poll)
+after STALL, and kill plus rerun stays under the shortest time mutmut gives a
+mutant's tests, (estimate + timeout_constant 1) x timeout_multiplier 5 x 2
+seconds of CPU, halved for the wall clock: 5 s with a zero estimate. At
+anything longer a hang ends the mutant's run first, mutmut counts it a
+timeout, and the gate counts a timeout as a kill, so a survivor hides.
 
     python tests/test_chd_chdman.py
 """
@@ -34,7 +39,7 @@ from chdtool.chdman import WINDOWS_CHDMAN
 from platformtools.tools import find_tool
 
 SECTOR = 2048
-STALL = 20.0
+STALL = 2.0
 
 
 def _short_stall(test: Callable[[], None]) -> Callable[[], None]:
