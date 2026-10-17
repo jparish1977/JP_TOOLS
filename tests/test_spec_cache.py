@@ -868,6 +868,23 @@ def test_a_runs_own_gitdir_is_no_input() -> None:
                    rc == 0 and f"verdict not kept: {extra} was there for a run and is gone" in err)
 
 
+def test_a_fresh_clone_keeps_its_verdicts() -> None:
+    """A checkout whose repository has no worktrees/ yet, as a fresh clone in
+    CI has: the first copy's linked worktree would make it while the runs run,
+    and a run that lists .git, as git does, would then find .git changed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        tree, spec, env = _fixture(td)
+        for args in (("init", "-q"), ("add", "."), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "t")):
+            subprocess.run(["git", "-C", str(tree), *args], check=True, capture_output=True)
+        # Past spec_cache.MARGIN_NS: the repository is older than any run's start.
+        time.sleep(1.1)
+        rc, _, err = _spec(tree, spec, dict(env, FAKE_LISTED=str(tree / ".git")))
+        entries = list((td / "cache" / "spec").glob("*.json")) if (td / "cache" / "spec").is_dir() else []
+        check("kept with .git listed by a run, worktrees/ made, and nothing said",
+              (rc, len(entries), (tree / ".git" / "worktrees").is_dir(), err), (0, 1, True, ""))
+
+
 def test_nothing_is_kept_for_a_spec_not_all_killed_or_without_strace() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         td = Path(tmp)

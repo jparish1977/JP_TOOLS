@@ -59,7 +59,10 @@ printing "kept"; anything else runs again (jpcheck/spec_cache.py says how).
 A verdict is kept only when nothing its runs read moved while they ran (the
 checkout is snapshotted before the first run), and only when every path its
 runs' calls named could be placed; otherwise the run says why on stderr.
-Without strace nothing is kept, and the run says so.
+Without strace nothing is kept, and the run says so. The repository's
+worktrees/ directory, where each copy's gitdir goes, is made before the
+snapshot (worktrees_ready), so a fresh clone's first copy does not change
+the .git a run's git lists.
 
 A SIGTERM (a job manager's cancel) ends the run without leaving a copy or a
 gitdir behind: the runners still going are sent TERM (the runner restores and
@@ -80,6 +83,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import NoReturn
 
@@ -160,6 +164,24 @@ def own_git(root: str, tree: str) -> str | None:
     with open(os.path.join(tree, ".git"), "w", encoding="utf-8") as fh:
         fh.write(f"gitdir: {gitdir}\n")
     return gitdir
+
+
+def worktrees_ready(root: str) -> None:
+    """When ROOT is a git checkout, make its repository's worktrees/ if it is
+    not there, before the start a kept verdict is held to (spec_cache.start):
+    own_git makes it otherwise, with the first copy, and the directory it is
+    made in, ROOT's .git, then changed while the runs ran. One made here is
+    waited past spec_cache.MARGIN_NS, inside which a change counts as made
+    after the start."""
+    if not os.path.exists(os.path.join(root, ".git")):
+        return
+    common = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if os.path.isdir(os.path.join(common, "worktrees")):
+        return
+    os.makedirs(os.path.join(common, "worktrees"), exist_ok=True)
+    made = os.stat(common).st_ctime_ns
+    while time.time_ns() - spec_cache.MARGIN_NS <= made:
+        time.sleep(0.05)
 
 
 # (checkout paths, outside paths), each with whether a run opened it; and
@@ -355,6 +377,8 @@ def main(argv: list[str]) -> int:
         sys.stderr.write("mutate-spec: MUTATE_CACHE_DIR is set but strace is not installed: "
                          "every spec runs, and no verdict is kept\n")
     outdir = os.environ.get("MUTATE_OUT_DIR", ".")
+    if os.environ.get("MUTATE_CACHE_DIR"):
+        worktrees_ready(root)
     # Before any run: what a kept verdict is held to (spec_cache, AS IT WAS).
     begun = spec_cache.start(root) if os.environ.get("MUTATE_CACHE_DIR") else None
     bad = 0
